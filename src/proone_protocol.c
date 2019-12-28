@@ -25,8 +25,6 @@ const char *proone_arch2str (const proone_arch_t x) {
         return "sh4";
     case PROONE_ARCH_SPC:
         return "spc";
-    case PROONE_ARCH_X86_64:
-        return "x86_64";
     }
     
     return NULL;
@@ -65,9 +63,6 @@ proone_arch_t proone_str2arch (const char *str) {
     }
     else if (strcmp(str, "spc") == 0) {
         return PROONE_ARCH_SPC;
-    }
-    else if (strcmp(str, "x86_64") == 0) {
-        return PROONE_ARCH_X86_64;
     }
 
     return PROONE_ARCH_NONE;

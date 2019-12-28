@@ -16,7 +16,7 @@
 #include <zlib.h>
 
 
-void proone_init_bin_archive (bin_archive_t *a) {
+void proone_init_bin_archive (proone_bin_archive_t *a) {
     a->data_size = 0;
     a->data = NULL;
     a->nb_binaries = 0;
@@ -177,13 +177,13 @@ END:
     return ret;
 }
 
-proone_index_bin_archive_result_code_t proone_index_bin_archive (proone_unpack_bin_archive_result_t *in, bin_archive_t *out) {
+proone_index_bin_archive_result_code_t proone_index_bin_archive (proone_unpack_bin_archive_result_t *in, proone_bin_archive_t *out) {
     proone_index_bin_archive_result_code_t ret = PROONE_INDEX_BIN_ARCHIVE_OK;
     size_t buf_pos = 0, arr_cnt = 0, offset_arr[NB_PROONE_ARCH], size_arr[NB_PROONE_ARCH], i;
     proone_arch_t arch;
     uint32_t bin_size;
     proone_arch_t arch_arr[NB_PROONE_ARCH];
-    bin_archive_t archive;
+    proone_bin_archive_t archive;
     uint8_t *out_buf;
     void *ny_buf;
     
@@ -266,7 +266,7 @@ void proone_free_unpack_bin_archive_result (proone_unpack_bin_archive_result_t *
     r->err = 0;
 }
 
-void proone_free_bin_archive (bin_archive_t *a) {
+void proone_free_bin_archive (proone_bin_archive_t *a) {
     free(a->data);
     free(a->arch_arr);
     a->nb_binaries = 0;

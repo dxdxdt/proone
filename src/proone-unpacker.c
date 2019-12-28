@@ -64,12 +64,12 @@ static void report_index_bin_archive_err (const proone_index_bin_archive_result_
     fprintf(stderr, "%s.\n", msg);
 }
 
-int main (const int args, const char **argc) {
+int main (const int argc, const char **args) {
     int exit_code = 0;
     const char *path_prefix;
     size_t path_prefix_len;
     proone_unpack_bin_archive_result_t unpack_ret;
-    bin_archive_t bin_archive;
+    proone_bin_archive_t bin_archive;
     proone_index_bin_archive_result_code_t index_ret;
     size_t i;
     const char *arch_str;
@@ -78,12 +78,12 @@ int main (const int args, const char **argc) {
     void *ny_buf;
     int fd = -1;
 
-    if (args <= 1) {
-        fprintf(stderr, "Usage: %s <prefix>\n", argc[0]);
+    if (argc <= 1) {
+        fprintf(stderr, "Usage: %s <prefix>\n", args[0]);
         return 1;
     }
 
-    path_prefix = argc[1];
+    path_prefix = args[1];
     path_prefix_len = strlen(path_prefix);
     proone_init_bin_archive(&bin_archive);
 

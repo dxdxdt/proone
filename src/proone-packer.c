@@ -14,7 +14,7 @@
 #include "proone_protocol.h"
 
 
-int main (const int args, const char **argc) {
+int main (const int argc, const char **args) {
     typedef struct {
         proone_arch_t arch;
         const char *path;
@@ -31,8 +31,8 @@ int main (const int args, const char **argc) {
     struct stat st;
     uint8_t head[4];
 
-    if (args <= 1) {
-        fprintf(stderr, "Usage: %s <path to binary 1> [path to binary 2 [path to binary ...]]\n", argc[0]);
+    if (argc <= 1) {
+        fprintf(stderr, "Usage: %s <path to binary 1> [path to binary 2 [path to binary ...]]\n", args[0]);
         return 1;
     }
     // refuse to run if stdout is terminal
@@ -41,8 +41,8 @@ int main (const int args, const char **argc) {
         return 1;
     }
     // too many files
-    if (args - 1 > NB_PROONE_ARCH) {
-        fprintf(stderr, "** Too many files given (%d > %d).\n", args - 1, NB_PROONE_ARCH);
+    if (argc - 1 > NB_PROONE_ARCH) {
+        fprintf(stderr, "** Too many files given (%d > %d).\n", argc - 1, NB_PROONE_ARCH);
         return 1;
     }
 
@@ -51,8 +51,8 @@ int main (const int args, const char **argc) {
     memset(archive_arr, 0, sizeof(archive_tuple_t) * NB_PROONE_ARCH);
 
     // Check the file names are valid
-    for (i = 1; i < (size_t)args; i += 1) {
-        path = argc[i];
+    for (i = 1; i < (size_t)argc; i += 1) {
+        path = args[i];
 
         ext = strrchr(path, '.');
         if (ext == NULL) {

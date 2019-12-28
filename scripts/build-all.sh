@@ -9,7 +9,6 @@ ARCH_ARR=(
     "ppc"
     "sh4"
     "spc"
-    "x86_64"
 )
 TOOLCHAIN_ARR=(
     "armv4t"
@@ -21,7 +20,6 @@ TOOLCHAIN_ARR=(
     "ppc"
     "sh4"
     "spc"
-    "x86_64"
 )
 HOST_ARR=(
     "arm-buildroot-linux-uclibcgnueabi"
@@ -33,7 +31,6 @@ HOST_ARR=(
     "powerpc-buildroot-linux-uclibc"
     "sh4-buildroot-linux-uclibc"
     "sparc-buildroot-linux-uclibc"
-    "x86_64-buildroot-linux-uclibc"
 )
 ARR_SIZE="${#ARCH_ARR[@]}"
 if [ $ARR_SIZE -ne "${#TOOLCHAIN_ARR[@]}" ] || [ $ARR_SIZE -ne "${#HOST_ARR[@]}" ]; then

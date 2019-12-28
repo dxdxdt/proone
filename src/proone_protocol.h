@@ -15,7 +15,6 @@ enum proone_arch {
     PROONE_ARCH_RV64,
     PROONE_ARCH_SH4,
     PROONE_ARCH_SPC,
-    PROONE_ARCH_X86_64,
 
     NB_PROONE_ARCH
 };

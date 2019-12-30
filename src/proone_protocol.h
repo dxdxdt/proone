@@ -1,7 +1,8 @@
 #pragma once
 #include <stddef.h>
 
-enum proone_arch {
+
+typedef enum {
     PROONE_ARCH_NONE = -1,
     
     PROONE_ARCH_ARMV4T,
@@ -17,9 +18,7 @@ enum proone_arch {
     PROONE_ARCH_SPC,
 
     NB_PROONE_ARCH
-};
-
-typedef enum proone_arch proone_arch_t;
+} proone_arch_t;
 
 
 const char *proone_arch2str (const proone_arch_t x);

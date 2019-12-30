@@ -126,7 +126,7 @@ int main (const int argc, const char **args) {
                 exit_code = 2;
                 break;
             }
-            if (write(fd, bin_archive.data + bin_archive.offset_arr[i], bin_archive.size_arr[i]) != bin_archive.size_arr[i]) {
+            if (write(fd, bin_archive.data + bin_archive.offset_arr[i], bin_archive.size_arr[i]) != (ssize_t)bin_archive.size_arr[i]) {
                 perror("write()");
                 exit_code = 2;
                 break;

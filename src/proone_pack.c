@@ -28,8 +28,6 @@ void proone_init_bin_archive (proone_bin_archive_t *a) {
 void proone_init_unpack_bin_archive_result (proone_unpack_bin_archive_result_t *r) {
     r->data_size = 0;
     r->data = NULL;
-    r->raw_data_size = 0;
-    r->raw_data = NULL;
     r->result = PROONE_UNPACK_BIN_ARCHIVE_OK;
     r->err = 0;
 }
@@ -82,21 +80,11 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
             break;
         }
 
-        ny_buf = realloc(ret.raw_data, ret.raw_data_size + fd_read_size);
-        if (ny_buf == NULL) {
-            ret.result = PROONE_UNPACK_BIN_ARCHIVE_MEM_ERR;
-            ret.err = errno;
-            goto END;
-        }
-        ret.raw_data = (uint8_t*)ny_buf;
-        memcpy(ret.raw_data + ret.raw_data_size, fd_buf, fd_read_size);
-        ret.raw_data_size += fd_read_size;
-
         // remove white spaces
         fd_data_size = fd_read_size;
-        for (i = 0; i < fd_data_size; ) {
+        for (i = 0; i < (size_t)fd_data_size; ) {
             if (isspace(fd_buf[i])) {
-                if (i + 1 >= fd_data_size) {
+                if (i + 1 >= (size_t)fd_data_size) {
                     // last trailing whitespace
                     fd_data_size -= 1;
                     break;
@@ -167,11 +155,8 @@ END:
 
     if (ret.result != PROONE_UNPACK_BIN_ARCHIVE_OK) {
         free(ret.data);
-        free(ret.raw_data);
         ret.data = NULL;
         ret.data_size = 0;
-        ret.raw_data = NULL;
-        ret.raw_data_size = 0;
     }
 
     return ret;
@@ -179,13 +164,12 @@ END:
 
 proone_index_bin_archive_result_code_t proone_index_bin_archive (proone_unpack_bin_archive_result_t *in, proone_bin_archive_t *out) {
     proone_index_bin_archive_result_code_t ret = PROONE_INDEX_BIN_ARCHIVE_OK;
-    size_t buf_pos = 0, arr_cnt = 0, offset_arr[NB_PROONE_ARCH], size_arr[NB_PROONE_ARCH], i;
+    size_t buf_pos = 0, arr_cnt = 0, offset_arr[NB_PROONE_ARCH], size_arr[NB_PROONE_ARCH];
     proone_arch_t arch;
     uint32_t bin_size;
     proone_arch_t arch_arr[NB_PROONE_ARCH];
     proone_bin_archive_t archive;
     uint8_t *out_buf;
-    void *ny_buf;
     
     memset(arch_arr, 0, sizeof(proone_arch_t) * NB_PROONE_ARCH);
     memset(offset_arr, 0, sizeof(size_t) * NB_PROONE_ARCH);
@@ -225,27 +209,16 @@ proone_index_bin_archive_result_code_t proone_index_bin_archive (proone_unpack_b
     archive.offset_arr = (size_t*)(out_buf + sizeof(proone_arch_t) * arr_cnt);
     archive.size_arr = (size_t*)(out_buf + sizeof(proone_arch_t) * arr_cnt + sizeof(size_t*) * arr_cnt);
 
+    archive.data_size = in->data_size;
+    archive.data = in->data;
     archive.nb_binaries = arr_cnt;
-    buf_pos = 0;
-    for (i = 0; i < arr_cnt; i += 1) {
-        memmove(in->data + buf_pos, in->data + offset_arr[i], size_arr[i]);
-        archive.arch_arr[i] = arch_arr[i];
-        archive.offset_arr[i] = buf_pos;
-        archive.size_arr[i] = size_arr[i];
-        buf_pos += size_arr[i];
-    }
+    memcpy(archive.arch_arr, arch_arr, arr_cnt * sizeof(proone_arch_t));
+    memcpy(archive.offset_arr, offset_arr, arr_cnt * sizeof(size_t));
+    memcpy(archive.size_arr, size_arr, arr_cnt * sizeof(size_t));
 
-    ny_buf = realloc(in->data, buf_pos);
-    if (ny_buf == NULL) {
-        ret = PROONE_INDEX_BIN_ARCHIVE_MEM_ERR;
-        goto END;
-    }
-    archive.data = (uint8_t*)ny_buf;
-    archive.data_size = buf_pos;
-
-    *out = archive;
     in->data = NULL;
     in->data_size = 0;
+    *out = archive;
 
 END:
     if (ret != PROONE_INDEX_BIN_ARCHIVE_OK) {
@@ -257,11 +230,8 @@ END:
 
 void proone_free_unpack_bin_archive_result (proone_unpack_bin_archive_result_t *r) {
     free(r->data);
-    free(r->raw_data);
     r->data = NULL;
     r->data_size = 0;
-    r->raw_data = NULL;
-    r->raw_data_size = 0;
     r->result = PROONE_INDEX_BIN_ARCHIVE_OK;
     r->err = 0;
 }

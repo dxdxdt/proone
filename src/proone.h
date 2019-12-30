@@ -5,13 +5,14 @@
 #include <stdbool.h>
 
 
-typedef struct {
+struct proone_global {
     bool has_proc_lim_lock;
     bool bin_ready;
+    int caught_signal;
     proone_rnd_engine_t *rnd;
     proone_unpack_bin_archive_result_t bin_pack;
     proone_bin_archive_t bin_archive;
-} proone_global_t;
+};
 
 
-extern proone_global_t pne_global;
+extern struct proone_global pne_global;

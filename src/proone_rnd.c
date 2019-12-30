@@ -54,13 +54,12 @@ void proone_free_rnd_engine (proone_rnd_engine_t *engine) {
 uint32_t proone_rnd_gen_int (proone_rnd_engine_t *engine) {
 	static const size_t M = 397;
 	static const uint32_t
-		MATRIX_A = 0x9908b0df,
 		UPPER_MASK = 0x80000000,
 		LOWER_MASK = 0x7fffffff,
 		TEMPERING_MASK_B = 0x9d2c5680,
 		TEMPERING_MASK_C = 0xefc60000;
+	static const uint32_t mag01[2] = {0, 0x9908b0df};
 	uint32_t y;
-	static const uint32_t mag01[2] = {0, MATRIX_A};
 	
 	if (engine->mti >= N) {
 		size_t kk;

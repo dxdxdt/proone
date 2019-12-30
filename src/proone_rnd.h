@@ -6,6 +6,7 @@
 
 struct proone_rnd_engine;
 typedef struct proone_rnd_engine proone_rnd_engine_t;
+typedef struct proone_rnd_engnie_alloc_result proone_rnd_engnie_alloc_result_t;
 
 typedef enum {
 	PROONE_RND_ENGINE_ALLOC_OK,
@@ -13,10 +14,10 @@ typedef enum {
 	PROONE_RND_ENGINE_ALLOC_MEM_ERR
 } proone_rnd_engine_alloc_result_code_t;
 
-typedef struct {
+struct proone_rnd_engnie_alloc_result {
 	proone_rnd_engine_alloc_result_code_t result;
 	proone_rnd_engine_t *engine;
-} proone_rnd_engnie_alloc_result_t;
+};
 
 
 void proone_init_alloc_rnd_engine_result (proone_rnd_engnie_alloc_result_t *r);

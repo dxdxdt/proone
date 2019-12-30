@@ -1,0 +1,64 @@
+#pragma once
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <time.h>
+#include <poll.h>
+
+
+typedef uint8_t proone_worker_sched_flag_t;
+
+typedef struct proone_worker_sched_req proone_worker_sched_req_t;
+typedef bool(*proone_worker_sched_req_alloc_func_t)(proone_worker_sched_req_t *, const size_t);
+typedef void(*proone_worker_sched_req_free_func_t)(proone_worker_sched_req_t *);
+typedef struct proone_worker_sched_req_mem_func proone_worker_sched_req_mem_func_t;
+typedef struct proone_worker_sched_info proone_worker_sched_info_t;
+typedef struct proone_worker proone_worker_t;
+
+struct proone_worker_sched_req_mem_func {
+	proone_worker_sched_req_alloc_func_t alloc;
+	proone_worker_sched_req_free_func_t free;
+	void *ctx;
+};
+
+struct proone_worker_sched_req {
+	size_t pollfd_arr_size;
+	struct pollfd *pollfd_arr;
+	struct timespec timeout;
+	proone_worker_sched_req_mem_func_t mem_func;
+	proone_worker_sched_flag_t flags;
+	bool pollfd_ready;
+};
+
+struct proone_worker_sched_info {
+	proone_worker_sched_flag_t tick_flags;
+	struct timespec last_tick;
+	struct timespec this_tick;
+	struct timespec tick_diff;
+	double real_tick_diff;
+};
+
+struct proone_worker {
+	intptr_t id;
+	void *ctx;
+
+	void (*free)(void *ctx);
+	void (*fin)(void *ctx);
+	void (*work)(void *ctx, const proone_worker_sched_info_t *sched_info, proone_worker_sched_req_t *sched_req);
+	bool (*has_finalised)(void *ctx);
+};
+
+/* Do nothing. The worker has more work to do and is yielding cpu time to the
+* other workers.
+*/
+static const proone_worker_sched_flag_t PROONE_WORKER_SCHED_FLAG_NONE 		= 0x00;
+/* Do `poll()`. The worker has to set `shed_req` properly.
+*/
+static const proone_worker_sched_flag_t PROONE_WORKER_SCHED_FLAG_POLL 		= 0x01;
+/* Do `poll()` with timeout or just sleep. The worker has to set
+* `proone_worker_sched_req_t::timeout` properly.
+*/
+static const proone_worker_sched_flag_t PROONE_WORKER_SCHED_FLAG_TIMEOUT	= 0x02;
+
+
+bool proone_init_worker_sched_req (proone_worker_sched_req_t *wsr, proone_worker_sched_req_mem_func_t *mem_func);

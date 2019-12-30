@@ -7,7 +7,7 @@
 #include <string.h>
 
 
-static const uint8_t PROONE_DATA_VAULT_MASK[256] = {
+const uint8_t PROONE_DVAULT_MASK[] = {
     0xA2, 0x7A, 0x61, 0x65, 0x78, 0xBE, 0x95, 0x8A, 0xBF, 0x07, 
     0x52, 0x8F, 0x0E, 0x6F, 0x0B, 0xD8, 0x5B, 0xD4, 0x77, 0x9D, 
     0x39, 0x28, 0x72, 0xE2, 0x42, 0x5D, 0xE7, 0x92, 0xDD, 0xAF, 
@@ -19,7 +19,7 @@ static const uint8_t PROONE_DATA_VAULT_MASK[256] = {
     0x15, 0xAC, 0xF9, 0xD9, 0x3E, 0xF5, 0x38, 0xF4, 0x6D, 0xAB, 
     0xE9, 0x4C, 0x0D, 0x3F, 0x71, 0xDF, 0xC0, 0xB9, 0xD5, 0xA6, 
     0x53, 0xED, 0xE6, 0x82, 0x73, 0xC8, 0xA5, 0x08, 0x48, 0x1A, 
-    0x79, 0x05, 0x10, 0x75, 0xF3, 0xE4, 0x85, 0x74, 0xDC, 0x2C, 
+    0x79, 0x05, 0x10, 0x75, 0xF3, 0xE4, 0x85, 0xEB, 0xDC, 0x2C, 
     0x23, 0xCD, 0xBC, 0x1C, 0x45, 0x24, 0x5C, 0x26, 0x17, 0xB3, 
     0xA0, 0xBB, 0x03, 0xC9, 0xA1, 0x56, 0x2F, 0x91, 0xCF, 0xFE, 
     0xC2, 0xAE, 0x54, 0xE1, 0x00, 0x13, 0x9C, 0x5E, 0xAD, 0xB8, 
@@ -31,30 +31,26 @@ static const uint8_t PROONE_DATA_VAULT_MASK[256] = {
     0x9A, 0x35, 0xBA, 0xD7, 0x66, 0xE0, 0x19, 0xF2, 0x04, 0xFB, 
     0x70, 0xD6, 0xFF, 0x40, 0x83, 0xDE, 0xD0, 0xB7, 0xA8, 0xEA, 
     0x16, 0x49, 0xFA, 0xCC, 0x11, 0x46, 0xCE, 0xE8, 0x4F, 0xD2, 
-    0x4D, 0xE5, 0x27, 0x50, 0x6A, 0xEB, 0xDA, 0xC7, 0xA4, 0xA9, 
+    0x4D, 0xE5, 0x27, 0x50, 0x6A, 0x74, 0xDA, 0xC7, 0xA4, 0xA9, 
     0x5F, 0x97, 0x29, 0x14, 0x6C, 0x7E, 0x1E, 0xC5, 0x5A, 0x1B, 
     0x33, 0x69, 0x09, 0x2E, 0xD3, 0xF6
 };
 
-static proone_data_key_t pne_cur_unmasked = PROONE_DATA_KEY_NONE;
+static uint8_t *unmasked_buf = NULL;
+static size_t unmasked_buf_size = 0;
 
-
-static void pne_dvault_invert (const size_t size, uint8_t *m, const uint8_t salt) {
-    size_t i;
-
-    for (i = 0; i < size; i += 1) {
-        m[i] ^= PROONE_DATA_VAULT_MASK[(uint8_t)(i + salt)];
-    }
-}
 
 static void pne_dvault_invert_entry (const proone_data_key_t key) {
-    pne_dvault_invert((size_t)PROONE_DATA_DICT[key][2] << 8 | (size_t)PROONE_DATA_DICT[key][3], PROONE_DATA_DICT[key], PROONE_DATA_DICT[key][1]);
+    const size_t entry_size = proone_dvault_get_entry_size(key);
+
+    memcpy(unmasked_buf, PROONE_DATA_DICT[key] + 4, entry_size);
+    proone_dvault_invert_mem(entry_size, unmasked_buf, proone_dvault_get_entry_salt(key));
 }
 
 static void pne_dvault_entry_check (const proone_data_key_t key, const proone_data_type_t type) {
-    if ((PROONE_DATA_KEY_NONE < key && key < NB_PROONE_DATA_KEY) ||
-        (PROONE_DATA_TYPE_NONE < type && type <= NB_PROONE_DATA_TYPE) ||
-        type != (proone_data_type_t)PROONE_DATA_DICT[key][0]) {
+    if (!(PROONE_DATA_KEY_NONE < key && key < NB_PROONE_DATA_KEY) ||
+        !(PROONE_DATA_TYPE_NONE < type && type < NB_PROONE_DATA_TYPE) ||
+        type != proone_dvault_get_entry_data_type(key)) {
         abort();
     }
 }
@@ -72,6 +68,14 @@ proone_data_type_t proone_str2data_type (const char *str) {
         return PROONE_DATA_TYPE_CSTR;
     }
     return PROONE_DATA_TYPE_NONE;
+}
+
+void proone_dvault_invert_mem (const size_t size, uint8_t *m, const uint8_t salt) {
+    size_t i;
+
+    for (i = 0; i < size; i += 1) {
+        m[i] ^= PROONE_DVAULT_MASK[(i + (size_t)salt) % 256];
+    }
 }
 
 void proone_init_dvault_mask_result (proone_dvault_mask_result_t *r) {
@@ -117,26 +121,55 @@ proone_dvault_mask_result_t proone_dvault_mask (const proone_data_type_t type, c
         (uint8_t)((0x000000FF & (uint32_t)data_size) >> 0));
 
     for (i = 0; i < data_size; i += 1) {
-        sprintf(ret.str + 4 * 4 + 4 * i, "\\x%02X", data[i] ^ PROONE_DATA_VAULT_MASK[(uint8_t)(i + salt)]);
+        sprintf(ret.str + 4 * 4 + 4 * i, "\\x%02X", data[i] ^ PROONE_DVAULT_MASK[(i + (size_t)salt) % 256]);
     }
 
     return ret;
+}
+
+void proone_init_dvault (void) {
+    size_t max_size = 0;
+    size_t entry_size;
+    proone_data_key_t i;
+
+    for (i = PROONE_DATA_KEY_NONE + 1; i < NB_PROONE_DATA_KEY; i += 1) {
+        entry_size = proone_dvault_get_entry_size(i);
+        if (entry_size > max_size) {
+            max_size = entry_size;
+        }
+    }
+
+    unmasked_buf = malloc(max_size);
+    unmasked_buf_size = max_size;
+    if (unmasked_buf == NULL) {
+        abort();
+    }
+}
+
+void proone_deinit_dvault (void) {
+    free(unmasked_buf);
+    unmasked_buf = NULL;
+}
+
+proone_data_type_t proone_dvault_get_entry_data_type (const proone_data_key_t key) {
+    return (proone_data_type_t)PROONE_DATA_DICT[key][0];
+}
+
+size_t proone_dvault_get_entry_size (const proone_data_key_t key) {
+    return (size_t)PROONE_DATA_DICT[key][2] << 8 | (size_t)PROONE_DATA_DICT[key][3];
+}
+
+uint8_t proone_dvault_get_entry_salt (const proone_data_key_t key) {
+    return PROONE_DATA_DICT[key][1];
 }
 
 const char *proone_dvault_unmask_entry_cstr (const proone_data_key_t key) {
     proone_dvault_reset_dict();
     pne_dvault_entry_check(key, PROONE_DATA_TYPE_CSTR);
     pne_dvault_invert_entry(key);
-    pne_cur_unmasked = key;
-    return (const char*)PROONE_DATA_DICT[key] + 4;
+    return (const char*)unmasked_buf;
 }
 
 void proone_dvault_reset_dict (void) {
-    if (pne_cur_unmasked == PROONE_DATA_KEY_NONE) {
-        return;
-    }
-    else {
-        pne_dvault_invert_entry(pne_cur_unmasked);
-        pne_cur_unmasked = PROONE_DATA_KEY_NONE;
-    }
+    memset(unmasked_buf, 0, unmasked_buf_size);
 }

@@ -2,6 +2,10 @@
 #include "proone_rnd.h"
 
 #include <stddef.h>
+#include <time.h>
+
+
+#define proone_op_spaceship(a,b) (a==b?0:a<b?-1:1)
 
 
 #if 0
@@ -16,4 +20,11 @@ bool proone_strendsw (const char *str, const char *w) {
 }
 #endif
 
+void proone_succeed_or_die (const int ret);
+
 void proone_rnd_alphanumeric_str (proone_rnd_engine_t *rnd_engine, char *str, const size_t len);
+void proone_empty_func ();
+
+struct timespec proone_sub_timespec (const struct timespec *a, const struct timespec *b);
+double proone_real_timespec (const struct timespec *ts);
+int proone_cmp_timespec (const struct timespec *a, const struct timespec *b);

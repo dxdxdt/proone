@@ -10,4 +10,4 @@ typedef enum {
 } proone_data_key_t;
 
 
-extern uint8_t *PROONE_DATA_DICT[];
+extern uint8_t *PROONE_DATA_DICT[NB_PROONE_DATA_KEY];

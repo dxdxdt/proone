@@ -1,4 +1,4 @@
-#include "proone_dvault.h"
+#include "dvault.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -7,7 +7,7 @@
 #include <string.h>
 
 
-const uint8_t PROONE_DVAULT_MASK[] = {
+const uint8_t PRNE_DVAULT_MASK[] = {
     0xA2, 0x7A, 0x61, 0x65, 0x78, 0xBE, 0x95, 0x8A, 0xBF, 0x07, 
     0x52, 0x8F, 0x0E, 0x6F, 0x0B, 0xD8, 0x5B, 0xD4, 0x77, 0x9D, 
     0x39, 0x28, 0x72, 0xE2, 0x42, 0x5D, 0xE7, 0x92, 0xDD, 0xAF, 
@@ -40,79 +40,79 @@ static uint8_t *unmasked_buf = NULL;
 static size_t unmasked_buf_size = 0;
 
 
-static void pne_dvault_invert_entry (const proone_data_key_t key, size_t *len) {
-    const size_t entry_size = proone_dvault_get_entry_size(key);
+static void invert_entry (const prne_data_key_t key, size_t *len) {
+    const size_t entry_size = prne_dvault_get_entry_size(key);
 
     if (len != NULL) {
         *len = entry_size;
     }
-    memcpy(unmasked_buf, PROONE_DATA_DICT[key] + 4, entry_size);
-    proone_dvault_invert_mem(entry_size, unmasked_buf, proone_dvault_get_entry_salt(key));
+    memcpy(unmasked_buf, PRNE_DATA_DICT[key] + 4, entry_size);
+    prne_dvault_invert_mem(entry_size, unmasked_buf, prne_dvault_get_entry_salt(key));
 }
 
-static void pne_dvault_entry_check (const proone_data_key_t key, const proone_data_type_t type) {
-    if (!(PROONE_DATA_KEY_NONE < key && key < NB_PROONE_DATA_KEY) ||
-        !(PROONE_DATA_TYPE_NONE < type && type < NB_PROONE_DATA_TYPE) ||
-        type != proone_dvault_get_entry_data_type(key)) {
+static void entry_check (const prne_data_key_t key, const prne_data_type_t type) {
+    if (!(PRNE_DATA_KEY_NONE < key && key < NB_PRNE_DATA_KEY) ||
+        !(PRNE_DATA_TYPE_NONE < type && type < NB_PRNE_DATA_TYPE) ||
+        type != prne_dvault_get_entry_data_type(key)) {
         abort();
     }
 }
 
 
-const char *proone_data_type2str (const proone_data_type_t t) {
+const char *prne_data_type2str (const prne_data_type_t t) {
     switch (t) {
-    case PROONE_DATA_TYPE_CSTR: return "cstr";
+    case PRNE_DATA_TYPE_CSTR: return "cstr";
     }
     return NULL;
 }
 
-proone_data_type_t proone_str2data_type (const char *str) {
-    if (strcmp(str, proone_data_type2str(PROONE_DATA_TYPE_CSTR)) == 0) {
-        return PROONE_DATA_TYPE_CSTR;
+prne_data_type_t prne_str2data_type (const char *str) {
+    if (strcmp(str, prne_data_type2str(PRNE_DATA_TYPE_CSTR)) == 0) {
+        return PRNE_DATA_TYPE_CSTR;
     }
-    return PROONE_DATA_TYPE_NONE;
+    return PRNE_DATA_TYPE_NONE;
 }
 
-void proone_dvault_invert_mem (const size_t size, uint8_t *m, const uint8_t salt) {
+void prne_dvault_invert_mem (const size_t size, uint8_t *m, const uint8_t salt) {
     size_t i;
 
     for (i = 0; i < size; i += 1) {
-        m[i] ^= PROONE_DVAULT_MASK[(i + (size_t)salt) % 256];
+        m[i] ^= PRNE_DVAULT_MASK[(i + (size_t)salt) % 256];
     }
 }
 
-void proone_init_dvault_mask_result (proone_dvault_mask_result_t *r) {
-    r->result = PROONE_DVAULT_MASK_OK;
+void prne_init_dvault_mask_result (prne_dvault_mask_result_t *r) {
+    r->result = PRNE_DVAULT_MASK_OK;
     r->str = NULL;
     r->str_len = 0;
 }
 
-void proone_free_dvault_mask_result (proone_dvault_mask_result_t *r) {
+void prne_free_dvault_mask_result (prne_dvault_mask_result_t *r) {
     free(r->str);
     r->str_len = 0;
     r->str = NULL;
-    r->result = PROONE_DVAULT_MASK_OK;
+    r->result = PRNE_DVAULT_MASK_OK;
 }
 
-proone_dvault_mask_result_t proone_dvault_mask (const proone_data_type_t type, const uint8_t salt, const size_t data_size, const uint8_t *data) {
+prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const uint8_t salt, const size_t data_size, const uint8_t *data) {
     size_t i;
-    proone_dvault_mask_result_t ret;
+    prne_dvault_mask_result_t ret;
 
-    proone_init_dvault_mask_result(&ret);
+    prne_init_dvault_mask_result(&ret);
 
     if (data_size > 0x0000FFFF) {
-        ret.result = PROONE_DVAULT_MASK_TOO_LARGE;
+        ret.result = PRNE_DVAULT_MASK_TOO_LARGE;
         return ret;        
     }
-    if (!(PROONE_DATA_TYPE_NONE < type && type < NB_PROONE_DATA_TYPE)) {
-        ret.result = PROONE_DVAULT_MASK_INVALID_TYPE;
+    if (!(PRNE_DATA_TYPE_NONE < type && type < NB_PRNE_DATA_TYPE)) {
+        ret.result = PRNE_DVAULT_MASK_INVALID_TYPE;
         return ret;        
     }
 
     ret.str_len = 4 * 4 + 4 * data_size + 1;
     ret.str = malloc(ret.str_len);
     if (ret.str == NULL) {
-        ret.result = PROONE_DVAULT_MASK_MEM_ERR;
+        ret.result = PRNE_DVAULT_MASK_MEM_ERR;
         ret.str_len = 0;
         return ret;
     }
@@ -124,21 +124,21 @@ proone_dvault_mask_result_t proone_dvault_mask (const proone_data_type_t type, c
         (uint8_t)((0x000000FF & (uint32_t)data_size) >> 0));
 
     for (i = 0; i < data_size; i += 1) {
-        sprintf(ret.str + 4 * 4 + 4 * i, "\\x%02X", data[i] ^ PROONE_DVAULT_MASK[(i + (size_t)salt) % 256]);
+        sprintf(ret.str + 4 * 4 + 4 * i, "\\x%02X", data[i] ^ PRNE_DVAULT_MASK[(i + (size_t)salt) % 256]);
     }
 
     return ret;
 }
 
-void proone_init_dvault (void) {
+void prne_init_dvault (void) {
     size_t max_size = 0;
     size_t entry_size;
-    proone_data_key_t i;
+    prne_data_key_t i;
 
-    for (i = PROONE_DATA_KEY_NONE + 1; i < NB_PROONE_DATA_KEY; i += 1) {
-        entry_size = proone_dvault_get_entry_size(i);
-        switch (proone_dvault_get_entry_data_type(i)) {
-        case PROONE_DATA_TYPE_CSTR:
+    for (i = PRNE_DATA_KEY_NONE + 1; i < NB_PRNE_DATA_KEY; i += 1) {
+        entry_size = prne_dvault_get_entry_size(i);
+        switch (prne_dvault_get_entry_data_type(i)) {
+        case PRNE_DATA_TYPE_CSTR:
             entry_size += 1;
             break;
         }
@@ -158,30 +158,30 @@ void proone_init_dvault (void) {
     }
 }
 
-void proone_deinit_dvault (void) {
+void prne_deinit_dvault (void) {
     free(unmasked_buf);
     unmasked_buf = NULL;
 }
 
-proone_data_type_t proone_dvault_get_entry_data_type (const proone_data_key_t key) {
-    return (proone_data_type_t)PROONE_DATA_DICT[key][0];
+prne_data_type_t prne_dvault_get_entry_data_type (const prne_data_key_t key) {
+    return (prne_data_type_t)PRNE_DATA_DICT[key][0];
 }
 
-size_t proone_dvault_get_entry_size (const proone_data_key_t key) {
-    return (size_t)PROONE_DATA_DICT[key][2] << 8 | (size_t)PROONE_DATA_DICT[key][3];
+size_t prne_dvault_get_entry_size (const prne_data_key_t key) {
+    return (size_t)PRNE_DATA_DICT[key][2] << 8 | (size_t)PRNE_DATA_DICT[key][3];
 }
 
-uint8_t proone_dvault_get_entry_salt (const proone_data_key_t key) {
-    return PROONE_DATA_DICT[key][1];
+uint8_t prne_dvault_get_entry_salt (const prne_data_key_t key) {
+    return PRNE_DATA_DICT[key][1];
 }
 
-char *proone_dvault_unmask_entry_cstr (const proone_data_key_t key, size_t *len) {
-    proone_dvault_reset_dict();
-    pne_dvault_entry_check(key, PROONE_DATA_TYPE_CSTR);
-    pne_dvault_invert_entry(key, len);
+char *prne_dvault_unmask_entry_cstr (const prne_data_key_t key, size_t *len) {
+    prne_dvault_reset_dict();
+    entry_check(key, PRNE_DATA_TYPE_CSTR);
+    invert_entry(key, len);
     return (char*)unmasked_buf;
 }
 
-void proone_dvault_reset_dict (void) {
+void prne_dvault_reset_dict (void) {
     memset(unmasked_buf, 0, unmasked_buf_size);
 }

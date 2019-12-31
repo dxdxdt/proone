@@ -42,9 +42,9 @@ PROONE_PREFIX="builds"
 PROONE_BIN="$PROONE_PREFIX/bin"
 PROONE_TOOLS="$PROONE_PREFIX/tools"
 export PROONE_BIN_PREFIX="$PROONE_BIN/proone"
-PROONE_PACKER="$PROONE_TOOLS/proone-packer"
-PROONE_UNPACKER="$PROONE_TOOLS/proone-unpacker"
-PROONE_BIN_ARCHIVE="$PROONE_PREFIX/bin-archive.zz.base64"
+PROONE_PACKER="$PROONE_TOOLS/proone-pack"
+PROONE_UNPACKER="$PROONE_TOOLS/proone-unpack"
+PROONE_BIN_ARCHIVE="$PROONE_PREFIX/bin-archive"
 
 rm -rf "$PROONE_PREFIX" && mkdir "$PROONE_PREFIX" "$PROONE_BIN" "$PROONE_TOOLS"
 if [ $? -ne 0 ] ; then
@@ -54,7 +54,7 @@ fi
 make distclean
 
 # native build for tools
-./configure &&  make -j$(nproc) && cp -a src/proone-packer "$PROONE_PACKER" && cp -a src/proone-unpacker "$PROONE_UNPACKER" && make distclean
+./configure &&  make -j$(nproc) && cp -a src/proone-pack "$PROONE_PACKER" && cp -a src/proone-unpack "$PROONE_UNPACKER" && make distclean
 if [ $? -ne 0 ]; then
     exit $?
 fi
@@ -68,7 +68,8 @@ for (( i = 0; i < ARR_SIZE; i += 1 )); do
 done
 
 # pack
-"$PROONE_PACKER" "$PROONE_BIN_PREFIX."* | pigz -z - | base64 > "$PROONE_BIN_ARCHIVE"
+echo "" > "$PROONE_BIN_ARCHIVE" # don't include the credential line
+"$PROONE_PACKER" "$PROONE_BIN_PREFIX."* | pigz -z - | base64 >> "$PROONE_BIN_ARCHIVE"
 if [ $? -ne 0 ]; then
     exit $?
 fi

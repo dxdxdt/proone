@@ -9,29 +9,29 @@
 #include <openssl/err.h>
 #include <zlib.h>
 
-#include "proone_pack.h"
+#include "pack.h"
 
 
-static void report_unpack_bin_archive_err (const proone_unpack_bin_archive_result_t *r) {
+static void report_unpack_bin_archive_err (const prne_unpack_bin_archive_result_t *r) {
     const char *err_str, *err_msg = NULL;
 
     switch (r->result) {
-    case PROONE_UNPACK_BIN_ARCHIVE_OK:
+    case PRNE_UNPACK_BIN_ARCHIVE_OK:
         err_str = "ok";
         break;
-    case PROONE_UNPACK_BIN_ARCHIVE_OPENSSL_ERR:
+    case PRNE_UNPACK_BIN_ARCHIVE_OPENSSL_ERR:
         err_str = "openssl error";
         err_msg = ERR_error_string(r->err, NULL);
         break;
-    case PROONE_UNPACK_BIN_ARCHIVE_Z_ERR:
+    case PRNE_UNPACK_BIN_ARCHIVE_Z_ERR:
         err_str = "zlib error";
         err_msg = zError((int)r->err);
         break;
-    case PROONE_UNPACK_BIN_ARCHIVE_ERRNO:
+    case PRNE_UNPACK_BIN_ARCHIVE_ERRNO:
         err_str = "errno";
         err_msg = strerror((int)r->err);
         break;
-    case PROONE_UNPACK_BIN_ARCHIVE_MEM_ERR:
+    case PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR:
         err_str = "memory error";
         err_msg = strerror((int)r->err);
         break;
@@ -47,15 +47,15 @@ static void report_unpack_bin_archive_err (const proone_unpack_bin_archive_resul
     }
 }
 
-static void report_index_bin_archive_err (const proone_index_bin_archive_result_code_t c) {
+static void report_index_bin_archive_err (const prne_index_bin_archive_result_code_t c) {
     const char *msg;
 
     switch (c) {
-    case PROONE_INDEX_BIN_ARCHIVE_OK:
+    case PRNE_INDEX_BIN_ARCHIVE_OK:
         msg = "ok"; break;
-    case PROONE_INDEX_BIN_ARCHIVE_FMT_ERR:
+    case PRNE_INDEX_BIN_ARCHIVE_FMT_ERR:
         msg = "format error"; break;
-    case PROONE_INDEX_BIN_ARCHIVE_MEM_ERR:
+    case PRNE_INDEX_BIN_ARCHIVE_MEM_ERR:
         msg = "memory error"; break;
     default:
         msg = "* unknown"; break;
@@ -68,9 +68,9 @@ int main (const int argc, const char **args) {
     int exit_code = 0;
     const char *path_prefix;
     size_t path_prefix_len;
-    proone_unpack_bin_archive_result_t unpack_ret;
-    proone_bin_archive_t bin_archive;
-    proone_index_bin_archive_result_code_t index_ret;
+    prne_unpack_bin_archive_result_t unpack_ret;
+    prne_bin_archive_t bin_archive;
+    prne_index_bin_archive_result_code_t index_ret;
     size_t i;
     const char *arch_str;
     char *path = NULL;
@@ -85,25 +85,25 @@ int main (const int argc, const char **args) {
 
     path_prefix = args[1];
     path_prefix_len = strlen(path_prefix);
-    proone_init_bin_archive(&bin_archive);
+    prne_init_bin_archive(&bin_archive);
 
     do { // fake loop
-        unpack_ret = proone_unpack_bin_archive(STDIN_FILENO);
-        if (unpack_ret.result != PROONE_UNPACK_BIN_ARCHIVE_OK) {
+        unpack_ret = prne_unpack_bin_archive(STDIN_FILENO);
+        if (unpack_ret.result != PRNE_UNPACK_BIN_ARCHIVE_OK) {
             report_unpack_bin_archive_err(&unpack_ret);
             exit_code = 2;
             break;
         }
 
-        index_ret = proone_index_bin_archive(&unpack_ret, &bin_archive);
-        if (index_ret != PROONE_INDEX_BIN_ARCHIVE_OK) {
+        index_ret = prne_index_bin_archive(&unpack_ret, &bin_archive);
+        if (index_ret != PRNE_INDEX_BIN_ARCHIVE_OK) {
             report_index_bin_archive_err(index_ret);
             exit_code = 2;
             break;
         }
 
         for (i = 0; i < bin_archive.nb_binaries; i += 1) {
-            arch_str = proone_arch2str(bin_archive.arch_arr[i]);
+            arch_str = prne_arch2str(bin_archive.arch_arr[i]);
             if (arch_str == NULL) {
                 fprintf(stderr, "** unrecognised arch!");
                 exit_code = 2;
@@ -137,8 +137,8 @@ int main (const int argc, const char **args) {
 
     free(path);
     close(fd);
-    proone_free_unpack_bin_archive_result(&unpack_ret);
-    proone_free_bin_archive(&bin_archive);
+    prne_free_unpack_bin_archive_result(&unpack_ret);
+    prne_free_bin_archive(&bin_archive);
 
     return exit_code;
 }

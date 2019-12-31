@@ -1,4 +1,4 @@
-#include "proone_util.h"
+#include "util.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -10,22 +10,22 @@
 #include <openssl/evp.h>
 
 
-void proone_succeed_or_die (const int ret) {
+void prne_succeed_or_die (const int ret) {
 	if (ret < 0) {
 		abort();
 	}
 }
 
-void proone_empty_func () {}
+void prne_empty_func () {}
 
-void proone_rnd_alphanumeric_str (proone_rnd_engine_t *rnd_engine, char *str, const size_t len) {
+void prne_rnd_alphanumeric_str (prne_rnd_engine_t *rnd_engine, char *str, const size_t len) {
 	static const char SET[] = "qwertyuiopasdfghjklzxcvbnm0123456789";
 	size_t i = 0;
 	uint32_t n;
 
 	if (len >= 4) {
 		for (; i < len / 4 * 4; i += 4) {
-			n = proone_rnd_gen_int(rnd_engine);
+			n = prne_rnd_gen_int(rnd_engine);
 			str[i + 0] = SET[((uint8_t*)&n)[0] % sizeof(SET)];
 			str[i + 1] = SET[((uint8_t*)&n)[1] % sizeof(SET)];
 			str[i + 2] = SET[((uint8_t*)&n)[2] % sizeof(SET)];
@@ -33,14 +33,14 @@ void proone_rnd_alphanumeric_str (proone_rnd_engine_t *rnd_engine, char *str, co
 		}
 	}
 	if (i < len) {
-		n = proone_rnd_gen_int(rnd_engine);
+		n = prne_rnd_gen_int(rnd_engine);
 		for (; i < len; i += 1) {
 			str[i] = SET[((uint8_t*)&n)[i % 4] % sizeof(SET)];
 		}
 	}
 }
 
-size_t proone_str_shift_spaces (char *str, const size_t len) {
+size_t prne_str_shift_spaces (char *str, const size_t len) {
 	size_t i, ret = len;
 
 	for (i = 0; i < ret; ) {
@@ -62,7 +62,7 @@ size_t proone_str_shift_spaces (char *str, const size_t len) {
 }
 
 
-struct timespec proone_sub_timespec (const struct timespec *a, const struct timespec *b) {
+struct timespec prne_sub_timespec (const struct timespec *a, const struct timespec *b) {
 	struct timespec ret;
 
 	if (a->tv_nsec < b->tv_nsec) {
@@ -77,11 +77,11 @@ struct timespec proone_sub_timespec (const struct timespec *a, const struct time
 	return ret;
 }
 
-double proone_real_timespec (const struct timespec *ts) {
+double prne_real_timespec (const struct timespec *ts) {
 	return (double)ts->tv_sec + (double)ts->tv_nsec / 1000000000.0;
 }
 
-int proone_cmp_timespec (const struct timespec *a, const struct timespec *b) {
+int prne_cmp_timespec (const struct timespec *a, const struct timespec *b) {
 	if (a->tv_sec < b->tv_sec) {
 		return -1;
 	}
@@ -92,7 +92,7 @@ int proone_cmp_timespec (const struct timespec *a, const struct timespec *b) {
 	return a->tv_nsec < b->tv_nsec ? -1 : a->tv_nsec > b->tv_nsec ? 1 : 0;
 }
 
-char *proone_enc_base64_mem (const uint8_t *data, const size_t size) {
+char *prne_enc_base64_mem (const uint8_t *data, const size_t size) {
 	char *ret = NULL, *p = NULL;
 	BIO *b64_bio = NULL, *mem_bio = NULL;
 	bool ok = true;
@@ -142,7 +142,7 @@ END:
 	return ret;
 }
 
-bool proone_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data, size_t *size) {
+bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data, size_t *size) {
 	char *in_mem = NULL;
 	size_t in_mem_len, out_len;
 	uint8_t *out_mem = NULL;
@@ -165,7 +165,7 @@ bool proone_dec_base64_mem (const char *str, const size_t str_len, uint8_t **dat
 		goto END;
 	}
 	memcpy(in_mem, str, str_len);
-	in_mem_len = proone_str_shift_spaces(in_mem, str_len);
+	in_mem_len = prne_str_shift_spaces(in_mem, str_len);
 	if (in_mem_len == 0) {
 		ret = true;
 		goto END;

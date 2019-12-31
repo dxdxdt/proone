@@ -1,5 +1,5 @@
-#include "proone_pack.h"
-#include "proone_util.h"
+#include "pack.h"
+#include "util.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -16,7 +16,7 @@
 #include <zlib.h>
 
 
-void proone_init_bin_archive (proone_bin_archive_t *a) {
+void prne_init_bin_archive (prne_bin_archive_t *a) {
     a->data_size = 0;
     a->data = NULL;
     a->nb_binaries = 0;
@@ -25,17 +25,17 @@ void proone_init_bin_archive (proone_bin_archive_t *a) {
     a->size_arr = NULL;    
 }
 
-void proone_init_unpack_bin_archive_result (proone_unpack_bin_archive_result_t *r) {
+void prne_init_unpack_bin_archive_result (prne_unpack_bin_archive_result_t *r) {
     r->data_size = 0;
     r->data = NULL;
-    r->result = PROONE_UNPACK_BIN_ARCHIVE_OK;
+    r->result = PRNE_UNPACK_BIN_ARCHIVE_OK;
     r->err = 0;
 }
 
-proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
+prne_unpack_bin_archive_result_t prne_unpack_bin_archive (const int fd) {
     static const size_t fd_buf_size = 77, bio_buf_size = 58, z_buf_size = 4096;
     
-    proone_unpack_bin_archive_result_t ret;
+    prne_unpack_bin_archive_result_t ret;
     BIO *b64_bio = NULL, *mem_bio = NULL;
     uint8_t *mem = NULL, *fd_buf = NULL, *bio_buf = NULL, *z_buf = NULL;
     int fd_read_size, fd_data_size, bio_write_size, bio_read_size;
@@ -45,12 +45,12 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
     void *ny_buf;
     bool stream_end;
 
-    proone_init_unpack_bin_archive_result(&ret);
+    prne_init_unpack_bin_archive_result(&ret);
     memset(&stream, 0, sizeof(z_stream));
 
     mem = (uint8_t*)malloc(fd_buf_size + bio_buf_size + z_buf_size);
     if (mem == NULL) {
-        ret.result = PROONE_UNPACK_BIN_ARCHIVE_MEM_ERR;
+        ret.result = PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR;
         ret.err = errno;
         goto END;
     }
@@ -60,13 +60,13 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
 
     z_func_ret = inflateInit(&stream);
     if (z_func_ret != Z_OK) {
-        ret.result = PROONE_UNPACK_BIN_ARCHIVE_Z_ERR;
+        ret.result = PRNE_UNPACK_BIN_ARCHIVE_Z_ERR;
         ret.err = z_func_ret;
         goto END;
     }
 
     if ((mem_bio = BIO_new(BIO_s_mem())) == NULL || (b64_bio = BIO_new(BIO_f_base64())) == NULL) {
-        ret.result = PROONE_UNPACK_BIN_ARCHIVE_OPENSSL_ERR;
+        ret.result = PRNE_UNPACK_BIN_ARCHIVE_OPENSSL_ERR;
         ret.err = ERR_get_error();
         goto END;
     }
@@ -77,7 +77,7 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
     do {
         fd_read_size = read(fd, fd_buf, fd_buf_size);
         if (fd_read_size < 0) {
-            ret.result = PROONE_UNPACK_BIN_ARCHIVE_ERRNO;
+            ret.result = PRNE_UNPACK_BIN_ARCHIVE_ERRNO;
             ret.err = errno;
             goto END;
         }
@@ -86,19 +86,19 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
         }
 
         // remove white spaces
-        fd_data_size = proone_str_shift_spaces((char*)fd_buf, (size_t)fd_read_size);
+        fd_data_size = prne_str_shift_spaces((char*)fd_buf, (size_t)fd_read_size);
 
         if (fd_data_size > 0) {
             BIO_reset(mem_bio);
             bio_write_size = BIO_write(mem_bio, fd_buf, fd_data_size);
             if (bio_write_size != fd_data_size) {
-                ret.result = PROONE_UNPACK_BIN_ARCHIVE_MEM_ERR;
+                ret.result = PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR;
                 goto END;
             }
 
             bio_read_size = BIO_read(b64_bio, bio_buf, (int)bio_buf_size);
             if (bio_read_size < 0) {
-                ret.result = PROONE_UNPACK_BIN_ARCHIVE_OPENSSL_ERR;
+                ret.result = PRNE_UNPACK_BIN_ARCHIVE_OPENSSL_ERR;
                 ret.err = ERR_get_error();
                 goto END;
             }
@@ -118,7 +118,7 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
                     case Z_BUF_ERROR:
                         break;
                     default:
-                        ret.result = PROONE_UNPACK_BIN_ARCHIVE_Z_ERR;
+                        ret.result = PRNE_UNPACK_BIN_ARCHIVE_Z_ERR;
                         ret.err = z_func_ret;
                         goto END;
                     } 
@@ -127,7 +127,7 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
                     if (z_out_size > 0) {
                         ny_buf = realloc(ret.data, ret.data_size + z_out_size);
                         if (ny_buf == NULL) {
-                            ret.result = PROONE_UNPACK_BIN_ARCHIVE_MEM_ERR;
+                            ret.result = PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR;
                             ret.err = errno;
                             break;
                         }
@@ -143,7 +143,7 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
 
 END:
     free(mem);
-    if (ret.result != PROONE_UNPACK_BIN_ARCHIVE_OK) {
+    if (ret.result != PRNE_UNPACK_BIN_ARCHIVE_OK) {
         free(ret.data);
         ret.data = NULL;
         ret.data_size = 0;
@@ -155,33 +155,33 @@ END:
     return ret;
 }
 
-proone_index_bin_archive_result_code_t proone_index_bin_archive (proone_unpack_bin_archive_result_t *in, proone_bin_archive_t *out) {
-    proone_index_bin_archive_result_code_t ret = PROONE_INDEX_BIN_ARCHIVE_OK;
-    size_t buf_pos = 0, arr_cnt = 0, offset_arr[NB_PROONE_ARCH], size_arr[NB_PROONE_ARCH];
-    proone_arch_t arch;
+prne_index_bin_archive_result_code_t prne_index_bin_archive (prne_unpack_bin_archive_result_t *in, prne_bin_archive_t *out) {
+    prne_index_bin_archive_result_code_t ret = PRNE_INDEX_BIN_ARCHIVE_OK;
+    size_t buf_pos = 0, arr_cnt = 0, offset_arr[NB_PRNE_ARCH], size_arr[NB_PRNE_ARCH];
+    prne_arch_t arch;
     uint32_t bin_size;
-    proone_arch_t arch_arr[NB_PROONE_ARCH];
-    proone_bin_archive_t archive;
+    prne_arch_t arch_arr[NB_PRNE_ARCH];
+    prne_bin_archive_t archive;
     uint8_t *out_buf;
     
-    memset(arch_arr, 0, sizeof(proone_arch_t) * NB_PROONE_ARCH);
-    memset(offset_arr, 0, sizeof(size_t) * NB_PROONE_ARCH);
-    memset(size_arr, 0, sizeof(size_t) * NB_PROONE_ARCH);
-    proone_init_bin_archive(&archive);
+    memset(arch_arr, 0, sizeof(prne_arch_t) * NB_PRNE_ARCH);
+    memset(offset_arr, 0, sizeof(size_t) * NB_PRNE_ARCH);
+    memset(size_arr, 0, sizeof(size_t) * NB_PRNE_ARCH);
+    prne_init_bin_archive(&archive);
 
     do {
-        if (buf_pos + 4 >= in->data_size || arr_cnt >= NB_PROONE_ARCH) {
-            ret = PROONE_INDEX_BIN_ARCHIVE_FMT_ERR;
+        if (buf_pos + 4 >= in->data_size || arr_cnt >= NB_PRNE_ARCH) {
+            ret = PRNE_INDEX_BIN_ARCHIVE_FMT_ERR;
             goto END;
         }
 
-        arch = (proone_arch_t)in->data[buf_pos];
+        arch = (prne_arch_t)in->data[buf_pos];
         bin_size =
             ((uint32_t)in->data[buf_pos + 1] << 16) |
             ((uint32_t)in->data[buf_pos + 2] << 8) |
             (uint32_t)in->data[buf_pos + 3];
-        if (proone_arch2str(arch) == NULL || bin_size == 0 || buf_pos + 4 + bin_size > in->data_size) {
-            ret = PROONE_INDEX_BIN_ARCHIVE_FMT_ERR;
+        if (prne_arch2str(arch) == NULL || bin_size == 0 || buf_pos + 4 + bin_size > in->data_size) {
+            ret = PRNE_INDEX_BIN_ARCHIVE_FMT_ERR;
             goto END;
         }
 
@@ -193,19 +193,19 @@ proone_index_bin_archive_result_code_t proone_index_bin_archive (proone_unpack_b
         buf_pos += 4 + bin_size;
     } while (buf_pos < in->data_size);
 
-    out_buf = (uint8_t*)malloc(sizeof(proone_arch_t) * arr_cnt + sizeof(size_t*) * arr_cnt + sizeof(size_t*) * arr_cnt);
+    out_buf = (uint8_t*)malloc(sizeof(prne_arch_t) * arr_cnt + sizeof(size_t*) * arr_cnt + sizeof(size_t*) * arr_cnt);
     if (out_buf == NULL) {
-        ret = PROONE_INDEX_BIN_ARCHIVE_MEM_ERR;
+        ret = PRNE_INDEX_BIN_ARCHIVE_MEM_ERR;
         goto END;
     }
-    archive.arch_arr = (proone_arch_t*)out_buf;
-    archive.offset_arr = (size_t*)(out_buf + sizeof(proone_arch_t) * arr_cnt);
-    archive.size_arr = (size_t*)(out_buf + sizeof(proone_arch_t) * arr_cnt + sizeof(size_t*) * arr_cnt);
+    archive.arch_arr = (prne_arch_t*)out_buf;
+    archive.offset_arr = (size_t*)(out_buf + sizeof(prne_arch_t) * arr_cnt);
+    archive.size_arr = (size_t*)(out_buf + sizeof(prne_arch_t) * arr_cnt + sizeof(size_t*) * arr_cnt);
 
     archive.data_size = in->data_size;
     archive.data = in->data;
     archive.nb_binaries = arr_cnt;
-    memcpy(archive.arch_arr, arch_arr, arr_cnt * sizeof(proone_arch_t));
+    memcpy(archive.arch_arr, arch_arr, arr_cnt * sizeof(prne_arch_t));
     memcpy(archive.offset_arr, offset_arr, arr_cnt * sizeof(size_t));
     memcpy(archive.size_arr, size_arr, arr_cnt * sizeof(size_t));
 
@@ -214,22 +214,22 @@ proone_index_bin_archive_result_code_t proone_index_bin_archive (proone_unpack_b
     *out = archive;
 
 END:
-    if (ret != PROONE_INDEX_BIN_ARCHIVE_OK) {
-        proone_free_bin_archive(&archive);
+    if (ret != PRNE_INDEX_BIN_ARCHIVE_OK) {
+        prne_free_bin_archive(&archive);
     }
 
     return ret;
 }
 
-void proone_free_unpack_bin_archive_result (proone_unpack_bin_archive_result_t *r) {
+void prne_free_unpack_bin_archive_result (prne_unpack_bin_archive_result_t *r) {
     free(r->data);
     r->data = NULL;
     r->data_size = 0;
-    r->result = PROONE_INDEX_BIN_ARCHIVE_OK;
+    r->result = PRNE_INDEX_BIN_ARCHIVE_OK;
     r->err = 0;
 }
 
-void proone_free_bin_archive (proone_bin_archive_t *a) {
+void prne_free_bin_archive (prne_bin_archive_t *a) {
     free(a->data);
     free(a->arch_arr);
     a->nb_binaries = 0;

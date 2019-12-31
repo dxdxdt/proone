@@ -1,41 +1,41 @@
-#include "proone_rnd.h"
+#include "rnd.h"
 
 #include <stdlib.h>
 
 #define N ((size_t)624)
 
 
-struct proone_rnd_engine {
+struct prne_rnd_engine {
 	size_t mti;
 	uint32_t mt[N];
 };
 
 
-void proone_init_alloc_rnd_engine_result (proone_rnd_engnie_alloc_result_t *r) {
+void prne_init_alloc_rnd_engine_result (prne_rnd_engnie_alloc_result_t *r) {
 	r->engine = NULL;
-	r->result = PROONE_RND_ENGINE_ALLOC_OK;
+	r->result = PRNE_RND_ENGINE_ALLOC_OK;
 }
 
-proone_rnd_engnie_alloc_result_t proone_alloc_rnd_engine (const uint32_t *s) {
-	proone_rnd_engnie_alloc_result_t ret;
+prne_rnd_engnie_alloc_result_t prne_alloc_rnd_engine (const uint32_t *s) {
+	prne_rnd_engnie_alloc_result_t ret;
 	uint32_t seed;
 
-	proone_init_alloc_rnd_engine_result(&ret);
+	prne_init_alloc_rnd_engine_result(&ret);
 	
 	if (s == NULL) {
 		seed = 4357;
 	}
 	else {
 		if (*s == 0) {
-			ret.result = PROONE_RND_ENGINE_ALLOC_INVALID_SEED;
+			ret.result = PRNE_RND_ENGINE_ALLOC_INVALID_SEED;
 			return ret;
 		}
 		seed = *s;
 	}
 	
-	ret.engine = (proone_rnd_engine_t*)malloc(sizeof(proone_rnd_engine_t));
+	ret.engine = (prne_rnd_engine_t*)malloc(sizeof(prne_rnd_engine_t));
 	if (ret.engine == NULL) {
-		ret.result = PROONE_RND_ENGINE_ALLOC_MEM_ERR;
+		ret.result = PRNE_RND_ENGINE_ALLOC_MEM_ERR;
 		return ret;
 	}
 
@@ -47,11 +47,11 @@ proone_rnd_engnie_alloc_result_t proone_alloc_rnd_engine (const uint32_t *s) {
 	return ret;
 }
 
-void proone_free_rnd_engine (proone_rnd_engine_t *engine) {
+void prne_free_rnd_engine (prne_rnd_engine_t *engine) {
 	free(engine);
 }
 
-uint32_t proone_rnd_gen_int (proone_rnd_engine_t *engine) {
+uint32_t prne_rnd_gen_int (prne_rnd_engine_t *engine) {
 	static const size_t M = 397;
 	static const uint32_t
 		UPPER_MASK = 0x80000000,
@@ -88,6 +88,6 @@ uint32_t proone_rnd_gen_int (proone_rnd_engine_t *engine) {
 	return y;
 }
 
-double proone_rnd_gen_double (proone_rnd_engine_t *engine) {
-	return (double)proone_rnd_gen_int(engine) * 2.3283064370807974e-10;
+double prne_rnd_gen_double (prne_rnd_engine_t *engine) {
+	return (double)prne_rnd_gen_int(engine) * 2.3283064370807974e-10;
 }

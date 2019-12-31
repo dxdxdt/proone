@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "proone_dvault.h"
+#include "dvault.h"
 
 
 static const char *RND_DEV_PATH = "/dev/random";
@@ -17,10 +17,10 @@ int main (const int argc, const char **args) {
     ssize_t fd_read_size;
     uint8_t salt;
     size_t read_size = 0;
-    proone_dvault_mask_result_t mask_result;
-    proone_data_type_t type;
+    prne_dvault_mask_result_t mask_result;
+    prne_data_type_t type;
 
-    proone_init_dvault_mask_result(&mask_result);
+    prne_init_dvault_mask_result(&mask_result);
 
     if (argc <= 1) {
         fprintf(stderr,
@@ -54,9 +54,9 @@ int main (const int argc, const char **args) {
     close(rnd_fd);
     rnd_fd = -1;
 
-    type = proone_str2data_type(args[1]);
+    type = prne_str2data_type(args[1]);
     switch (type) {
-    case PROONE_DATA_TYPE_CSTR: {
+    case PRNE_DATA_TYPE_CSTR: {
         static const size_t buf_size = 0x0000FFFF + 1;
         uint8_t buf[buf_size];
 
@@ -83,12 +83,12 @@ int main (const int argc, const char **args) {
             goto END;
         }
 
-        mask_result = proone_dvault_mask(type, salt, read_size, buf);
-        if (mask_result.result == PROONE_DVAULT_MASK_OK) {
+        mask_result = prne_dvault_mask(type, salt, read_size, buf);
+        if (mask_result.result == PRNE_DVAULT_MASK_OK) {
             printf("(uint8_t*)\"%s\"\n", mask_result.str);
         }
         else {
-            fprintf(stderr, "Error: proone_dvault_mask() returned %d\n", (int)mask_result.result);
+            fprintf(stderr, "Error: prne_dvault_mask() returned %d\n", (int)mask_result.result);
             exit_code = 1;
             goto END;
         }
@@ -102,7 +102,7 @@ int main (const int argc, const char **args) {
 
 END:
     close(rnd_fd);
-    proone_free_dvault_mask_result(&mask_result);
+    prne_free_dvault_mask_result(&mask_result);
 
     return exit_code;
 }

@@ -1,5 +1,5 @@
-#include "proone_heartbeat-worker.h"
-#include "proone_dvault.h"
+#include "heartbeat-worker.h"
+#include "dvault.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -34,7 +34,7 @@ static void heartbeat_worker_fin (void *in_ctx) {
 	ctx->finalised = true;
 }
 
-static void heartbeat_worker_work (void *in_ctx, const proone_worker_sched_info_t *sched_info, proone_worker_sched_req_t *sched_req) {
+static void heartbeat_worker_work (void *in_ctx, const prne_worker_sched_info_t *sched_info, prne_worker_sched_req_t *sched_req) {
 	DECL_CTX_PTR(in_ctx);
 
 	if (sched_req->pollfd_ready) {
@@ -42,7 +42,7 @@ static void heartbeat_worker_work (void *in_ctx, const proone_worker_sched_info_
 
 		if (revents & (POLLERR | POLLHUP | POLLNVAL)) {
 			ctx->finalised = true;
-			sched_req->flags = PROONE_WORKER_SCHED_FLAG_NONE;
+			sched_req->flags = PRNE_WORKER_SCHED_FLAG_NONE;
 			return;
 		}
 		if (revents & POLLIN) {
@@ -55,7 +55,7 @@ static void heartbeat_worker_work (void *in_ctx, const proone_worker_sched_info_
 
 				addr_len = sizeof(struct sockaddr_in);
 				if (recvfrom(ctx->fd, ctx->rcv_buf, sizeof(ctx->rcv_buf), 0, (struct sockaddr*)&remote_addr, &addr_len) == sizeof(ctx->rcv_buf)) {
-					proone_dvault_invert_mem(sizeof(ctx->rcv_buf) - 1, ctx->rcv_buf + 1, ctx->rcv_buf[0]);
+					prne_dvault_invert_mem(sizeof(ctx->rcv_buf) - 1, ctx->rcv_buf + 1, ctx->rcv_buf[0]);
 					sendto(ctx->fd, ctx->rcv_buf + 1, sizeof(ctx->rcv_buf) - 1, 0, (const struct sockaddr*)&remote_addr, addr_len);
 				}
 			}
@@ -64,14 +64,14 @@ static void heartbeat_worker_work (void *in_ctx, const proone_worker_sched_info_
 
 				addr_len = sizeof(struct sockaddr_in6);
 				if (recvfrom(ctx->fd, ctx->rcv_buf, sizeof(ctx->rcv_buf), 0, (struct sockaddr*)&remote_addr, &addr_len) == sizeof(ctx->rcv_buf)) {
-					proone_dvault_invert_mem(sizeof(ctx->rcv_buf) - 1, ctx->rcv_buf + 1, ctx->rcv_buf[0]);
+					prne_dvault_invert_mem(sizeof(ctx->rcv_buf) - 1, ctx->rcv_buf + 1, ctx->rcv_buf[0]);
 					sendto(ctx->fd, ctx->rcv_buf + 1, sizeof(ctx->rcv_buf) - 1, 0, (const struct sockaddr*)&remote_addr, addr_len);
 				}
 			}
 		}
 	}
 
-	sched_req->flags = PROONE_WORKER_SCHED_FLAG_POLL;
+	sched_req->flags = PRNE_WORKER_SCHED_FLAG_POLL;
 	sched_req->mem_func.alloc(sched_req, 1);
 	sched_req->pollfd_arr[0].fd = ctx->fd;
 	sched_req->pollfd_arr[0].events = POLLIN;
@@ -83,7 +83,7 @@ static bool heartbeat_worker_has_finalised (void *in_ctx) {
 }
 
 
-bool proone_alloc_heartbeat_worker (proone_worker_t *w) {
+bool prne_alloc_heartbeat_worker (prne_worker_t *w) {
 	bool ret = true;
 	hb_w_ctx_t *ctx = NULL;
 	

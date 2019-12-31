@@ -16,10 +16,10 @@ if [ -z "$LISTARCH" ]; then
     LISTARCH="../src/proone-list-arch"
 fi
 if [ -z "$PACKER" ]; then
-    PACKER="../src/proone-packer"
+    PACKER="../src/proone-pack"
 fi
 if [ -z "$UNPACKER" ]; then
-    UNPACKER="../src/proone-unpacker"
+    UNPACKER="../src/proone-unpack"
 fi
 ARCH_ARR=(`"$LISTARCH"`)
 
@@ -41,12 +41,12 @@ for arch in ${ARCH_ARR[@]}; do
     fi
 done
 
-"$PACKER" "$BIN_PACK_DIR/$BIN_PREFIX."* | pigz -z - | base64 > "$TEST_DIR/$BIN_ARCHIVE_PREFIX.zz.b64"
+"$PACKER" "$BIN_PACK_DIR/$BIN_PREFIX."* | pigz -z - | base64 > "$TEST_DIR/$BIN_ARCHIVE_PREFIX"
 if [ $? -ne 0 ]; then
     exit 2;
 fi
 
-"$UNPACKER" "$BIN_UNPACK_DIR/$BIN_PREFIX" < "$TEST_DIR/$BIN_ARCHIVE_PREFIX.zz.b64"
+"$UNPACKER" "$BIN_UNPACK_DIR/$BIN_PREFIX" < "$TEST_DIR/$BIN_ARCHIVE_PREFIX"
 if [ $? -ne 0 ]; then
     exit 2;
 fi
@@ -58,6 +58,6 @@ for arch in ${ARCH_ARR[@]}; do
     fi
 done
 
-echo $(du -bs "$BIN_PACK_DIR" | awk '{print $1;}') $(wc -c "$TEST_DIR/$BIN_ARCHIVE_PREFIX.zz.b64" | awk '{print $1;}') >> "$SIZE_LOG"
+echo $(du -bs "$BIN_PACK_DIR" | awk '{print $1;}') $(wc -c "$TEST_DIR/$BIN_ARCHIVE_PREFIX" | awk '{print $1;}') >> "$SIZE_LOG"
 
 exit 0

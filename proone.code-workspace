@@ -5,6 +5,15 @@
 		}
 	],
 	"settings": {
-		"editor.insertSpaces": false
+		"editor.insertSpaces": false,
+		"C_Cpp.default.cStandard": "c11",
+		"C_Cpp.default.defines": [
+			"_GNU_SOURCE"],
+		"C_Cpp.default.compilerArgs": [
+			"-pedantic",
+			"-Wall",
+			"-Wextra",
+			"-Wno-switch",
+			"-Wno-unused-parameter"]
 	}
 }

@@ -15,7 +15,7 @@ int main (void) {
 
 		switch (type) {
 		case PROONE_DATA_TYPE_CSTR:
-			printf("%10lld: %s\n", (long long)i, proone_dvault_unmask_entry_cstr(i));
+			printf("%10lld: %s\n", (long long)i, proone_dvault_unmask_entry_cstr(i, NULL));
 			break;
 		default:
 			fprintf(stderr, "Error: unhandled data type (%d)'%s'\n", (int)type, proone_data_type2str(type));

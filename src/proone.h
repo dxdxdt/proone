@@ -6,6 +6,8 @@
 
 
 struct proone_global {
+    uint8_t *host_cred_data;
+    size_t host_cred_size;
     bool has_proc_lim_lock;
     bool bin_ready;
     int caught_signal;

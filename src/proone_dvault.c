@@ -40,9 +40,12 @@ static uint8_t *unmasked_buf = NULL;
 static size_t unmasked_buf_size = 0;
 
 
-static void pne_dvault_invert_entry (const proone_data_key_t key) {
+static void pne_dvault_invert_entry (const proone_data_key_t key, size_t *len) {
     const size_t entry_size = proone_dvault_get_entry_size(key);
 
+    if (len != NULL) {
+        *len = entry_size;
+    }
     memcpy(unmasked_buf, PROONE_DATA_DICT[key] + 4, entry_size);
     proone_dvault_invert_mem(entry_size, unmasked_buf, proone_dvault_get_entry_salt(key));
 }
@@ -134,12 +137,21 @@ void proone_init_dvault (void) {
 
     for (i = PROONE_DATA_KEY_NONE + 1; i < NB_PROONE_DATA_KEY; i += 1) {
         entry_size = proone_dvault_get_entry_size(i);
+        switch (proone_dvault_get_entry_data_type(i)) {
+        case PROONE_DATA_TYPE_CSTR:
+            entry_size += 1;
+            break;
+        }
+
         if (entry_size > max_size) {
             max_size = entry_size;
         }
     }
 
-    unmasked_buf = malloc(max_size);
+    if (max_size == 0) {
+        abort();
+    }
+    unmasked_buf = calloc(max_size, 1);
     unmasked_buf_size = max_size;
     if (unmasked_buf == NULL) {
         abort();
@@ -163,11 +175,11 @@ uint8_t proone_dvault_get_entry_salt (const proone_data_key_t key) {
     return PROONE_DATA_DICT[key][1];
 }
 
-const char *proone_dvault_unmask_entry_cstr (const proone_data_key_t key) {
+char *proone_dvault_unmask_entry_cstr (const proone_data_key_t key, size_t *len) {
     proone_dvault_reset_dict();
     pne_dvault_entry_check(key, PROONE_DATA_TYPE_CSTR);
-    pne_dvault_invert_entry(key);
-    return (const char*)unmasked_buf;
+    pne_dvault_invert_entry(key, len);
+    return (char*)unmasked_buf;
 }
 
 void proone_dvault_reset_dict (void) {

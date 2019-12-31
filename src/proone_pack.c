@@ -1,10 +1,10 @@
 #include "proone_pack.h"
+#include "proone_util.h"
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -37,27 +37,32 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
     
     proone_unpack_bin_archive_result_t ret;
     BIO *b64_bio = NULL, *mem_bio = NULL;
-    uint8_t fd_buf[fd_buf_size], bio_buf[bio_buf_size], z_buf[z_buf_size];
+    uint8_t *mem = NULL, *fd_buf = NULL, *bio_buf = NULL, *z_buf = NULL;
     int fd_read_size, fd_data_size, bio_write_size, bio_read_size;
     int z_func_ret;
     z_stream stream;
     size_t z_out_size;
     void *ny_buf;
     bool stream_end;
-    size_t i;
 
     proone_init_unpack_bin_archive_result(&ret);
+    memset(&stream, 0, sizeof(z_stream));
 
-    stream.zalloc = NULL;
-    stream.zfree = NULL;
-    stream.opaque = NULL;
-    stream.avail_in = 0;
-    stream.next_in = Z_NULL;
+    mem = (uint8_t*)malloc(fd_buf_size + bio_buf_size + z_buf_size);
+    if (mem == NULL) {
+        ret.result = PROONE_UNPACK_BIN_ARCHIVE_MEM_ERR;
+        ret.err = errno;
+        goto END;
+    }
+    fd_buf = mem;
+    bio_buf = mem + fd_buf_size;
+    z_buf = mem + fd_buf_size + bio_buf_size;
+
     z_func_ret = inflateInit(&stream);
     if (z_func_ret != Z_OK) {
         ret.result = PROONE_UNPACK_BIN_ARCHIVE_Z_ERR;
         ret.err = z_func_ret;
-        return ret;
+        goto END;
     }
 
     if ((mem_bio = BIO_new(BIO_s_mem())) == NULL || (b64_bio = BIO_new(BIO_f_base64())) == NULL) {
@@ -81,21 +86,7 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
         }
 
         // remove white spaces
-        fd_data_size = fd_read_size;
-        for (i = 0; i < (size_t)fd_data_size; ) {
-            if (isspace(fd_buf[i])) {
-                if (i + 1 >= (size_t)fd_data_size) {
-                    // last trailing whitespace
-                    fd_data_size -= 1;
-                    break;
-                }
-                memmove(fd_buf + i, fd_buf + i + 1, fd_data_size - i - 1);
-                fd_data_size -= 1;
-            }
-            else {
-                i += 1;
-            }
-        }
+        fd_data_size = proone_str_shift_spaces((char*)fd_buf, (size_t)fd_read_size);
 
         if (fd_data_size > 0) {
             BIO_reset(mem_bio);
@@ -133,31 +124,33 @@ proone_unpack_bin_archive_result_t proone_unpack_bin_archive (const int fd) {
                     } 
 
                     z_out_size = z_buf_size - stream.avail_out;
-                    ny_buf = realloc(ret.data, ret.data_size + z_out_size);
-                    if (ny_buf == NULL) {
-                        ret.result = PROONE_UNPACK_BIN_ARCHIVE_MEM_ERR;
-                        ret.err = errno;
-                        break;
-                    }
-                    ret.data = (uint8_t*)ny_buf;
+                    if (z_out_size > 0) {
+                        ny_buf = realloc(ret.data, ret.data_size + z_out_size);
+                        if (ny_buf == NULL) {
+                            ret.result = PROONE_UNPACK_BIN_ARCHIVE_MEM_ERR;
+                            ret.err = errno;
+                            break;
+                        }
+                        ret.data = (uint8_t*)ny_buf;
 
-                    memcpy(ret.data + ret.data_size, z_buf, z_out_size);
-                    ret.data_size += z_out_size;
+                        memcpy(ret.data + ret.data_size, z_buf, z_out_size);
+                        ret.data_size += z_out_size;
+                    }
                 } while (stream.avail_out == 0);            
             }
         }
     } while (!stream_end);
 
 END:
-    inflateEnd(&stream);
-    BIO_free(b64_bio);
-    BIO_free(mem_bio);
-
+    free(mem);
     if (ret.result != PROONE_UNPACK_BIN_ARCHIVE_OK) {
         free(ret.data);
         ret.data = NULL;
         ret.data_size = 0;
     }
+    inflateEnd(&stream);
+    BIO_free(b64_bio);
+    BIO_free(mem_bio);
 
     return ret;
 }

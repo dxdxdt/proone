@@ -45,7 +45,7 @@ static bool ensure_single_instance (void) {
     int fd;
 
     fd = shm_open(
-        proone_dvault_unmask_entry_cstr(PROONE_DATA_KEY_PROC_LIM_SHM),
+        proone_dvault_unmask_entry_cstr(PROONE_DATA_KEY_PROC_LIM_SHM, NULL),
         O_RDWR | O_CREAT | O_TRUNC,
         0666);
     proone_dvault_reset_dict();
@@ -151,6 +151,54 @@ static void proc_fin_call (void) {
     }
 }
 
+static void print_ready_signature (void) {
+    size_t len;
+    uint8_t *sig_data;
+    char *plain_str, *sig_str;
+    
+    plain_str = proone_dvault_unmask_entry_cstr(PROONE_DATA_KEY_SIGN_INIT_OK, &len);
+
+    sig_data = (uint8_t*)malloc(len + 1);
+    sig_data[0] = (uint8_t)(proone_rnd_gen_int(pne_global.rnd) % 256);
+    memcpy(sig_data + 1, plain_str, len);
+    proone_dvault_reset_dict();
+    proone_dvault_invert_mem(len, sig_data + 1, sig_data[0]);
+
+    sig_str = proone_enc_base64_mem(sig_data, len);
+    if (sig_str == NULL) {
+        abort();
+    }
+
+    puts(sig_str);
+
+    free(sig_str);
+    free(sig_data);
+}
+
+static void read_host_credential (void) {
+    static const size_t buf_size = (1 + 2 + 255 * 2) * 4 / 3;
+    char *buf = (char*)malloc(buf_size);
+    size_t i;
+    bool found = false;
+
+    for (i = 0; i < buf_size; i += 1) {
+        if (read(STDIN_FILENO, &buf[i], 1) != 1) {
+            goto END;
+        }
+
+        if (buf[i] == '\n') {
+            found = true;
+            break;
+        }
+    }
+    if (found) {
+        proone_dec_base64_mem(buf, i, &pne_global.host_cred_data, &pne_global.host_cred_size);
+    }
+
+END:
+    free(buf);
+}
+
 
 int main (const int argc, char **args) {
     int exit_code = 0;
@@ -158,6 +206,8 @@ int main (const int argc, char **args) {
     worker_tuple_t *wt;
     proone_worker_sched_info_t sched_info;
 
+    pne_global.host_cred_data = NULL;
+    pne_global.host_cred_size = 0;
     pne_global.has_proc_lim_lock = false;
     pne_global.bin_ready = false;
     pne_global.caught_signal = 0;
@@ -173,9 +223,9 @@ int main (const int argc, char **args) {
 #endif
     init_rnd_engine();
 
+    print_ready_signature();
+    read_host_credential();
     // get fed with the bin archive
-    puts(proone_dvault_unmask_entry_cstr(PROONE_DATA_KEY_SIGN_INIT_OK));
-    proone_dvault_reset_dict();
     pne_global.bin_pack = proone_unpack_bin_archive(STDIN_FILENO);
     if (pne_global.bin_pack.result == PROONE_UNPACK_BIN_ARCHIVE_OK) {
         pne_global.bin_ready = proone_index_bin_archive(&pne_global.bin_pack, &pne_global.bin_archive) == PROONE_INDEX_BIN_ARCHIVE_OK;
@@ -185,12 +235,12 @@ int main (const int argc, char **args) {
     close(STDIN_FILENO);
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
-    errno = 0;
 
     // install signal handlers
     // try to exit gracefully upon reception of these signals
     signal(SIGINT, handle_interrupt);
     signal(SIGTERM, handle_interrupt);
+    signal(SIGCHLD, SIG_IGN);
 #ifndef DEBUG
     signal(SIGPIPE, SIG_IGN);
 #endif
@@ -271,6 +321,9 @@ int main (const int argc, char **args) {
             void *ny_mem;
             size_t pollfd_ptr;
 
+            /* FIXME: `total_pollfd_size` could be zero if there's some bug in
+            * one of the workers.
+            */
             ny_mem = realloc(pollfd_pool.arr, total_pollfd_size * sizeof(struct pollfd));
             if (ny_mem != NULL) {
                 pollfd_pool.arr = (struct pollfd*)ny_mem;
@@ -279,6 +332,11 @@ int main (const int argc, char **args) {
                 pollfd_ptr = 0;
                 for (i = 0; i < worker_pool_size; i += 1) {
                     wt = &worker_pool[i];
+
+                    if (wt->worker.has_finalised(wt->worker.ctx)) {
+                        continue;
+                    }
+                    
                     if (wt->sched_req.flags & PROONE_WORKER_SCHED_FLAG_POLL) {
                         wt->sched_req.pollfd_ready = false;
                         memcpy(pollfd_pool.arr + pollfd_ptr, wt->sched_req.pollfd_arr, wt->sched_req.pollfd_arr_size * sizeof(struct pollfd));
@@ -299,6 +357,11 @@ int main (const int argc, char **args) {
                     pollfd_ptr = 0;
                     for (i = 0; i < worker_pool_size; i += 1) {
                         wt = &worker_pool[i];
+
+                        if (wt->worker.has_finalised(wt->worker.ctx)) {
+                            continue;
+                        }
+
                         if (wt->sched_req.flags & PROONE_WORKER_SCHED_FLAG_POLL) {
                             wt->sched_req.pollfd_ready = true;
                             memcpy(wt->sched_req.pollfd_arr, pollfd_pool.arr + pollfd_ptr, wt->sched_req.pollfd_arr_size);
@@ -326,8 +389,12 @@ END:
         wt->sched_req.mem_func.free(&wt->sched_req);
     }
 
+    free(pne_global.host_cred_data);
+    pne_global.host_cred_data = NULL;
+    pne_global.host_cred_size = 0;
+
     if (pne_global.has_proc_lim_lock) {
-        shm_unlink(proone_dvault_unmask_entry_cstr(PROONE_DATA_KEY_PROC_LIM_SHM));
+        shm_unlink(proone_dvault_unmask_entry_cstr(PROONE_DATA_KEY_PROC_LIM_SHM, NULL));
         proone_dvault_reset_dict();
         pne_global.has_proc_lim_lock = false;
     }

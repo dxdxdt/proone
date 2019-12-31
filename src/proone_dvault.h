@@ -43,5 +43,5 @@ void proone_deinit_dvault (void);
 proone_data_type_t proone_dvault_get_entry_data_type (const proone_data_key_t key);
 size_t proone_dvault_get_entry_size (const proone_data_key_t key);
 uint8_t proone_dvault_get_entry_salt (const proone_data_key_t key);
-const char *proone_dvault_unmask_entry_cstr (const proone_data_key_t key);
+char *proone_dvault_unmask_entry_cstr (const proone_data_key_t key, size_t *len);
 void proone_dvault_reset_dict (void);

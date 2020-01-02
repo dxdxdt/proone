@@ -1,4 +1,5 @@
 #include "rnd.h"
+#include "util_rt.h"
 
 #include <stdlib.h>
 
@@ -33,7 +34,7 @@ prne_rnd_engnie_alloc_result_t prne_alloc_rnd_engine (const uint32_t *s) {
 		seed = *s;
 	}
 	
-	ret.engine = (prne_rnd_engine_t*)malloc(sizeof(prne_rnd_engine_t));
+	ret.engine = (prne_rnd_engine_t*)prne_malloc(sizeof(prne_rnd_engine_t), 1);
 	if (ret.engine == NULL) {
 		ret.result = PRNE_RND_ENGINE_ALLOC_MEM_ERR;
 		return ret;
@@ -48,7 +49,7 @@ prne_rnd_engnie_alloc_result_t prne_alloc_rnd_engine (const uint32_t *s) {
 }
 
 void prne_free_rnd_engine (prne_rnd_engine_t *engine) {
-	free(engine);
+	prne_free(engine);
 }
 
 uint32_t prne_rnd_gen_int (prne_rnd_engine_t *engine) {

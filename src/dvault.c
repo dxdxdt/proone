@@ -1,4 +1,5 @@
 #include "dvault.h"
+#include "util_rt.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -88,7 +89,7 @@ void prne_init_dvault_mask_result (prne_dvault_mask_result_t *r) {
 }
 
 void prne_free_dvault_mask_result (prne_dvault_mask_result_t *r) {
-    free(r->str);
+    prne_free(r->str);
     r->str_len = 0;
     r->str = NULL;
     r->result = PRNE_DVAULT_MASK_OK;
@@ -110,7 +111,7 @@ prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const u
     }
 
     ret.str_len = 4 * 4 + 4 * data_size + 1;
-    ret.str = malloc(ret.str_len);
+    ret.str = prne_malloc(1, ret.str_len);
     if (ret.str == NULL) {
         ret.result = PRNE_DVAULT_MASK_MEM_ERR;
         ret.str_len = 0;
@@ -151,7 +152,7 @@ void prne_init_dvault (void) {
     if (max_size == 0) {
         abort();
     }
-    unmasked_buf = calloc(max_size, 1);
+    unmasked_buf = prne_calloc(1, max_size);
     unmasked_buf_size = max_size;
     if (unmasked_buf == NULL) {
         abort();
@@ -159,7 +160,7 @@ void prne_init_dvault (void) {
 }
 
 void prne_deinit_dvault (void) {
-    free(unmasked_buf);
+    prne_free(unmasked_buf);
     unmasked_buf = NULL;
 }
 

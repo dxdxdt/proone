@@ -1,9 +1,10 @@
 #pragma once
+#include "util_ct.h"
+#include "data.h"
+
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
-
-#include "data.h"
 
 
 typedef struct prne_dvault_mask_result prne_dvault_mask_result_t;
@@ -13,6 +14,7 @@ typedef enum {
     PRNE_DATA_TYPE_CSTR,
     NB_PRNE_DATA_TYPE
 } prne_data_type_t;
+PRNE_LIMIT_ENUM(prne_data_type_t, NB_PRNE_DATA_TYPE, 0xFF);
 
 typedef enum {
     PRNE_DVAULT_MASK_OK,

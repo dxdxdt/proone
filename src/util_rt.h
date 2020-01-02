@@ -5,9 +5,6 @@
 #include <time.h>
 
 
-#define prne_op_spaceship(a,b) (a==b?0:a<b?-1:1)
-
-
 #if 0
 bool prne_strendsw (const char *str, const char *w) {
     const size_t len_str = strlen(str);
@@ -23,7 +20,12 @@ bool prne_strendsw (const char *str, const char *w) {
 void prne_succeed_or_die (const int ret);
 void prne_empty_func ();
 
-void prne_rnd_alphanumeric_str (prne_rnd_engine_t *rnd_engine, char *str, const size_t len);
+void *prne_malloc (const size_t se, const size_t cnt);
+void *prne_realloc (void *ptr, const size_t se, const size_t cnt);
+void *prne_calloc (const size_t se, const size_t cnt);
+void prne_free (void *ptr);
+
+void prne_rnd_anum_str (prne_rnd_engine_t *rnd_engine, char *str, const size_t len);
 size_t prne_str_shift_spaces (char *str, const size_t len);
 
 struct timespec prne_sub_timespec (const struct timespec *a, const struct timespec *b);

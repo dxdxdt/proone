@@ -1,10 +1,11 @@
 #include "worker.h"
+#include "util_rt.h"
 
 #include <stdlib.h>
 
 
 static void def_free_func (prne_worker_sched_req_t *wsr) {
-	free(wsr->pollfd_arr);
+	prne_free(wsr->pollfd_arr);
 	wsr->pollfd_arr = NULL;
 	wsr->pollfd_arr_size = 0;
 }
@@ -14,7 +15,7 @@ static bool def_alloc_func (prne_worker_sched_req_t *wsr, const size_t ny_size) 
 		def_free_func(wsr);
 	}
 	else if (ny_size != wsr->pollfd_arr_size) {
-		void *ny_buf = realloc(wsr->pollfd_arr, ny_size * sizeof(struct pollfd));
+		void *ny_buf = prne_realloc(wsr->pollfd_arr, sizeof(struct pollfd), ny_size);
 
 		if (ny_buf == NULL) {
 			return false;

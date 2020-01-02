@@ -1,5 +1,5 @@
 #include "pack.h"
-#include "util.h"
+#include "util_rt.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -48,7 +48,7 @@ prne_unpack_bin_archive_result_t prne_unpack_bin_archive (const int fd) {
     prne_init_unpack_bin_archive_result(&ret);
     memset(&stream, 0, sizeof(z_stream));
 
-    mem = (uint8_t*)malloc(fd_buf_size + bio_buf_size + z_buf_size);
+    mem = (uint8_t*)prne_malloc(1, fd_buf_size + bio_buf_size + z_buf_size);
     if (mem == NULL) {
         ret.result = PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR;
         ret.err = errno;
@@ -125,7 +125,7 @@ prne_unpack_bin_archive_result_t prne_unpack_bin_archive (const int fd) {
 
                     z_out_size = z_buf_size - stream.avail_out;
                     if (z_out_size > 0) {
-                        ny_buf = realloc(ret.data, ret.data_size + z_out_size);
+                        ny_buf = prne_realloc(ret.data, 1, ret.data_size + z_out_size);
                         if (ny_buf == NULL) {
                             ret.result = PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR;
                             ret.err = errno;
@@ -141,10 +141,14 @@ prne_unpack_bin_archive_result_t prne_unpack_bin_archive (const int fd) {
         }
     } while (!stream_end);
 
+    if (ret.data_size == 0) {
+        ret.result = PRNE_UNPACK_BIN_ARCHIVE_FMT_ERR;
+    }
+
 END:
-    free(mem);
+    prne_free(mem);
     if (ret.result != PRNE_UNPACK_BIN_ARCHIVE_OK) {
-        free(ret.data);
+        prne_free(ret.data);
         ret.data = NULL;
         ret.data_size = 0;
     }
@@ -162,7 +166,6 @@ prne_index_bin_archive_result_code_t prne_index_bin_archive (prne_unpack_bin_arc
     uint32_t bin_size;
     prne_arch_t arch_arr[NB_PRNE_ARCH];
     prne_bin_archive_t archive;
-    uint8_t *out_buf;
     
     memset(arch_arr, 0, sizeof(prne_arch_t) * NB_PRNE_ARCH);
     memset(offset_arr, 0, sizeof(size_t) * NB_PRNE_ARCH);
@@ -193,14 +196,13 @@ prne_index_bin_archive_result_code_t prne_index_bin_archive (prne_unpack_bin_arc
         buf_pos += 4 + bin_size;
     } while (buf_pos < in->data_size);
 
-    out_buf = (uint8_t*)malloc(sizeof(prne_arch_t) * arr_cnt + sizeof(size_t*) * arr_cnt + sizeof(size_t*) * arr_cnt);
-    if (out_buf == NULL) {
+    archive.arch_arr = (prne_arch_t*)prne_malloc(sizeof(prne_arch_t), arr_cnt);
+    archive.offset_arr = (size_t*)prne_malloc(sizeof(size_t), arr_cnt);
+    archive.size_arr = (size_t*)prne_malloc(sizeof(size_t), arr_cnt);
+    if (archive.arch_arr == NULL || archive.offset_arr == NULL || archive.size_arr == NULL) {
         ret = PRNE_INDEX_BIN_ARCHIVE_MEM_ERR;
         goto END;
     }
-    archive.arch_arr = (prne_arch_t*)out_buf;
-    archive.offset_arr = (size_t*)(out_buf + sizeof(prne_arch_t) * arr_cnt);
-    archive.size_arr = (size_t*)(out_buf + sizeof(prne_arch_t) * arr_cnt + sizeof(size_t*) * arr_cnt);
 
     archive.data_size = in->data_size;
     archive.data = in->data;
@@ -222,7 +224,7 @@ END:
 }
 
 void prne_free_unpack_bin_archive_result (prne_unpack_bin_archive_result_t *r) {
-    free(r->data);
+    prne_free(r->data);
     r->data = NULL;
     r->data_size = 0;
     r->result = PRNE_INDEX_BIN_ARCHIVE_OK;
@@ -230,9 +232,12 @@ void prne_free_unpack_bin_archive_result (prne_unpack_bin_archive_result_t *r) {
 }
 
 void prne_free_bin_archive (prne_bin_archive_t *a) {
-    free(a->data);
-    free(a->arch_arr);
+    prne_free(a->data);
+    prne_free(a->arch_arr);
+    prne_free(a->offset_arr);
+    prne_free(a->size_arr);
     a->nb_binaries = 0;
+    a->data = NULL;
     a->data_size = 0;
     a->arch_arr = NULL;
     a->offset_arr = NULL;

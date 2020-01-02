@@ -1,4 +1,4 @@
-#include "util.h"
+#include "util_rt.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -18,7 +18,31 @@ void prne_succeed_or_die (const int ret) {
 
 void prne_empty_func () {}
 
-void prne_rnd_alphanumeric_str (prne_rnd_engine_t *rnd_engine, char *str, const size_t len) {
+void *prne_malloc (const size_t se, const size_t cnt) {
+	if (SIZE_MAX / se < cnt) {
+		errno = ENOMEM;
+		return NULL;
+	}
+	return malloc(cnt * se);
+}
+
+void *prne_realloc (void *ptr, const size_t se, const size_t cnt) {
+	if (SIZE_MAX / se < cnt) {
+		errno = ENOMEM;
+		return NULL;
+	}
+	return realloc(ptr, se * cnt);
+}
+
+void *prne_calloc (const size_t se, const size_t cnt) {
+	return calloc(se, cnt);
+}
+
+void prne_free (void *ptr) {
+	free(ptr);
+}
+
+void prne_rnd_anum_str (prne_rnd_engine_t *rnd_engine, char *str, const size_t len) {
 	static const char SET[] = "qwertyuiopasdfghjklzxcvbnm0123456789";
 	size_t i = 0;
 	uint32_t n;
@@ -122,7 +146,7 @@ char *prne_enc_base64_mem (const uint8_t *data, const size_t size) {
 		goto END;
 	}
 	if (out_len > 0) {
-		ret = (char*)malloc(out_len + 1);
+		ret = (char*)prne_malloc(1, out_len + 1);
 		if (ret == NULL) {
 			ok = false;
 			goto END;
@@ -135,7 +159,7 @@ END:
 	BIO_free(b64_bio);
 	BIO_free(mem_bio);
 	if (!ok) {
-		free(ret);
+		prne_free(ret);
 		ret = NULL;
 	}
 
@@ -159,7 +183,7 @@ bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data,
 		goto END;
 	}
 
-	in_mem = (char*)malloc(str_len);
+	in_mem = (char*)prne_malloc(1, str_len);
 	if (in_mem == NULL) {
 		ret = false;
 		goto END;
@@ -181,7 +205,7 @@ bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data,
 	BIO_push(b64_bio, mem_bio);
 	
 	out_len = in_mem_len * 3 / 4;
-	out_mem = (uint8_t*)malloc((size_t)out_len);
+	out_mem = (uint8_t*)prne_malloc(1, (size_t)out_len);
 	if (out_mem == NULL) {
 		ret = false;
 		goto END;
@@ -196,20 +220,20 @@ bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data,
 END:
 	BIO_free(b64_bio);
 	BIO_free(mem_bio);
-	free(in_mem);
+	prne_free(in_mem);
 	if (ret) {
 		if (read_size > 0) {
 			*data = out_mem;
 			*size = (size_t)read_size;
 		}
 		else {
-			free(out_mem);
+			prne_free(out_mem);
 			*data = NULL;
 			*size = 0;
 		}
 	}
 	else {
-		free(out_mem);
+		prne_free(out_mem);
 	}
 
 	return ret;

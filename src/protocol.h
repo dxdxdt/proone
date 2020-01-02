@@ -1,4 +1,6 @@
 #pragma once
+#include "util_ct.h"
+
 #include <stddef.h>
 
 
@@ -19,6 +21,7 @@ typedef enum {
 
     NB_PRNE_ARCH
 } prne_arch_t;
+PRNE_LIMIT_ENUM(prne_arch_t, NB_PRNE_ARCH, 0xFF);
 
 
 const char *prne_arch2str (const prne_arch_t x);

@@ -22,7 +22,8 @@ typedef enum {
     PRNE_UNPACK_BIN_ARCHIVE_OPENSSL_ERR,
     PRNE_UNPACK_BIN_ARCHIVE_Z_ERR,
     PRNE_UNPACK_BIN_ARCHIVE_ERRNO,
-    PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR
+    PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR,
+    PRNE_UNPACK_BIN_ARCHIVE_FMT_ERR
 } prne_unpack_bin_archive_result_code_t;
 
 struct prne_unpack_bin_archive_result {

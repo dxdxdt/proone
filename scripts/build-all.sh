@@ -54,7 +54,7 @@ fi
 make distclean
 
 # native build for tools
-./configure &&  make -j$(nproc) && cp -a src/proone-pack "$PROONE_PACKER" && cp -a src/proone-unpack "$PROONE_UNPACKER" && make distclean
+./configure $PROONE_AM_CONF &&  make -j$(nproc) && cp -a src/proone-pack "$PROONE_PACKER" && cp -a src/proone-unpack "$PROONE_UNPACKER" && make distclean
 if [ $? -ne 0 ]; then
     exit $?
 fi
@@ -68,7 +68,7 @@ for (( i = 0; i < ARR_SIZE; i += 1 )); do
 done
 
 # pack
-echo "" > "$PROONE_BIN_ARCHIVE" # don't include the credential line
+echo "bwEYAZaX8Zu9X1C6024h" > "$PROONE_BIN_ARCHIVE" # "test":"password"
 "$PROONE_PACKER" "$PROONE_BIN_PREFIX."* | pigz -z - | base64 >> "$PROONE_BIN_ARCHIVE"
 if [ $? -ne 0 ]; then
     exit $?

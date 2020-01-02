@@ -1,4 +1,5 @@
 #include "heartbeat-worker.h"
+#include "util_rt.h"
 #include "dvault.h"
 
 #include <stdlib.h>
@@ -10,7 +11,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-#define DECL_CTX_PTR(p) hb_w_ctx_t*ctx=(hb_w_ctx_t*)p
+#define DECL_CTX_PTR(p) hb_w_ctx_t *ctx = (hb_w_ctx_t*)p;
 
 typedef struct hb_w_ctx hb_w_ctx_t;
 
@@ -26,7 +27,7 @@ static const uint16_t HEARTBEAT_DEFAULT_BIND_PORT = 55420;
 static void heartbeat_worker_free (void *in_ctx) {
 	DECL_CTX_PTR(in_ctx);
 	close(ctx->fd);
-	free(ctx);
+	prne_free(ctx);
 }
 
 static void heartbeat_worker_fin (void *in_ctx) {
@@ -87,7 +88,7 @@ bool prne_alloc_heartbeat_worker (prne_worker_t *w) {
 	bool ret = true;
 	hb_w_ctx_t *ctx = NULL;
 	
-	ctx = (hb_w_ctx_t*)malloc(sizeof(hb_w_ctx_t));
+	ctx = (hb_w_ctx_t*)prne_malloc(sizeof(hb_w_ctx_t), 1);
 	if (ctx == NULL) {
 		ret = false;
 		goto END;
@@ -152,7 +153,7 @@ END:
 		if (ctx != NULL) {
 			close(ctx->fd);
 		}
-		free(ctx);
+		prne_free(ctx);
 	}
 
 	return ret;

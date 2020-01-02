@@ -10,6 +10,7 @@
 #include <zlib.h>
 
 #include "pack.h"
+#include "util_rt.h"
 
 
 static void report_unpack_bin_archive_err (const prne_unpack_bin_archive_result_t *r) {
@@ -34,6 +35,9 @@ static void report_unpack_bin_archive_err (const prne_unpack_bin_archive_result_
     case PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR:
         err_str = "memory error";
         err_msg = strerror((int)r->err);
+        break;
+    case PRNE_UNPACK_BIN_ARCHIVE_FMT_ERR:
+        err_str = "format error";
         break;
     default:
         err_str = "* unknown";
@@ -111,9 +115,9 @@ int main (const int argc, const char **args) {
             }
             
             path_size = 2 + path_prefix_len + strlen(arch_str);
-            ny_buf = realloc(path, path_size);
+            ny_buf = prne_realloc(path, 1, path_size);
             if (ny_buf == NULL) {
-                perror("realloc()");
+                perror("prne_realloc()");
                 exit_code = 2;
                 break;
             }
@@ -135,7 +139,7 @@ int main (const int argc, const char **args) {
         }
     } while (false);
 
-    free(path);
+    prne_free(path);
     close(fd);
     prne_free_unpack_bin_archive_result(&unpack_ret);
     prne_free_bin_archive(&bin_archive);

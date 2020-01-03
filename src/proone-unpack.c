@@ -6,8 +6,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include <openssl/err.h>
 #include <zlib.h>
+#include <mbedtls/error.h>
 
 #include "pack.h"
 #include "util_rt.h"
@@ -15,14 +15,16 @@
 
 static void report_unpack_bin_archive_err (const prne_unpack_bin_archive_result_t *r) {
     const char *err_str, *err_msg = NULL;
+    char err_buf[1024];
 
     switch (r->result) {
     case PRNE_UNPACK_BIN_ARCHIVE_OK:
         err_str = "ok";
         break;
-    case PRNE_UNPACK_BIN_ARCHIVE_OPENSSL_ERR:
-        err_str = "openssl error";
-        err_msg = ERR_error_string(r->err, NULL);
+    case PRNE_UNPACK_BIN_ARCHIVE_CRYPTO_ERR:
+        err_str = "crypto error";
+        mbedtls_strerror(r->err, err_buf, 1024);
+        err_msg = err_buf;
         break;
     case PRNE_UNPACK_BIN_ARCHIVE_Z_ERR:
         err_str = "zlib error";

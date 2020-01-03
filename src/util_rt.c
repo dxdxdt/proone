@@ -6,8 +6,7 @@
 
 #include <errno.h>
 
-#include <openssl/bio.h>
-#include <openssl/evp.h>
+#include <mbedtls/base64.h>
 
 
 void prne_succeed_or_die (const int ret) {
@@ -117,124 +116,48 @@ int prne_cmp_timespec (const struct timespec *a, const struct timespec *b) {
 }
 
 char *prne_enc_base64_mem (const uint8_t *data, const size_t size) {
-	char *ret = NULL, *p = NULL;
-	BIO *b64_bio = NULL, *mem_bio = NULL;
-	bool ok = true;
-	int out_len;
+	size_t ret_size;
+	char *ret;
 
-	if (size > INT32_MAX || size == 0) {
+	mbedtls_base64_encode(NULL, 0, &ret_size, data, size);
+	if (ret_size == 0) {
+		return NULL;
+	}
+	ret = (char*)prne_malloc(1, ret_size);
+	if (ret == NULL) {
 		return NULL;
 	}
 
-	b64_bio = BIO_new(BIO_f_base64());
-	mem_bio = BIO_new(BIO_s_mem());
-	if (b64_bio == NULL || mem_bio == NULL) {
-		ok = false;
-		goto END;
-	}
-	BIO_set_flags(b64_bio, BIO_FLAGS_BASE64_NO_NL);
-	BIO_push(b64_bio, mem_bio);
-
-	if (BIO_write(b64_bio, data, size) != (int)size) {
-		ok = false;
-		goto END;
-	}
-
-	out_len = BIO_get_mem_data(mem_bio, &p);
-	if (out_len < 0) {
-		ok = false;
-		goto END;
-	}
-	if (out_len > 0) {
-		ret = (char*)prne_malloc(1, out_len + 1);
-		if (ret == NULL) {
-			ok = false;
-			goto END;
-		}
-		memcpy(ret, p, out_len);
-		ret[out_len] = 0;
-	}
-
-END:
-	BIO_free(b64_bio);
-	BIO_free(mem_bio);
-	if (!ok) {
+	if (mbedtls_base64_encode((uint8_t*)ret, ret_size, &ret_size, data, size) < 0) {
 		prne_free(ret);
-		ret = NULL;
+		return NULL;
 	}
 
 	return ret;
 }
 
 bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data, size_t *size) {
-	char *in_mem = NULL;
-	size_t in_mem_len, out_len;
-	uint8_t *out_mem = NULL;
-	BIO *b64_bio = NULL, *mem_bio = NULL;
-	bool ret = true;
-	int read_size = 0;
+	size_t ret_size;
+	uint8_t *ret;
 
-	if (str_len > INT32_MAX) {
+	mbedtls_base64_decode(NULL, 0, &ret_size, (uint8_t*)str, str_len);
+	if (ret_size == 0) {
+		*data = NULL;
+		*size = 0;
+		return true;
+	}
+	ret = prne_malloc(1, ret_size);
+	if (ret == NULL) {
+		return false;
+	}
+
+	if (mbedtls_base64_decode(ret, ret_size, &ret_size, (uint8_t*)str, str_len) < 0) {
+		prne_free(ret);
 		errno = EINVAL;
 		return false;
 	}
-	if (str_len == 0) {
-		ret = true;
-		goto END;
-	}
 
-	in_mem = (char*)prne_malloc(1, str_len);
-	if (in_mem == NULL) {
-		ret = false;
-		goto END;
-	}
-	memcpy(in_mem, str, str_len);
-	in_mem_len = prne_str_shift_spaces(in_mem, str_len);
-	if (in_mem_len == 0) {
-		ret = true;
-		goto END;
-	}
-
-	b64_bio = BIO_new(BIO_f_base64());
-	mem_bio = BIO_new_mem_buf(in_mem, in_mem_len);
-	if (b64_bio == NULL || mem_bio == NULL) {
-		ret = false;
-		goto END;
-	}
-	BIO_set_flags(b64_bio, BIO_FLAGS_BASE64_NO_NL);
-	BIO_push(b64_bio, mem_bio);
-	
-	out_len = in_mem_len * 3 / 4;
-	out_mem = (uint8_t*)prne_malloc(1, (size_t)out_len);
-	if (out_mem == NULL) {
-		ret = false;
-		goto END;
-	}
-
-	read_size = BIO_read(b64_bio, out_mem, out_len);
-	if (read_size < 0) {
-		ret = false;
-		goto END;
-	}
-
-END:
-	BIO_free(b64_bio);
-	BIO_free(mem_bio);
-	prne_free(in_mem);
-	if (ret) {
-		if (read_size > 0) {
-			*data = out_mem;
-			*size = (size_t)read_size;
-		}
-		else {
-			prne_free(out_mem);
-			*data = NULL;
-			*size = 0;
-		}
-	}
-	else {
-		prne_free(out_mem);
-	}
-
-	return ret;
+	*data = ret;
+	*size = ret_size;
+	return true;
 }

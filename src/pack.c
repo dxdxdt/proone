@@ -10,10 +10,8 @@
 #include <unistd.h>
 #include <errno.h>
 
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-#include <openssl/err.h>
 #include <zlib.h>
+#include <mbedtls/base64.h>
 
 
 void prne_init_bin_archive (prne_bin_archive_t *a) {
@@ -33,30 +31,29 @@ void prne_init_unpack_bin_archive_result (prne_unpack_bin_archive_result_t *r) {
 }
 
 prne_unpack_bin_archive_result_t prne_unpack_bin_archive (const int fd) {
-    static const size_t fd_buf_size = 77, bio_buf_size = 58, z_buf_size = 4096;
+    static const size_t fd_buf_size = 77, b64_buf_size = 58, z_buf_size = 1024;
     
     prne_unpack_bin_archive_result_t ret;
-    BIO *b64_bio = NULL, *mem_bio = NULL;
-    uint8_t *mem = NULL, *fd_buf = NULL, *bio_buf = NULL, *z_buf = NULL;
-    int fd_read_size, fd_data_size, bio_write_size, bio_read_size;
+    uint8_t *mem = NULL, *fd_buf = NULL, *b64_buf = NULL, *z_buf = NULL;
+    int fd_read_size, fd_data_size, rem_size = 0;
     int z_func_ret;
     z_stream stream;
-    size_t z_out_size;
+    size_t dec_b64_size, z_out_size;
     void *ny_buf;
     bool stream_end;
 
     prne_init_unpack_bin_archive_result(&ret);
     memset(&stream, 0, sizeof(z_stream));
 
-    mem = (uint8_t*)prne_malloc(1, fd_buf_size + bio_buf_size + z_buf_size);
+    mem = (uint8_t*)prne_malloc(1, fd_buf_size + b64_buf_size + z_buf_size);
     if (mem == NULL) {
         ret.result = PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR;
         ret.err = errno;
         goto END;
     }
     fd_buf = mem;
-    bio_buf = mem + fd_buf_size;
-    z_buf = mem + fd_buf_size + bio_buf_size;
+    b64_buf = mem + fd_buf_size;
+    z_buf = mem + fd_buf_size + b64_buf_size;
 
     z_func_ret = inflateInit(&stream);
     if (z_func_ret != Z_OK) {
@@ -65,17 +62,9 @@ prne_unpack_bin_archive_result_t prne_unpack_bin_archive (const int fd) {
         goto END;
     }
 
-    if ((mem_bio = BIO_new(BIO_s_mem())) == NULL || (b64_bio = BIO_new(BIO_f_base64())) == NULL) {
-        ret.result = PRNE_UNPACK_BIN_ARCHIVE_OPENSSL_ERR;
-        ret.err = ERR_get_error();
-        goto END;
-    }
-    BIO_set_flags(b64_bio, BIO_FLAGS_BASE64_NO_NL);
-    BIO_push(b64_bio, mem_bio);
-
     stream_end = false;
     do {
-        fd_read_size = read(fd, fd_buf, fd_buf_size);
+        fd_read_size = read(fd, fd_buf + rem_size, fd_buf_size - rem_size);
         if (fd_read_size < 0) {
             ret.result = PRNE_UNPACK_BIN_ARCHIVE_ERRNO;
             ret.err = errno;
@@ -84,28 +73,21 @@ prne_unpack_bin_archive_result_t prne_unpack_bin_archive (const int fd) {
         if (fd_read_size == 0) {
             break;
         }
+        fd_read_size += rem_size;
 
-        // remove white spaces
-        fd_data_size = prne_str_shift_spaces((char*)fd_buf, (size_t)fd_read_size);
+        fd_read_size = fd_data_size = prne_str_shift_spaces((char*)fd_buf, (size_t)fd_read_size);
+        fd_data_size = fd_data_size / 4 * 4;
+        rem_size = fd_read_size - fd_data_size;
 
         if (fd_data_size > 0) {
-            BIO_reset(mem_bio);
-            bio_write_size = BIO_write(mem_bio, fd_buf, fd_data_size);
-            if (bio_write_size != fd_data_size) {
-                ret.result = PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR;
-                goto END;
+            ret.err = mbedtls_base64_decode(b64_buf, b64_buf_size, &dec_b64_size, fd_buf, fd_data_size);
+            if (ret.err != 0) {
+                ret.result = PRNE_UNPACK_BIN_ARCHIVE_CRYPTO_ERR;
             }
 
-            bio_read_size = BIO_read(b64_bio, bio_buf, (int)bio_buf_size);
-            if (bio_read_size < 0) {
-                ret.result = PRNE_UNPACK_BIN_ARCHIVE_OPENSSL_ERR;
-                ret.err = ERR_get_error();
-                goto END;
-            }
-
-            if (bio_read_size > 0) {
-                stream.avail_in = bio_read_size;
-                stream.next_in = bio_buf;
+            if (dec_b64_size > 0) {
+                stream.avail_in = dec_b64_size;
+                stream.next_in = b64_buf;
                 do {
                     stream.avail_out = z_buf_size;
                     stream.next_out = z_buf;
@@ -139,6 +121,8 @@ prne_unpack_bin_archive_result_t prne_unpack_bin_archive (const int fd) {
                 } while (stream.avail_out == 0);            
             }
         }
+
+        memmove(fd_buf, fd_buf + fd_data_size, rem_size);
     } while (!stream_end);
 
     if (ret.data_size == 0) {
@@ -153,8 +137,6 @@ END:
         ret.data_size = 0;
     }
     inflateEnd(&stream);
-    BIO_free(b64_bio);
-    BIO_free(mem_bio);
 
     return ret;
 }

@@ -36,7 +36,10 @@ AM_COND_IF([TESTS], [
     [AC_MSG_ERROR([gtest/gtest.h not found.])])
 ])
 
-PKG_CHECK_MODULES_STATIC([DEP], [zlib openssl])
+PKG_CHECK_MODULES_STATIC([DEP_PKGCFG], [zlib])
+AC_CHECK_LIB([mbedcrypto], [mbedtls_cipher_setup], [], [AC_MSG_ERROR([mbedtls not found])])
+AC_CHECK_LIB([mbedtls], [mbedtls_ssl_init], [], [AC_MSG_ERROR([mbedtls not found])])
+AC_CHECK_LIB([mbedx509], [mbedtls_x509_crt_parse], [], [AC_MSG_ERROR([mbedtls not found])])
 
 AC_CONFIG_FILES([Makefile src/Makefile])
 AC_OUTPUT

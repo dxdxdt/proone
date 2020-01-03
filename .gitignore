@@ -19,3 +19,4 @@ Makefile.in
 /builds/*
 /scripts/pack_test
 /scripts/*.log
+/src/proone_conf

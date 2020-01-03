@@ -9,7 +9,7 @@ typedef enum {
     
     PRNE_ARCH_ARMV4T,
     PRNE_ARCH_ARMV7,
-    PRNE_ARCH_I586,
+    PRNE_ARCH_I686,
     PRNE_ARCH_M68K,
     PRNE_ARCH_MIPS,
     PRNE_ARCH_MPSL,

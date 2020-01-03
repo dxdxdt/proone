@@ -39,6 +39,7 @@ const uint8_t PRNE_DVAULT_MASK[] = {
 
 static uint8_t *unmasked_buf = NULL;
 static size_t unmasked_buf_size = 0;
+static bool unmasked = false;
 
 
 static void invert_entry (const prne_data_key_t key, size_t *len) {
@@ -49,6 +50,7 @@ static void invert_entry (const prne_data_key_t key, size_t *len) {
     }
     memcpy(unmasked_buf, PRNE_DATA_DICT[key] + 4, entry_size);
     prne_dvault_invert_mem(entry_size, unmasked_buf, prne_dvault_get_entry_salt(key));
+    unmasked = true;
 }
 
 static void entry_check (const prne_data_key_t key, const prne_data_type_t type) {
@@ -63,6 +65,7 @@ static void entry_check (const prne_data_key_t key, const prne_data_type_t type)
 const char *prne_data_type2str (const prne_data_type_t t) {
     switch (t) {
     case PRNE_DATA_TYPE_CSTR: return "cstr";
+    case PRNE_DATA_TYPE_BIN: return "bin";
     }
     return NULL;
 }
@@ -71,6 +74,10 @@ prne_data_type_t prne_str2data_type (const char *str) {
     if (strcmp(str, prne_data_type2str(PRNE_DATA_TYPE_CSTR)) == 0) {
         return PRNE_DATA_TYPE_CSTR;
     }
+    if (strcmp(str, prne_data_type2str(PRNE_DATA_TYPE_BIN)) == 0) {
+        return PRNE_DATA_TYPE_BIN;
+    }
+    
     return PRNE_DATA_TYPE_NONE;
 }
 
@@ -157,11 +164,14 @@ void prne_init_dvault (void) {
     if (unmasked_buf == NULL) {
         abort();
     }
+    unmasked = false;
 }
 
 void prne_deinit_dvault (void) {
     prne_free(unmasked_buf);
     unmasked_buf = NULL;
+    unmasked_buf_size = 0;
+    unmasked = false;
 }
 
 prne_data_type_t prne_dvault_get_entry_data_type (const prne_data_key_t key) {
@@ -183,6 +193,16 @@ char *prne_dvault_unmask_entry_cstr (const prne_data_key_t key, size_t *len) {
     return (char*)unmasked_buf;
 }
 
+void prne_dvault_unmask_entry_bin (const prne_data_key_t key, const uint8_t **data, size_t *len) {
+    prne_dvault_reset_dict();
+    entry_check(key, PRNE_DATA_TYPE_BIN);
+    invert_entry(key, len);
+    *data = unmasked_buf;
+}
+
 void prne_dvault_reset_dict (void) {
-    memset(unmasked_buf, 0, unmasked_buf_size);
+    if (unmasked) {
+        memset(unmasked_buf, 0, unmasked_buf_size);
+        unmasked = false;
+    }
 }

@@ -5,18 +5,16 @@
 
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/random.h>
 
 #include "dvault.h"
 
 
-static const char *RND_DEV_PATH = "/dev/random";
-
 int main (const int argc, const char **args) {
     int exit_code = 0;
-    int rnd_fd = -1;
     ssize_t fd_read_size;
-    uint8_t salt;
     size_t read_size = 0;
+    uint8_t salt;
     prne_dvault_mask_result_t mask_result;
     prne_data_type_t type;
 
@@ -25,37 +23,15 @@ int main (const int argc, const char **args) {
     if (argc <= 1) {
         fprintf(stderr,
             "Usage: %s <type>\n"
-            "<type>: 'cstr'\n"
-            "\n"
-            "using random device: %s\n",
-            args[0], RND_DEV_PATH);
+            "<type>: 'cstr', 'bin'\n",
+            args[0]);
         exit_code = 2;
         goto END;
     }
 
-    rnd_fd = open(RND_DEV_PATH, O_RDONLY);
-    if (rnd_fd < 0) {
-        perror("Error opening random device");
-        exit_code = 1;
-        goto END;
-    }
-
-    fd_read_size = read(rnd_fd, &salt, 1);
-    if (fd_read_size < 0) {
-        perror("Error reading random device");
-        exit_code = 1;
-        goto END;
-    }
-    if (fd_read_size == 0) {
-        fprintf(stderr, "Nothing read from random device. Low entropy?\n");
-        exit_code = 1;
-        goto END;
-    }
-    close(rnd_fd);
-    rnd_fd = -1;
-
     type = prne_str2data_type(args[1]);
     switch (type) {
+    case PRNE_DATA_TYPE_BIN:
     case PRNE_DATA_TYPE_CSTR: {
         static const size_t buf_size = 0x0000FFFF + 1;
         uint8_t buf[buf_size];
@@ -83,9 +59,11 @@ int main (const int argc, const char **args) {
             goto END;
         }
 
+        getrandom(&salt, sizeof(uint8_t), 0);
+
         mask_result = prne_dvault_mask(type, salt, read_size, buf);
         if (mask_result.result == PRNE_DVAULT_MASK_OK) {
-            printf("(uint8_t*)\"%s\"\n", mask_result.str);
+            printf("(uint8_t*)\"%s\",\n", mask_result.str);
         }
         else {
             fprintf(stderr, "Error: prne_dvault_mask() returned %d\n", (int)mask_result.result);
@@ -101,7 +79,6 @@ int main (const int argc, const char **args) {
     }    
 
 END:
-    close(rnd_fd);
     prne_free_dvault_mask_result(&mask_result);
 
     return exit_code;

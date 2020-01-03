@@ -2,7 +2,7 @@
 ARCH_ARR=(
     "armv4t"
     "armv7"
-    "i586"
+    "i686"
     "m68k"
     "mips"
     "mpsl"
@@ -13,7 +13,7 @@ ARCH_ARR=(
 TOOLCHAIN_ARR=(
     "armv4t"
     "armv7"
-    "i586"
+    "i686"
     "m68k"
     "mips"
     "mpsl"
@@ -22,15 +22,15 @@ TOOLCHAIN_ARR=(
     "spc"
 )
 HOST_ARR=(
-    "arm-buildroot-linux-uclibcgnueabi"
-    "arm-buildroot-linux-uclibcgnueabi"
-    "i586-buildroot-linux-uclibc"
-    "m68k-buildroot-linux-uclibc"
-    "mips-buildroot-linux-uclibc"
-    "mipsel-buildroot-linux-uclibc"
-    "powerpc-buildroot-linux-uclibc"
-    "sh4-buildroot-linux-uclibc"
-    "sparc-buildroot-linux-uclibc"
+    "arm-linux"
+    "arm-linux"
+    "i686-linux"
+    "m68k-linux"
+    "mips-linux"
+    "mipsel-linux"
+    "powerpc-linux"
+    "sh4-linux"
+    "sparc-linux"
 )
 ARR_SIZE="${#ARCH_ARR[@]}"
 if [ $ARR_SIZE -ne "${#TOOLCHAIN_ARR[@]}" ] || [ $ARR_SIZE -ne "${#HOST_ARR[@]}" ]; then
@@ -39,14 +39,16 @@ if [ $ARR_SIZE -ne "${#TOOLCHAIN_ARR[@]}" ] || [ $ARR_SIZE -ne "${#HOST_ARR[@]}"
 fi
 
 PROONE_PREFIX="builds"
-PROONE_BIN="$PROONE_PREFIX/bin"
+PROONE_ORG_BIN="$PROONE_PREFIX/out"
+PROONE_REL_BIN="$PROONE_PREFIX/bin"
 PROONE_TOOLS="$PROONE_PREFIX/tools"
-export PROONE_BIN_PREFIX="$PROONE_BIN/proone"
+export PROONE_ORG_BIN_PREFIX="$PROONE_ORG_BIN/proone"
+export PROONE_REL_BIN_PREFIX="$PROONE_REL_BIN/proone"
 PROONE_PACKER="$PROONE_TOOLS/proone-pack"
 PROONE_UNPACKER="$PROONE_TOOLS/proone-unpack"
 PROONE_BIN_ARCHIVE="$PROONE_PREFIX/bin-archive"
 
-rm -rf "$PROONE_PREFIX" && mkdir "$PROONE_PREFIX" "$PROONE_BIN" "$PROONE_TOOLS"
+rm -rf "$PROONE_PREFIX" && mkdir "$PROONE_PREFIX" "$PROONE_ORG_BIN" "$PROONE_REL_BIN" "$PROONE_TOOLS"
 if [ $? -ne 0 ] ; then
     exit $?
 fi
@@ -61,7 +63,7 @@ fi
 
 # cross-compile targets
 for (( i = 0; i < ARR_SIZE; i += 1 )); do
-    PROONE_HOST="${HOST_ARR[$i]}" PROONE_BIN_ARCH="${ARCH_ARR[$i]}" bash-xcomp-uclibc "${TOOLCHAIN_ARR[$i]}" "scripts/xcomp.sh"
+    PROONE_HOST="${HOST_ARR[$i]}" PROONE_BIN_ARCH="${ARCH_ARR[$i]}" bash-xcomp-emb "${TOOLCHAIN_ARR[$i]}" "scripts/xcomp.sh"
     if [ $? -ne 0 ]; then
         exit $?
     fi
@@ -69,7 +71,7 @@ done
 
 # pack
 echo "bwEYAZaX8Zu9X1C6024h" > "$PROONE_BIN_ARCHIVE" # "test":"password"
-"$PROONE_PACKER" "$PROONE_BIN_PREFIX."* | pigz -z - | base64 >> "$PROONE_BIN_ARCHIVE"
+"$PROONE_PACKER" "$PROONE_ORG_BIN_PREFIX."* | pigz -z - | base64 >> "$PROONE_BIN_ARCHIVE"
 if [ $? -ne 0 ]; then
     exit $?
 fi
@@ -78,7 +80,7 @@ fi
 
 
 # size report
-total_bin_size=$(cat "$PROONE_BIN_PREFIX."* | wc -c)
+total_bin_size=$(cat "$PROONE_ORG_BIN_PREFIX."* | wc -c)
 bin_archive_size=$(wc -c "$PROONE_BIN_ARCHIVE" | awk '{print $1;}')
 echo "print(\"archive/bin = $bin_archive_size / $total_bin_size (\" + str($bin_archive_size / $total_bin_size * 100) + \"%)\")" | python3
 

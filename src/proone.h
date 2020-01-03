@@ -7,6 +7,8 @@
 
 #include <sys/types.h>
 
+#include <mbedtls/ssl.h>
+
 
 struct prne_global {
     uint8_t *host_cred_data;
@@ -21,8 +23,24 @@ struct prne_global {
     int lock_shm_fd;
     int ny_bin_shm_fd;
     bool bin_ready;
+    bool s_ssl_ready;
+    bool c_ssl_ready;
+    
     prne_unpack_bin_archive_result_t bin_pack;
     prne_bin_archive_t bin_archive;
+
+    mbedtls_x509_crt ca;
+    struct {
+        mbedtls_ssl_config conf;
+        mbedtls_x509_crt crt;
+        mbedtls_pk_context pk;
+        mbedtls_dhm_context dhm;
+    } s_ssl;
+    struct {
+        mbedtls_ssl_config conf;
+        mbedtls_x509_crt crt;
+        mbedtls_pk_context pk;
+    } c_ssl;
 };
 
 struct prne_shared_global {

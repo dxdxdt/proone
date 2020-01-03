@@ -7,8 +7,8 @@ const char *prne_arch2str (const prne_arch_t x) {
         return "armv4t";
     case PRNE_ARCH_ARMV7:
         return "armv7";
-    case PRNE_ARCH_I586:
-        return "i586";
+    case PRNE_ARCH_I686:
+        return "i686";
     case PRNE_ARCH_M68K:
         return "m68k";
     case PRNE_ARCH_MIPS:
@@ -31,37 +31,37 @@ const char *prne_arch2str (const prne_arch_t x) {
 }
 
 prne_arch_t prne_str2arch (const char *str) {
-    if (strcmp(str, "armv4t") == 0) {
+    if (strcmp(str, prne_arch2str(PRNE_ARCH_ARMV4T)) == 0) {
         return PRNE_ARCH_ARMV4T;
     }
-    else if (strcmp(str, "armv7") == 0) {
+    else if (strcmp(str, prne_arch2str(PRNE_ARCH_ARMV7)) == 0) {
         return PRNE_ARCH_ARMV7;
     }
-    else if (strcmp(str, "i586") == 0) {
-        return PRNE_ARCH_I586;
+    else if (strcmp(str, prne_arch2str(PRNE_ARCH_I686)) == 0) {
+        return PRNE_ARCH_I686;
     }
-    else if (strcmp(str, "m68k") == 0) {
+    else if (strcmp(str, prne_arch2str(PRNE_ARCH_M68K)) == 0) {
         return PRNE_ARCH_M68K;
     }
-    else if (strcmp(str, "mips") == 0) {
+    else if (strcmp(str, prne_arch2str(PRNE_ARCH_MIPS)) == 0) {
         return PRNE_ARCH_MIPS;
     }
-    else if (strcmp(str, "mpsl") == 0) {
+    else if (strcmp(str, prne_arch2str(PRNE_ARCH_MPSL)) == 0) {
         return PRNE_ARCH_MPSL;
     }
-    else if (strcmp(str, "ppc") == 0) {
+    else if (strcmp(str, prne_arch2str(PRNE_ARCH_PPC)) == 0) {
         return PRNE_ARCH_PPC;
     }
-    else if (strcmp(str, "rv32") == 0) {
+    else if (strcmp(str, prne_arch2str(PRNE_ARCH_RV32)) == 0) {
         return PRNE_ARCH_RV32;
     }
-    else if (strcmp(str, "rv64") == 0) {
+    else if (strcmp(str, prne_arch2str(PRNE_ARCH_RV64)) == 0) {
         return PRNE_ARCH_RV64;
     }
-    else if (strcmp(str, "sh4") == 0) {
+    else if (strcmp(str, prne_arch2str(PRNE_ARCH_SH4)) == 0) {
         return PRNE_ARCH_SH4;
     }
-    else if (strcmp(str, "spc") == 0) {
+    else if (strcmp(str, prne_arch2str(PRNE_ARCH_SPC)) == 0) {
         return PRNE_ARCH_SPC;
     }
 

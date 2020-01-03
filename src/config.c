@@ -8,7 +8,7 @@ const prne_arch_t prne_host_arch =
 	#elif defined(__ARM_ARCH_7A__)
 		PRNE_ARCH_ARMV7
 	#elif defined(__x86_64__) || defined(__i386__)
-		PRNE_ARCH_I586
+		PRNE_ARCH_I686
 	#elif defined(__m68k__)
 		PRNE_ARCH_M68K
 	#elif defined(__mips__)

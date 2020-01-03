@@ -11,7 +11,10 @@ typedef struct prne_dvault_mask_result prne_dvault_mask_result_t;
 
 typedef enum {
     PRNE_DATA_TYPE_NONE = -1,
+
     PRNE_DATA_TYPE_CSTR,
+    PRNE_DATA_TYPE_BIN,
+    
     NB_PRNE_DATA_TYPE
 } prne_data_type_t;
 PRNE_LIMIT_ENUM(prne_data_type_t, NB_PRNE_DATA_TYPE, 0xFF);
@@ -46,4 +49,5 @@ prne_data_type_t prne_dvault_get_entry_data_type (const prne_data_key_t key);
 size_t prne_dvault_get_entry_size (const prne_data_key_t key);
 uint8_t prne_dvault_get_entry_salt (const prne_data_key_t key);
 char *prne_dvault_unmask_entry_cstr (const prne_data_key_t key, size_t *len);
+void prne_dvault_unmask_entry_bin (const prne_data_key_t key, const uint8_t **data, size_t *len);
 void prne_dvault_reset_dict (void);

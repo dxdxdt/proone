@@ -11,6 +11,7 @@
 #include <sys/sendfile.h>
 #include <fcntl.h>
 
+#include "util_rt.h"
 #include "protocol.h"
 
 
@@ -62,7 +63,7 @@ int main (const int argc, const char **args) {
         }
         ext += 1;
 
-        arch = prne_str2arch(ext);
+        arch = prne_arch_fstr(ext);
         if (arch == PRNE_ARCH_NONE) {
             fprintf(stderr, "** %s: unknown arch \"%s\"\n", path, ext);
             proc_result = false;
@@ -117,9 +118,9 @@ int main (const int argc, const char **args) {
         // write head
         head[0] = (uint8_t)archive->arch;
         // endian conversion as the file is big endian
-        head[1] = (uint8_t)(((uint32_t)st.st_size & 0x00FF0000) >> 16);
-        head[2] = (uint8_t)(((uint32_t)st.st_size & 0x0000FF00) >> 8);
-        head[3] = (uint8_t)((uint32_t)st.st_size & 0x000000FF);
+        head[1] = (uint8_t)(((uint_fast32_t)st.st_size & 0x00FF0000) >> 16);
+        head[2] = (uint8_t)(((uint_fast32_t)st.st_size & 0x0000FF00) >> 8);
+        head[3] = (uint8_t)((uint_fast32_t)st.st_size & 0x000000FF);
         if (write(STDOUT_FILENO, head, 4) != 4) {
             perror("write()");
             proc_result = false;
@@ -133,11 +134,11 @@ int main (const int argc, const char **args) {
             break;
         }
 
-        close(bin_fd);
+        prne_close(bin_fd);
         bin_fd = -1;
     }
 
-    close(bin_fd);
+    prne_close(bin_fd);
     bin_fd = -1;
     errno = 0;
 

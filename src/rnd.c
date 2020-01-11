@@ -2,6 +2,10 @@
 #include "util_rt.h"
 
 #include <stdlib.h>
+#include <time.h>
+
+#include <unistd.h>
+#include <sys/random.h>
 
 #define N ((size_t)624)
 
@@ -91,4 +95,27 @@ uint32_t prne_rnd_gen_int (prne_rnd_engine_t *engine) {
 
 double prne_rnd_gen_double (prne_rnd_engine_t *engine) {
 	return (double)prne_rnd_gen_int(engine) * 2.3283064370807974e-10;
+}
+
+prne_rnd_engine_t *prne_mk_rnd_engine (void) {
+	uint32_t seed = 0;
+    prne_rnd_engnie_alloc_result_t ret;
+
+    getrandom(&seed, sizeof(uint32_t), 0);
+
+    if (seed == 0) {
+        // fall back to seeding with what's available.
+        seed =
+            (uint32_t)(time(NULL) % 0xFFFFFFFF) ^
+            (uint32_t)(getpid() % 0xFFFFFFFF) ^
+            (uint32_t)(getppid() % 0xFFFFFFFF) ^
+            (uint32_t)(clock() % 0xFFFFFFFF);
+    }
+    
+    ret = prne_alloc_rnd_engine(seed == 0 ? NULL : &seed);
+    if (ret.result != PRNE_RND_ENGINE_ALLOC_OK) {
+        return NULL;
+    }
+
+    return ret.engine;
 }

@@ -29,7 +29,7 @@ int main (const int argc, const char **args) {
         goto END;
     }
 
-    type = prne_str2data_type(args[1]);
+    type = prne_data_type_fstr(args[1]);
     switch (type) {
     case PRNE_DATA_TYPE_BIN:
     case PRNE_DATA_TYPE_CSTR: {
@@ -59,7 +59,7 @@ int main (const int argc, const char **args) {
             goto END;
         }
 
-        getrandom(&salt, sizeof(uint8_t), 0);
+        getrandom(&salt, sizeof(salt), 0);
 
         mask_result = prne_dvault_mask(type, salt, read_size, buf);
         if (mask_result.result == PRNE_DVAULT_MASK_OK) {

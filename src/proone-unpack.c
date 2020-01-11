@@ -109,7 +109,7 @@ int main (const int argc, const char **args) {
         }
 
         for (i = 0; i < bin_archive.nb_binaries; i += 1) {
-            arch_str = prne_arch2str(bin_archive.arch_arr[i]);
+            arch_str = prne_arch_tostr(bin_archive.arch_arr[i]);
             if (arch_str == NULL) {
                 fprintf(stderr, "** unrecognised arch!");
                 exit_code = 2;
@@ -137,12 +137,12 @@ int main (const int argc, const char **args) {
                 exit_code = 2;
                 break;
             }
-            close(fd);
+            prne_close(fd);
         }
     } while (false);
 
     prne_free(path);
-    close(fd);
+    prne_close(fd);
     prne_free_unpack_bin_archive_result(&unpack_ret);
     prne_free_bin_archive(&bin_archive);
 

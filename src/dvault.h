@@ -35,8 +35,8 @@ struct prne_dvault_mask_result {
 
 extern const uint8_t PRNE_DVAULT_MASK[256];
 
-const char *prne_data_type2str (const prne_data_type_t t);
-prne_data_type_t prne_str2data_type (const char *str);
+const char *prne_data_type_tostr (const prne_data_type_t t);
+prne_data_type_t prne_data_type_fstr (const char *str);
 void prne_dvault_invert_mem (const size_t size, uint8_t *m, const uint8_t salt);
 
 void prne_init_dvault_mask_result (prne_dvault_mask_result_t *r);

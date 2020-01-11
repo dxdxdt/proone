@@ -56,10 +56,17 @@ fi
 make distclean
 
 # native build for tools
-./configure $PROONE_AM_CONF &&  make -j$(nproc) && cp -a src/proone-pack "$PROONE_PACKER" && cp -a src/proone-unpack "$PROONE_UNPACKER" && make distclean
+./configure $PROONE_AM_CONF &&  make -j$(nproc) &&
+    cp -a src/proone-pack "$PROONE_PACKER" &&
+    cp -a src/proone-unpack "$PROONE_UNPACKER" &&
+    cp -a src/proone-list-arch "$PROONE_TOOLS/proone-list-arch" &&
+    cp -a src/proone-mask "$PROONE_TOOLS/proone-mask" &&
+    cp -a src/proone-print-all-data "$PROONE_TOOLS/proone-print-all-data" &&
+    cp -a src/proone-resolv "$PROONE_TOOLS/proone-resolv"
 if [ $? -ne 0 ]; then
     exit $?
 fi
+make distclean
 
 # cross-compile targets
 for (( i = 0; i < ARR_SIZE; i += 1 )); do

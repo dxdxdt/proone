@@ -6,4 +6,4 @@
 #include <stdint.h>
 
 
-bool prne_alloc_heartbeat_worker (prne_worker_t *w);
+bool prne_alloc_htbt_worker (prne_worker_t *w);

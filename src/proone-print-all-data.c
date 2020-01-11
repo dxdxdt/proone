@@ -15,7 +15,7 @@ int main (void) {
 	for (i = PRNE_DATA_KEY_NONE + 1; i < NB_PRNE_DATA_KEY; i += 1) {
 		type = (prne_data_type_t)PRNE_DATA_DICT[i][0];
 
-		printf("%10lld(%" TYPE_STR_PADDING "s): ", (long long)i, prne_data_type2str(type));
+		printf("%10lld(%" TYPE_STR_PADDING "s): ", (long long)i, prne_data_type_tostr(type));
 		switch (type) {
 		case PRNE_DATA_TYPE_CSTR:
 			printf("%s", prne_dvault_unmask_entry_cstr(i, NULL));
@@ -32,7 +32,7 @@ int main (void) {
 			break;	
 		}
 		default:
-			fprintf(stderr, "Error: unknown data type (%d)'%s'\n", (int)type, prne_data_type2str(type));
+			fprintf(stderr, "Error: unknown data type (%d)'%s'\n", (int)type, prne_data_type_tostr(type));
 			abort();
 		}
 

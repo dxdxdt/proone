@@ -145,7 +145,7 @@ prne_index_bin_archive_result_code_t prne_index_bin_archive (prne_unpack_bin_arc
     prne_index_bin_archive_result_code_t ret = PRNE_INDEX_BIN_ARCHIVE_OK;
     size_t buf_pos = 0, arr_cnt = 0, offset_arr[NB_PRNE_ARCH], size_arr[NB_PRNE_ARCH];
     prne_arch_t arch;
-    uint32_t bin_size;
+    uint_fast32_t bin_size;
     prne_arch_t arch_arr[NB_PRNE_ARCH];
     prne_bin_archive_t archive;
     
@@ -162,10 +162,10 @@ prne_index_bin_archive_result_code_t prne_index_bin_archive (prne_unpack_bin_arc
 
         arch = (prne_arch_t)in->data[buf_pos];
         bin_size =
-            ((uint32_t)in->data[buf_pos + 1] << 16) |
-            ((uint32_t)in->data[buf_pos + 2] << 8) |
-            (uint32_t)in->data[buf_pos + 3];
-        if (prne_arch2str(arch) == NULL || bin_size == 0 || buf_pos + 4 + bin_size > in->data_size) {
+            ((uint_fast32_t)in->data[buf_pos + 1] << 16) |
+            ((uint_fast32_t)in->data[buf_pos + 2] << 8) |
+            (uint_fast32_t)in->data[buf_pos + 3];
+        if (prne_arch_tostr(arch) == NULL || bin_size == 0 || buf_pos + 4 + bin_size > in->data_size) {
             ret = PRNE_INDEX_BIN_ARCHIVE_FMT_ERR;
             goto END;
         }

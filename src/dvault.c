@@ -1,5 +1,6 @@
 #include "dvault.h"
 #include "util_rt.h"
+#include "util_ct.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -202,7 +203,7 @@ void prne_dvault_unmask_entry_bin (const prne_data_key_t key, const uint8_t **da
 
 void prne_dvault_reset_dict (void) {
     if (unmasked) {
-        memset(unmasked_buf, 0, unmasked_buf_size);
+        memzero(unmasked_buf, unmasked_buf_size);
         unmasked = false;
     }
 }

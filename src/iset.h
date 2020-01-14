@@ -5,7 +5,7 @@
 
 
 typedef struct prne_iset prne_iset_t;
-typedef uintptr_t prne_iset_val_t;
+typedef void* prne_iset_val_t;
 
 struct prne_iset {
 	prne_iset_val_t *arr;

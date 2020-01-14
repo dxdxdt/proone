@@ -1,5 +1,6 @@
 #include "pack.h"
 #include "util_rt.h"
+#include "util_ct.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -43,7 +44,7 @@ prne_unpack_bin_archive_result_t prne_unpack_bin_archive (const int fd) {
     bool stream_end;
 
     prne_init_unpack_bin_archive_result(&ret);
-    memset(&stream, 0, sizeof(z_stream));
+    memzero(&stream, sizeof(z_stream));
 
     mem = (uint8_t*)prne_malloc(1, fd_buf_size + b64_buf_size + z_buf_size);
     if (mem == NULL) {
@@ -149,9 +150,9 @@ prne_index_bin_archive_result_code_t prne_index_bin_archive (prne_unpack_bin_arc
     prne_arch_t arch_arr[NB_PRNE_ARCH];
     prne_bin_archive_t archive;
     
-    memset(arch_arr, 0, sizeof(prne_arch_t) * NB_PRNE_ARCH);
-    memset(offset_arr, 0, sizeof(size_t) * NB_PRNE_ARCH);
-    memset(size_arr, 0, sizeof(size_t) * NB_PRNE_ARCH);
+    memzero(arch_arr, sizeof(prne_arch_t) * NB_PRNE_ARCH);
+    memzero(offset_arr, sizeof(size_t) * NB_PRNE_ARCH);
+    memzero(size_arr, sizeof(size_t) * NB_PRNE_ARCH);
     prne_init_bin_archive(&archive);
 
     do {

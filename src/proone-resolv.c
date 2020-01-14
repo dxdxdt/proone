@@ -17,6 +17,7 @@
 #include <mbedtls/entropy.h>
 
 #include "util_rt.h"
+#include "util_ct.h"
 #include "llist.h"
 #include "resolv_worker.h"
 
@@ -303,7 +304,7 @@ static void install_signal_handlers (void) {
         prne_ok_or_die(fcntl(int_pipe[1], F_SETFD, FD_CLOEXEC));
     }
 
-	memset(&sa, 0, sizeof(struct sigaction));
+	memzero(&sa, sizeof(struct sigaction));
 	sa.sa_flags = SA_RESETHAND;
 	sa.sa_handler = handle_interrupt;
 	

@@ -12,6 +12,7 @@
 #include <fcntl.h>
 
 #include "util_rt.h"
+#include "util_ct.h"
 #include "protocol.h"
 
 
@@ -48,8 +49,8 @@ int main (const int argc, const char **args) {
     }
 
     // init
-    memset(encounter_arr, 0, sizeof(archive_tuple_t*) * NB_PRNE_ARCH);
-    memset(archive_arr, 0, sizeof(archive_tuple_t) * NB_PRNE_ARCH);
+    memzero(encounter_arr, sizeof(archive_tuple_t*) * NB_PRNE_ARCH);
+    memzero(archive_arr, sizeof(archive_tuple_t) * NB_PRNE_ARCH);
 
     // Check the file names are valid
     for (i = 1; i < (size_t)argc; i += 1) {

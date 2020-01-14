@@ -1,5 +1,6 @@
 #include "worker.h"
 #include "util_rt.h"
+#include "util_ct.h"
 
 #include <string.h>
 #include <time.h>
@@ -266,7 +267,7 @@ void prne_free_wkr_pollfd_slot (prne_wkr_pollfd_slot_pt s) {
 }
 
 void prne_init_wkr_tick_info (prne_wkr_tick_info_t *ti) {
-	memset(ti, 0, sizeof(prne_wkr_tick_info_t));
+	memzero(ti, sizeof(prne_wkr_tick_info_t));
 }
 
 void prne_free_wkr_tick_info (prne_wkr_tick_info_t *ti) {

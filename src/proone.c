@@ -59,13 +59,26 @@ static void proc_fin_call (void) {
     }
 }
 
-static void init_workers (prne_wkr_sched_req_t *sched_req) {
+static void alloc_workers (prne_wkr_sched_req_t *sched_req) {
     prne_g.resolv = prne_alloc_resolv_worker(&resolv_wkr, sched_req, &prne_g.ssl.rnd);
     if (prne_g.resolv != NULL) {
         resolv_wkr.id = PRNE_RESOLV_WKR_ID;
         wkr_arr[0] = &resolv_wkr;
-        prne_llist_append(&wkr_pool, &resolv_wkr);
+        if (prne_llist_append(&wkr_pool, &resolv_wkr) == NULL) {
+            prne_g.resolv = NULL;
+        }
     }
+}
+
+static void free_workers (void) {
+    for (size_t i = 0; i < sizeof(wkr_arr) / sizeof(prne_worker_t*); i += 1) {
+        if (wkr_arr[i] == NULL) {
+            continue;
+        }
+        wkr_arr[i]->free(wkr_arr[i]->ctx);
+        wkr_arr[i] = NULL;
+    }
+    prne_g.resolv = NULL;
 }
 
 #ifdef PRNE_DEBUG
@@ -106,7 +119,7 @@ static int proone_main (void) {
     prne_init_wkr_sched_req(&sched_req);
     prne_init_wkr_tick_info(&tick_info);
     prne_init_llist(&wkr_pool);
-    init_workers(&sched_req);
+    alloc_workers(&sched_req);
     if (pipe(int_pipe) == 0) {
         prne_set_pipe_size(int_pipe[0], 1);
         prne_ok_or_die(fcntl(int_pipe[0], F_SETFL, O_NONBLOCK));
@@ -188,13 +201,8 @@ static int proone_main (void) {
     }
 
 END:
-    for (size_t i = 0; i < sizeof(wkr_arr) / sizeof(prne_worker_t*); i += 1) {
-        if (wkr_arr[i] == NULL) {
-            continue;
-        }
-        wkr_arr[i]->free(wkr_arr[i]->ctx);
-        wkr_arr[i] = NULL;
-    }
+    free_workers();
+
     prne_free_llist(&wkr_pool);
     prne_free_wkr_pollfd_slot(int_pfd);
     prne_free_wkr_tick_info(&tick_info);
@@ -396,7 +404,7 @@ int main (const int argc, char **args) {
 
     prne_g.host_cred_data = NULL;
     prne_g.host_cred_size = 0;
-    memset(&prne_g.god_start, 0, sizeof(struct timespec));
+    prne_ok_or_die(clock_gettime(CLOCK_MONOTONIC, &prne_g.god_start));
     prne_g.run_cnt = 0;
     prne_g.resolv = NULL;
     prne_g.god_exit_evt = -1;
@@ -460,8 +468,6 @@ int main (const int argc, char **args) {
 #endif
 
     setup_signal_actions();
-
-    prne_ok_or_die(clock_gettime(CLOCK_MONOTONIC, &prne_g.god_start));
 
     // main loop
     while (prne_g.caught_signal == 0) {

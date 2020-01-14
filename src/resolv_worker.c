@@ -1,7 +1,9 @@
 #include "resolv_worker.h"
 #include "util_rt.h"
+#include "util_ct.h"
 #include "llist.h"
 #include "imap.h"
+#include "iset.h"
 #include "protocol.h"
 #include "mbedtls.h"
 
@@ -411,7 +413,7 @@ static bool resolv_ensure_conn (prne_resolv_wkr_ctx_t ctx) {
 			else {
 				struct sockaddr_in6 addr;
 
-				memset(&addr, 0, sizeof(addr));
+				memzero(&addr, sizeof(addr));
 				prne_net_ep_tosin6(ctx->dnssrv_6.arr + ctx->dnssrv_6.ptr, &addr);
 				connect(ctx->dnss_fd[0], (const struct sockaddr*)&addr, sizeof(addr));
 			}
@@ -425,7 +427,7 @@ static bool resolv_ensure_conn (prne_resolv_wkr_ctx_t ctx) {
 			else {
 				struct sockaddr_in addr;
 
-				memset(&addr, 0, sizeof(addr));
+				memzero(&addr, sizeof(addr));
 				prne_net_ep_tosin4(ctx->dnssrv_4.arr + ctx->dnssrv_4.ptr, &addr);
 				connect(ctx->dnss_fd[1], (const struct sockaddr*)&addr, sizeof(addr));
 			}
@@ -554,11 +556,14 @@ static bool resolv_ensure_conn (prne_resolv_wkr_ctx_t ctx) {
 	return false;
 }
 
-static const uint8_t* resolv_index_labels (prne_imap_t *map, const uint8_t *start, const uint8_t *end, const uint8_t *p) {
+static const uint8_t* resolv_index_labels (prne_imap_t *map, const uint8_t *start, const uint8_t *end, const uint8_t *p, prne_resolv_qr_t *qr, int *err) {
 	uint16_t ptr;
 	const prne_imap_tuple_t *tpl;
 
+	assert(qr != NULL);
+	assert(err != NULL);
 	if (p >= end) {
+		*qr = PRNE_RESOLV_QR_PRO_ERR;
 		return NULL;
 	}
 
@@ -568,17 +573,24 @@ static const uint8_t* resolv_index_labels (prne_imap_t *map, const uint8_t *star
 			ptr = ((uint16_t)p[0] << 8) | (uint16_t)p[1];
 			tpl = prne_imap_lookup(map, ptr);
 			if (tpl == NULL) {
+				*qr = PRNE_RESOLV_QR_ERR;
+				*err = errno;
 				return NULL;
 			}
 			return p + 2;
 		}
 		else if (*p > 63) {
+			*qr = PRNE_RESOLV_QR_PRO_ERR;
 			return NULL;
 		}
 		else {
 			// index the label
 			ptr = (uint16_t)(p - start) | 0xC000;
-			prne_imap_insert(map, ptr, (void*)p);
+			if (prne_imap_insert(map, ptr, (void*)p) == NULL) {
+				*qr = PRNE_RESOLV_QR_ERR;
+				*err = errno;
+				return NULL;
+			}
 			p += *p + 1;
 		}
 	}
@@ -586,34 +598,42 @@ static const uint8_t* resolv_index_labels (prne_imap_t *map, const uint8_t *star
 	return p + 1;
 }
 
-static int resolv_mapped_qname_cmp (prne_imap_t *map, const uint8_t *p_msg, const char *name) {
+static int resolv_mapped_qname_cmp (prne_imap_t *map, const uint8_t *a, const uint8_t *b, prne_resolv_qr_t *qr) {
+	const uint8_t *p[2] = { a, b };
+	size_t i;
 	uint16_t ptr;
 	const prne_imap_tuple_t *tpl;
 	int ret;
 
+
+	assert(qr != NULL);
+
 	do {
-		if ((p_msg[0] & 0xC0) == 0xC0) {
-			// deref the pointer
-			ptr = ((uint16_t)p_msg[0] << 8) | (uint16_t)p_msg[1];
-			tpl = prne_imap_lookup(map, ptr);
-			if (tpl == NULL) {
-				ret = -1;
-				break;
+		// deref the pointers
+		for (i = 0; i < 2; i += 1) {
+			if ((p[i][0] & 0xC0) == 0xC0) {
+				ptr = ((uint16_t)p[i][0] << 8) | (uint16_t)p[i][1];
+				tpl = prne_imap_lookup(map, ptr);
+				if (tpl == NULL) {
+					ret = -1;
+					*qr = PRNE_RESOLV_QR_PRO_ERR;
+					break;
+				}
+				p[i] = (const uint8_t*)tpl->val;
 			}
-			p_msg = (const uint8_t*)tpl->val;
 		}
-		else {
-			if (*p_msg != *name) {
-				ret = 0;
-				break;
-			}
-			if (*p_msg == 0 || *name == 0) {
-				ret = 1;
-				break;
-			}
-			p_msg += 1;
-			name += 1;
+
+		if (*p[0] != *p[1]) {
+			ret = 0;
+			break;
 		}
+		if (*p[0] == 0 || *p[1] == 0) {
+			ret = 1;
+			break;
+		}
+		
+		p[0] += 1;
+		p[1] += 1;
 	} while (true);
 
 	return ret;
@@ -621,21 +641,24 @@ static int resolv_mapped_qname_cmp (prne_imap_t *map, const uint8_t *p_msg, cons
 
 static bool resolv_proc_dns_msg (prne_resolv_wkr_ctx_t ctx, const uint8_t *data, const size_t len, bool *err_flag) {
 	typedef struct {
-		const void *p;
-		size_t len;
+		const uint8_t *name;
+		const uint8_t *data;
 		uint32_t ttl;
-	} data_tuple_t;
-	data_tuple_t *tpl;
+		uint16_t rtype;
+		uint16_t rclass;
+		uint16_t data_len;
+	} rr_tuple_t;
+	rr_tuple_t *tpl;
 	prne_resolv_qr_t qr;
 	int err = 0, cmp_ret;
-	const char *qname;
-	uint_fast16_t qid, status, ancount, rtype, rclass, rdlen, ttype;
-	uint_fast32_t ttl;
+	uint_fast16_t qid, status, ancount, ttype;
 	prne_imap_t ptr_map; // val in msg(uint8_t):(uint8_t*)real addr
-	prne_llist_t data_list;
+	prne_llist_t rr_list, ret_list;
+	prne_iset_t alias_set;
+	prne_llist_entry_t *cur;
 	query_entry_t *qent;
-	const uint8_t *end = data + len, *p, *p_name;
-	size_t i;
+	const uint8_t *qname, *alias, *end = data + len, *p, *rname;
+	size_t i, j, loop_cnt;
 	bool ret;
 
 	if (len < 12) {
@@ -648,7 +671,9 @@ static bool resolv_proc_dns_msg (prne_resolv_wkr_ctx_t ctx, const uint8_t *data,
 	status = 0;
 	ttype = 0;
 	prne_init_imap(&ptr_map);
-	prne_init_llist(&data_list);
+	prne_init_llist(&rr_list);
+	prne_init_llist(&ret_list);
+	prne_init_iset(&alias_set);
 
 	// ID
 	{
@@ -712,11 +737,9 @@ static bool resolv_proc_dns_msg (prne_resolv_wkr_ctx_t ctx, const uint8_t *data,
 		*err_flag = true;
 		goto END;
 	}
-	qname = (const char *)data + 12;
-	p = resolv_index_labels(&ptr_map, data, end, (const uint8_t*)qname);
+	qname = data + 12;
+	p = resolv_index_labels(&ptr_map, data, end, (const uint8_t*)qname, &qr, &err);
 	if (p == NULL) {
-		qr = PRNE_RESOLV_QR_PRO_ERR;
-		*err_flag = true;
 		goto END;
 	}
 	if ((size_t)(p - data + 4) > len) {
@@ -724,19 +747,13 @@ static bool resolv_proc_dns_msg (prne_resolv_wkr_ctx_t ctx, const uint8_t *data,
 		*err_flag = true;
 		goto END;
 	}
-	if (qent != NULL && strcmp(qname, qent->qname) != 0) {
+	if (qent != NULL && strcmp((const char*)qname, qent->qname) != 0) {
 		qr = PRNE_RESOLV_QR_PRO_ERR;
 		*err_flag = true;
 		goto END;
 	}
-	rtype = ((uint_fast16_t)p[0] << 8) | (uint_fast16_t)p[1];
-	rclass = ((uint_fast16_t)p[2] << 8) | (uint_fast16_t)p[3];
-	if (rclass != 1) {
-		qr = PRNE_RESOLV_QR_PRO_ERR;
-		*err_flag = true;
-		goto END;
-	}
-	if (ttype != 0 && ttype != rtype) {
+	if ((ttype != 0 && ttype != (((uint_fast16_t)p[0] << 8) | (uint_fast16_t)p[1])) ||
+		(((uint_fast16_t)p[2] << 8) | (uint_fast16_t)p[3]) != 1) {
 		qr = PRNE_RESOLV_QR_PRO_ERR;
 		*err_flag = true;
 		goto END;
@@ -745,80 +762,146 @@ static bool resolv_proc_dns_msg (prne_resolv_wkr_ctx_t ctx, const uint8_t *data,
 	p += 4;
 	// decode answer RRs
 	for (i = 0; i < ancount; i += 1) {
-		p_name = p;
-		p = resolv_index_labels(&ptr_map, data, end, p);
-		if (p == NULL || p >= end || end - p < 10) {
-			qr = PRNE_RESOLV_QR_PRO_ERR;
-			*err_flag = true;
+		tpl = prne_malloc(sizeof(rr_tuple_t), 1);
+		if (tpl == NULL)  {
+			err = errno;
+			qr = PRNE_RESOLV_QR_ERR;
 			goto END;
 		}
-		rtype = ((uint_fast16_t)p[0] << 8) | (uint_fast16_t)p[1];
-		rclass = ((uint_fast16_t)p[2] << 8) | (uint_fast16_t)p[3];
-		ttl = ((uint_fast32_t)p[4]) | ((uint_fast32_t)p[5]) | ((uint_fast32_t)p[6]) | ((uint_fast32_t)p[7]);
-		rdlen = ((uint_fast16_t)p[8] << 8) | (uint_fast16_t)p[9];
+		if (prne_llist_append(&rr_list, tpl) == NULL) {
+			prne_free(tpl);
+			err = errno;
+			qr = PRNE_RESOLV_QR_ERR;
+			goto END;
+		}
 
-		cmp_ret = resolv_mapped_qname_cmp(&ptr_map, p_name, qname);
-		if (cmp_ret < 0) {
+		tpl->name = p;
+		p = resolv_index_labels(&ptr_map, data, end, p, &qr, &err);
+		if (p == NULL) {
+			goto END;
+		}
+		if (p >= end || end - p < 10) {
 			qr = PRNE_RESOLV_QR_PRO_ERR;
 			*err_flag = true;
 			goto END;
 		}
-		if (cmp_ret && ttype != 0 && ttype == rtype && rclass == 1) {
-			if ((qent->type == PRNE_RESOLV_QT_A && rdlen != 4) ||
-				(qent->type == PRNE_RESOLV_QT_AAAA && rdlen != 16) ||
-				(qent->type == PRNE_RESOLV_QT_TXT && rdlen == 0)) {
-				qr = PRNE_RESOLV_QR_PRO_ERR;
-				*err_flag = true;
+		tpl->rtype = ((uint_fast16_t)p[0] << 8) | (uint_fast16_t)p[1];
+		tpl->rclass = ((uint_fast16_t)p[2] << 8) | (uint_fast16_t)p[3];
+		tpl->ttl = ((uint_fast32_t)p[4]) | ((uint_fast32_t)p[5]) | ((uint_fast32_t)p[6]) | ((uint_fast32_t)p[7]);
+		tpl->data_len = ((uint_fast16_t)p[8] << 8) | (uint_fast16_t)p[9];
+		rname = tpl->data = p + 10;
+
+		switch (tpl->rtype) {
+		case PRNE_RESOLV_RTYPE_SOA:
+			loop_cnt = 2;
+			break;
+		case PRNE_RESOLV_RTYPE_CNAME:
+		case PRNE_RESOLV_RTYPE_MX: 
+		case PRNE_RESOLV_RTYPE_NS:
+		case PRNE_RESOLV_RTYPE_PTR:
+			loop_cnt = 1;
+			break;
+		default:
+			loop_cnt = 0;
+		}
+		for (j = 0; j < loop_cnt; j += 1) {
+			rname = resolv_index_labels(&ptr_map, data, tpl->data + tpl->data_len, rname, &qr, &err);
+			if (rname == NULL) {
 				goto END;
 			}
+		}
 
-			tpl = (data_tuple_t*)prne_malloc(sizeof(data_tuple_t), 1);
-			if (tpl == NULL || prne_llist_append(&data_list, tpl) == NULL) {
-				prne_free(tpl);
+		p += 10 + tpl->data_len;
+	}
+
+	// resolve cname
+	alias = qname;
+	if (!prne_iset_insert(&alias_set, (prne_iset_val_t)alias)) {
+		qr = PRNE_RESOLV_QR_ERR;
+		err = errno;
+		goto END;
+	}
+QNAME_START:
+	cur = rr_list.head;
+	while (cur != NULL) {
+		tpl = (rr_tuple_t*)cur->element;
+
+		if (tpl->rtype == PRNE_RESOLV_RTYPE_CNAME) {
+			cmp_ret = resolv_mapped_qname_cmp(&ptr_map, tpl->name, alias, &qr);
+			if (cmp_ret < 0) {
+				goto END;
+			}
+			if (cmp_ret) {
+				if (prne_iset_lookup(&alias_set, (prne_iset_val_t)tpl->data)) {
+					qr = PRNE_RESOLV_QR_PRO_ERR;
+					goto END;
+				}
+				if (!prne_iset_insert(&alias_set, (prne_iset_val_t)tpl->data)) {
+					qr = PRNE_RESOLV_QR_ERR;
+					err = errno;
+					goto END;
+				}
+				alias = tpl->data;
+				goto QNAME_START;
+			}
+		}
+
+		cur = cur->next;
+	}
+
+	// index the selected(alias) resources
+	cur = rr_list.head;
+	while (cur != NULL) {
+		tpl = (rr_tuple_t*)cur->element;
+
+		cmp_ret = resolv_mapped_qname_cmp(&ptr_map, tpl->name, alias, &qr);
+		if (cmp_ret < 0) {
+			goto END;
+		}
+		if (cmp_ret && ttype == tpl->rtype) {
+			if (prne_llist_append(&ret_list, tpl) == NULL) {
 				qr = PRNE_RESOLV_QR_ERR;
 				err = errno;
 				goto END;
 			}
-			tpl->p = p + 10;
-			tpl->len = rdlen;		
-			tpl->ttl = ttl;
 		}
-		p += 10 + rdlen;
+
+		cur = cur->next;
 	}
 
-	if (data_list.size > 0 && qent != NULL) {
+	// return data
+	if (ret_list.size > 0 && qent != NULL) {
 		prne_llist_entry_t *cur;
-		data_tuple_t *tpl = NULL;
+		rr_tuple_t *tpl;
 
-		qent->fut.rr = (prne_resolv_rr_t*)prne_malloc(sizeof(prne_resolv_rr_t), data_list.size);
+		qent->fut.rr = (prne_resolv_rr_t*)prne_malloc(sizeof(prne_resolv_rr_t), ret_list.size);
 		if (qent->fut.rr == NULL) {	
 			qr = PRNE_RESOLV_QR_ERR;
 			err = errno;
 			goto END;
 		}
-		qent->fut.rr_cnt = data_list.size;
+		qent->fut.rr_cnt = ret_list.size;
 		for (i = 0; i < qent->fut.rr_cnt; i += 1) {
 			prne_init_resolv_rr(qent->fut.rr + i);
 		}
 
 		i = 0;
-		cur = data_list.head;
+		cur = ret_list.head;
 		while (cur != NULL) {
-			tpl = (data_tuple_t*)cur->element;
-			qent->fut.rr[i].rr_class = 1;
-			qent->fut.rr[i].rr_type = ttype;
+			tpl = (rr_tuple_t*)cur->element;
+
+			qent->fut.rr[i].rr_class = tpl->rclass;
+			qent->fut.rr[i].rr_type = tpl->rtype;
 			qent->fut.rr[i].rr_ttl = tpl->ttl;
-			if (tpl->len > 0) {
-				qent->fut.rr[i].name = resolv_qname_tostr(qent->qname);
-				assert(qent->fut.rr[i].name != NULL);
-				qent->fut.rr[i].rd_data = (uint8_t*)prne_malloc(1, tpl->len);
-				if (qent->fut.rr[i].rd_data == NULL) {
+			if (tpl->data_len > 0) {
+				if ((qent->fut.rr[i].name = resolv_qname_tostr(qent->qname)) == NULL ||
+					(qent->fut.rr[i].rd_data = (uint8_t*)prne_malloc(1, tpl->data_len)) == NULL) {
 					qr = PRNE_RESOLV_QR_ERR;
 					err = errno;
 					goto END;
 				}
-				qent->fut.rr[i].rd_len = tpl->len;
-				memcpy(qent->fut.rr[i].rd_data, tpl->p, tpl->len);
+				qent->fut.rr[i].rd_len = tpl->data_len;
+				memcpy(qent->fut.rr[i].rd_data, tpl->data, tpl->data_len);
 			}
 			else {
 				qent->fut.rr[i].rd_data = NULL;
@@ -833,17 +916,15 @@ static bool resolv_proc_dns_msg (prne_resolv_wkr_ctx_t ctx, const uint8_t *data,
 	qr = PRNE_RESOLV_QR_OK;
 	
 END:
-	if (data_list.size > 0) {
-		prne_llist_entry_t *cur;
-
-		cur = data_list.head;
-		while (cur != NULL) {
-			prne_free(cur->element);
-			cur = cur->next;
-		}
+	cur = rr_list.head;
+	while (cur != NULL) {
+		prne_free(cur->element);
+		cur = cur->next;
 	}
-	prne_free_llist(&data_list);
+	prne_free_llist(&rr_list);
+	prne_free_llist(&ret_list);
 	prne_free_imap(&ptr_map);
+	prne_free_iset(&alias_set);
 	if (qent != NULL) {
 		if (qr != PRNE_RESOLV_QR_OK) {
 			for (i = 0; i < qent->fut.rr_cnt; i += 1) {

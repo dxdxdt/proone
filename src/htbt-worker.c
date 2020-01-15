@@ -29,72 +29,72 @@ struct hb_w_ctx {
 
 #if 0
 static int create_ny_bin_shm (prne_rnd_engine_t *rnd) {
-    static const size_t str_len = sizeof(prne_s_g->ny_bin_shm_name);
+	static const size_t str_len = sizeof(prne_s_g->ny_bin_shm_name);
 
-    prne_s_g->ny_bin_shm_name[0] = '/';
-    prne_s_g->ny_bin_shm_name[str_len - 1] = 0;
-    prne_rnd_anum_str(rnd, prne_s_g->ny_bin_shm_name + 1, str_len - 2);
-    
-    return shm_open(prne_s_g->ny_bin_shm_name, O_RDWR | O_CREAT | O_TRUNC, 0700);
+	prne_s_g->ny_bin_shm_name[0] = '/';
+	prne_s_g->ny_bin_shm_name[str_len - 1] = 0;
+	prne_rnd_anum_str(rnd, prne_s_g->ny_bin_shm_name + 1, str_len - 2);
+	
+	return shm_open(prne_s_g->ny_bin_shm_name, O_RDWR | O_CREAT | O_TRUNC, 0700);
 }
 
 static void exec_ny_bin (void) {
-    // Just die on error
-    static const size_t proc_fd_path_size = 14 + 11 + 1;
-    int fd;
-    uint8_t *data;
-    size_t i;
-    const char **args;
-    struct stat st;
-    char *proc_fd_path, *real_shm_path;
-    prne_htbt_cmd_t cmd;
+	// Just die on error
+	static const size_t proc_fd_path_size = 14 + 11 + 1;
+	int fd;
+	uint8_t *data;
+	size_t i;
+	const char **args;
+	struct stat st;
+	char *proc_fd_path, *real_shm_path;
+	prne_htbt_cmd_t cmd;
 
-    prne_htbt_init_cmd(&cmd);
+	prne_htbt_init_cmd(&cmd);
 
-    fd = shm_open(prne_s_g->ny_bin_shm_name, O_RDONLY, 0);
-    if (fd < 0) {
-        abort();
-    }
-    if (fstat(fd, &st) < 0 || st.st_size <= 0 || (size_t)st.st_size < prne_s_g->ny_bin_size) {
-        abort();
-    }
-    data = (uint8_t*)mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_SHARED, fd, 0);
+	fd = shm_open(prne_s_g->ny_bin_shm_name, O_RDONLY, 0);
+	if (fd < 0) {
+		abort();
+	}
+	if (fstat(fd, &st) < 0 || st.st_size <= 0 || (size_t)st.st_size < prne_s_g->ny_bin_size) {
+		abort();
+	}
+	data = (uint8_t*)mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_SHARED, fd, 0);
 
-    if (prne_htbt_deserialise_cmd(data + prne_s_g->ny_bin_size, (size_t)st.st_size - prne_s_g->ny_bin_size, NULL, &cmd) != PRNE_HTBT_DESER_RET_OK) {
-        abort();
-    }
+	if (prne_htbt_deserialise_cmd(data + prne_s_g->ny_bin_size, (size_t)st.st_size - prne_s_g->ny_bin_size, NULL, &cmd) != PRNE_HTBT_DESER_RET_OK) {
+		abort();
+	}
 
-    munmap(data, (size_t)st.st_size);
-    data = NULL;
-    ftruncate(fd, prne_s_g->ny_bin_size);
+	munmap(data, (size_t)st.st_size);
+	data = NULL;
+	ftruncate(fd, prne_s_g->ny_bin_size);
 
-    args = prne_malloc(sizeof(const char*), (size_t)cmd.argc + 2);
-    for(i = 1; i <= cmd.argc; i += 1) {
-        args[i] = cmd.mem + cmd.offset_arr[i];
-    }
-    args[i] = NULL;
+	args = prne_malloc(sizeof(const char*), (size_t)cmd.argc + 2);
+	for(i = 1; i <= cmd.argc; i += 1) {
+		args[i] = cmd.mem + cmd.offset_arr[i];
+	}
+	args[i] = NULL;
 
-    proc_fd_path = prne_malloc(1, proc_fd_path_size);
-    snprintf(proc_fd_path, proc_fd_path_size, "/proc/self/fd/%d", fd);
-    if (lstat(proc_fd_path, &st) < 0) {
-        abort();
-    }
+	proc_fd_path = prne_malloc(1, proc_fd_path_size);
+	snprintf(proc_fd_path, proc_fd_path_size, "/proc/self/fd/%d", fd);
+	if (lstat(proc_fd_path, &st) < 0) {
+		abort();
+	}
 
-    real_shm_path = prne_malloc(1, st.st_size + 1);
-    if (readlink(proc_fd_path, real_shm_path, st.st_size) != st.st_size) {
-        abort();
-    }
-    prne_free(proc_fd_path);
-    proc_fd_path = NULL;
-    args[0] = real_shm_path;
-    
-    fchmod(fd, 0777);
-    prne_close(fd);
-    fd = -1;
+	real_shm_path = prne_malloc(1, st.st_size + 1);
+	if (readlink(proc_fd_path, real_shm_path, st.st_size) != st.st_size) {
+		abort();
+	}
+	prne_free(proc_fd_path);
+	proc_fd_path = NULL;
+	args[0] = real_shm_path;
+	
+	fchmod(fd, 0777);
+	prne_close(fd);
+	fd = -1;
 
-    if (execv(real_shm_path, (char *const*)args) < 0) {
-        abort();
-    }
+	if (execv(real_shm_path, (char *const*)args) < 0) {
+		abort();
+	}
 }
 #endif
 

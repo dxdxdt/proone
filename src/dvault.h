@@ -10,26 +10,26 @@
 typedef struct prne_dvault_mask_result prne_dvault_mask_result_t;
 
 typedef enum {
-    PRNE_DATA_TYPE_NONE = -1,
+	PRNE_DATA_TYPE_NONE = -1,
 
-    PRNE_DATA_TYPE_CSTR,
-    PRNE_DATA_TYPE_BIN,
-    
-    NB_PRNE_DATA_TYPE
+	PRNE_DATA_TYPE_CSTR,
+	PRNE_DATA_TYPE_BIN,
+	
+	NB_PRNE_DATA_TYPE
 } prne_data_type_t;
 PRNE_LIMIT_ENUM(prne_data_type_t, NB_PRNE_DATA_TYPE, 0xFF);
 
 typedef enum {
-    PRNE_DVAULT_MASK_OK,
-    PRNE_DVAULT_MASK_MEM_ERR,
-    PRNE_DVAULT_MASK_TOO_LARGE,
-    PRNE_DVAULT_MASK_INVALID_TYPE
+	PRNE_DVAULT_MASK_OK,
+	PRNE_DVAULT_MASK_MEM_ERR,
+	PRNE_DVAULT_MASK_TOO_LARGE,
+	PRNE_DVAULT_MASK_INVALID_TYPE
 } prne_dvault_mask_result_code_t;
 
 struct prne_dvault_mask_result {
-    size_t str_len;
-    char *str;
-    prne_dvault_mask_result_code_t result;
+	size_t str_len;
+	char *str;
+	prne_dvault_mask_result_code_t result;
 };
 
 

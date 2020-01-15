@@ -11,29 +11,29 @@ AC_PROG_RANLIB
 
 AC_ARG_ENABLE(debug,
 AS_HELP_STRING([--enable-debug],
-               [build with debug flags, default: no]),
+			   [build with debug flags, default: no]),
 [case "${enableval}" in
-             yes) debug=true ;;
-             no)  debug=false ;;
-             *)   AC_MSG_ERROR([bad value ${enableval} for --enable-debug]) ;;
+			 yes) debug=true ;;
+			 no)  debug=false ;;
+			 *)	  AC_MSG_ERROR([bad value ${enableval} for --enable-debug]) ;;
 esac],
 [debug=false])
 AM_CONDITIONAL(DEBUG, test x"$debug" = x"true")
 
 AC_ARG_ENABLE(tests,
 AS_HELP_STRING([--enable-tests],
-               [build tests, default: no]),
+			   [build tests, default: no]),
 [case "${enableval}" in
-             yes) tests=true ;;
-             no)  tests=false ;;
-             *)   AC_MSG_ERROR([bad value ${enableval} for --enable-tests]) ;;
+			 yes) tests=true ;;
+			 no)  tests=false ;;
+			 *)	  AC_MSG_ERROR([bad value ${enableval} for --enable-tests]) ;;
 esac],
 [tests=false])
 AM_CONDITIONAL(TESTS, test x"$tests" = x"true")
 AM_COND_IF([TESTS], [
-    AC_CHECK_HEADERS([gtest/gtest.h],
-    [],
-    [AC_MSG_ERROR([gtest/gtest.h not found.])])
+	AC_CHECK_HEADERS([gtest/gtest.h],
+	[],
+	[AC_MSG_ERROR([gtest/gtest.h not found.])])
 ])
 
 PKG_CHECK_MODULES_STATIC([DEP_PKGCFG], [zlib])

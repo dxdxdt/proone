@@ -9,34 +9,34 @@ typedef struct prne_bin_archive prne_bin_archive_t;
 typedef struct prne_unpack_bin_archive_result prne_unpack_bin_archive_result_t;
 
 struct prne_bin_archive {
-    size_t data_size;
-    uint8_t *data;
-    size_t nb_binaries;
-    prne_arch_t *arch_arr;
-    size_t *offset_arr;
-    size_t *size_arr;
+	size_t data_size;
+	uint8_t *data;
+	size_t nb_binaries;
+	prne_arch_t *arch_arr;
+	size_t *offset_arr;
+	size_t *size_arr;
 };
 
 typedef enum {
-    PRNE_UNPACK_BIN_ARCHIVE_OK,
-    PRNE_UNPACK_BIN_ARCHIVE_CRYPTO_ERR,
-    PRNE_UNPACK_BIN_ARCHIVE_Z_ERR,
-    PRNE_UNPACK_BIN_ARCHIVE_ERRNO,
-    PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR,
-    PRNE_UNPACK_BIN_ARCHIVE_FMT_ERR
+	PRNE_UNPACK_BIN_ARCHIVE_OK,
+	PRNE_UNPACK_BIN_ARCHIVE_CRYPTO_ERR,
+	PRNE_UNPACK_BIN_ARCHIVE_Z_ERR,
+	PRNE_UNPACK_BIN_ARCHIVE_ERRNO,
+	PRNE_UNPACK_BIN_ARCHIVE_MEM_ERR,
+	PRNE_UNPACK_BIN_ARCHIVE_FMT_ERR
 } prne_unpack_bin_archive_result_code_t;
 
 struct prne_unpack_bin_archive_result {
-    size_t data_size;
-    uint8_t *data;
-    prne_unpack_bin_archive_result_code_t result;
-    long err;
+	size_t data_size;
+	uint8_t *data;
+	prne_unpack_bin_archive_result_code_t result;
+	long err;
 };
 
 typedef enum {
-    PRNE_INDEX_BIN_ARCHIVE_OK,
-    PRNE_INDEX_BIN_ARCHIVE_FMT_ERR,
-    PRNE_INDEX_BIN_ARCHIVE_MEM_ERR
+	PRNE_INDEX_BIN_ARCHIVE_OK,
+	PRNE_INDEX_BIN_ARCHIVE_FMT_ERR,
+	PRNE_INDEX_BIN_ARCHIVE_MEM_ERR
 } prne_index_bin_archive_result_code_t;
 
 

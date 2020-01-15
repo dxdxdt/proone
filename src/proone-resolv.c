@@ -297,12 +297,12 @@ static void install_signal_handlers (void) {
 	struct sigaction sa;
 
 	if (pipe(int_pipe) == 0) {
-        prne_set_pipe_size(int_pipe[0], 1);
-        prne_ok_or_die(fcntl(int_pipe[0], F_SETFL, O_NONBLOCK));
-        prne_ok_or_die(fcntl(int_pipe[1], F_SETFL, O_NONBLOCK));
-        prne_ok_or_die(fcntl(int_pipe[0], F_SETFD, FD_CLOEXEC));
-        prne_ok_or_die(fcntl(int_pipe[1], F_SETFD, FD_CLOEXEC));
-    }
+		prne_set_pipe_size(int_pipe[0], 1);
+		prne_ok_or_die(fcntl(int_pipe[0], F_SETFL, O_NONBLOCK));
+		prne_ok_or_die(fcntl(int_pipe[1], F_SETFL, O_NONBLOCK));
+		prne_ok_or_die(fcntl(int_pipe[0], F_SETFD, FD_CLOEXEC));
+		prne_ok_or_die(fcntl(int_pipe[1], F_SETFD, FD_CLOEXEC));
+	}
 
 	memzero(&sa, sizeof(struct sigaction));
 	sa.sa_flags = SA_RESETHAND;

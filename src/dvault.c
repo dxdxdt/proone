@@ -106,6 +106,7 @@ void prne_free_dvault_mask_result (prne_dvault_mask_result_t *r) {
 prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const uint8_t salt, const size_t data_size, const uint8_t *data) {
 	size_t i;
 	prne_dvault_mask_result_t ret;
+	int f_ret;
 
 	prne_init_dvault_mask_result(&ret);
 
@@ -126,14 +127,15 @@ prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const u
 		return ret;
 	}
 
-	sprintf(ret.str, "\\x%02X\\x%02X\\x%02X\\x%02X",
+	f_ret = sprintf(ret.str, "\\x%02X\\x%02X\\x%02X\\x%02X",
 		type,
 		salt,
 		(int)((0xFF00 & (uint_fast16_t)data_size) >> 8),
 		(int)((0x00FF & (uint_fast16_t)data_size) >> 0));
-
+	assert(f_ret > 0);
 	for (i = 0; i < data_size; i += 1) {
-		sprintf(ret.str + 4 * 4 + 4 * i, "\\x%02X", data[i] ^ PRNE_DVAULT_MASK[(i + (size_t)salt) % 256]);
+		f_ret = sprintf(ret.str + 4 * 4 + 4 * i, "\\x%02X", data[i] ^ PRNE_DVAULT_MASK[(i + (size_t)salt) % 256]);
+		assert(f_ret > 0);
 	}
 
 	return ret;

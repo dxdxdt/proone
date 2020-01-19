@@ -1,10 +1,23 @@
 #pragma once
+#include "pack.h"
+
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 
 #include <mbedtls/ctr_drbg.h>
+
+
+struct prne_stdin_base64_rf_ctx;
+typedef struct prne_stdin_base64_rf_ctx prne_stdin_base64_rf_ctx_t;
+
+struct prne_stdin_base64_rf_ctx {
+	size_t line_len;
+	size_t out_len;
+	char line_buf[78];
+	uint8_t out_buf[58];
+};
 
 
 #if 0
@@ -31,6 +44,7 @@ void *prne_malloc (const size_t se, const size_t cnt);
 void *prne_realloc (void *ptr, const size_t se, const size_t cnt);
 void *prne_calloc (const size_t se, const size_t cnt);
 void prne_free (void *ptr);
+size_t prne_getpagesize (void);
 
 void prne_rnd_anum_str (mbedtls_ctr_drbg_context *rnd, char *str, const size_t len);
 char *prne_strnchr (const char *p, const char c, const size_t n);
@@ -44,5 +58,8 @@ struct timespec prne_max_timespec (const struct timespec a, const struct timespe
 
 char *prne_enc_base64_mem (const uint8_t *data, const size_t size);
 bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data, size_t *size);
+void prne_init_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx);
+void prne_free_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx);
+prne_pack_ret_t prne_stdin_base64_rf (void *ctx, const size_t req, uint8_t *out, size_t *out_len);
 
 bool prne_set_pipe_size (const int fd, const int size);

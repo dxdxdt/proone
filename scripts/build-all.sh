@@ -78,7 +78,7 @@ done
 
 # pack
 echo "bwEYAZaX8Zu9X1C6024h" > "$PROONE_BIN_ARCHIVE" # "test":"password"
-"$PROONE_PACKER" "$PROONE_ORG_BIN_PREFIX."* | pigz -z - | base64 >> "$PROONE_BIN_ARCHIVE"
+"$PROONE_PACKER" "$PROONE_ORG_BIN_PREFIX."* | base64 >> "$PROONE_BIN_ARCHIVE"
 if [ $? -ne 0 ]; then
 	exit $?
 fi

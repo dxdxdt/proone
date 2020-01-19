@@ -26,7 +26,6 @@ struct prne_global {
 	bool bin_ready;
 	bool is_child;
 	
-	prne_unpack_bin_archive_result_t bin_pack;
 	prne_bin_archive_t bin_archive;
 
 	struct {

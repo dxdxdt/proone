@@ -41,7 +41,7 @@ for arch in ${ARCH_ARR[@]}; do
 	fi
 done
 
-"$PACKER" "$BIN_PACK_DIR/$BIN_PREFIX."* | pigz -z - | base64 > "$TEST_DIR/$BIN_ARCHIVE_PREFIX"
+"$PACKER" "$BIN_PACK_DIR/$BIN_PREFIX."* | base64 > "$TEST_DIR/$BIN_ARCHIVE_PREFIX"
 if [ $? -ne 0 ]; then
 	exit 2;
 fi

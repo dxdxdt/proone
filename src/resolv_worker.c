@@ -1190,6 +1190,10 @@ static void resolv_proc_expired (prne_resolv_wkr_ctx_t ctx) {
 static void resolv_wkr_free (void *p) {
 	DECL_CTX_PTR(p);
 
+	if (p == NULL) {
+		return;
+	}
+
 	prne_free_wkr_timeout_slot(ctx->sckop_to_slot);
 	prne_free_wkr_timeout_slot(ctx->err_to_slot);
 	prne_free_wkr_pollfd_slot(ctx->evt_pfd_slot);
@@ -1202,6 +1206,9 @@ static void resolv_wkr_free (void *p) {
 	mbedtls_ssl_config_free(&ctx->ssl.conf);
 	mbedtls_ssl_free(&ctx->ssl.ctx);
 
+	prne_close(ctx->act_dns_fd);
+	prne_close(ctx->dnss_fd[0]);
+	prne_close(ctx->dnss_fd[1]);
 	prne_close(ctx->evtfd[0]);
 	prne_close(ctx->evtfd[1]);
 
@@ -1297,6 +1304,7 @@ prne_resolv_wkr_ctx_t prne_alloc_resolv_worker (prne_worker_t *w, prne_wkr_sched
 	ctx->sck_pfd_slot[1] = prne_alloc_wkr_pollfd_slot(wsr);
 	ctx->act_dns_fd = -1;
 	ctx->ctx_state = RESOLV_CTX_STATE_NONE;
+	ctx->wkr_state = RESOLV_WKR_STATE_OK;
 	ctx->ssl.ctr_drbg = ctr_drbg;
 	prne_init_llist(&ctx->qlist);
 	prne_init_imap(&ctx->qid_map);

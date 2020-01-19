@@ -1,5 +1,6 @@
 #include "util_rt.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -81,6 +82,17 @@ void *prne_calloc (const size_t se, const size_t cnt) {
 
 void prne_free (void *ptr) {
 	free(ptr);
+}
+
+size_t prne_getpagesize (void) {
+	long ret;
+
+	ret = sysconf(_SC_PAGESIZE);
+	if (ret > 0) {
+		return ret;
+	}
+
+	return 4096;
 }
 
 void prne_rnd_anum_str (mbedtls_ctr_drbg_context *rnd, char *str, const size_t len) {
@@ -225,6 +237,57 @@ bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data,
 	*data = ret;
 	*size = ret_size;
 	return true;
+}
+
+void prne_init_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx) {
+	ctx->line_len = 0;
+	ctx->out_len = 0;
+}
+
+void prne_free_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx) {
+	ctx->line_len = 0;
+	ctx->out_len = 0;
+}
+
+prne_pack_ret_t prne_stdin_base64_rf (void *in_ctx, const size_t req, uint8_t *out, size_t *out_len) {
+	prne_stdin_base64_rf_ctx_t *ctx = (prne_stdin_base64_rf_ctx_t*)in_ctx;
+	size_t rem = req, have;
+	prne_pack_ret_t ret;
+
+	ret.rc = PRNE_PACK_RC_OK;
+	ret.err = 0;
+	*out_len = 0;
+
+	while (true) {
+		have = prne_op_min(rem, ctx->out_len);
+		memcpy(out, ctx->out_buf, have);
+		memmove(ctx->out_buf, ctx->out_buf + have, ctx->out_len - have);
+		rem -= have;
+		ctx->out_len -= have;
+		out += have;
+		*out_len += have;
+
+		if (rem == 0) {
+			break;
+		}
+
+		if (fgets(ctx->line_buf, sizeof(ctx->line_buf), stdin) == NULL) {
+			if (feof(stdin)) {
+				break;
+			}
+			ret.rc = PRNE_PACK_RC_ERRNO;
+			ret.err = errno;
+			break;
+		}
+		ctx->line_len = prne_str_shift_spaces(ctx->line_buf, strlen(ctx->line_buf));
+
+		if ((ret.err = mbedtls_base64_decode(ctx->out_buf, sizeof(ctx->out_buf), &ctx->out_len, (unsigned char*)ctx->line_buf, ctx->line_len)) != 0) {
+			ret.rc = PRNE_PACK_RC_MBEDTLS_ERR;
+			break;
+		}
+	}
+
+	return ret;
 }
 
 bool prne_set_pipe_size (const int fd, const int size) {

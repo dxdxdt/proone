@@ -30,16 +30,18 @@ AS_HELP_STRING([--enable-tests],
 esac],
 [tests=false])
 AM_CONDITIONAL(TESTS, test x"$tests" = x"true")
-AM_COND_IF([TESTS], [
-	AC_CHECK_HEADERS([gtest/gtest.h],
-	[],
-	[AC_MSG_ERROR([gtest/gtest.h not found.])])
-])
+# AM_COND_IF([TESTS], [
+# 	AC_CHECK_HEADERS([gtest/gtest.h],
+# 	[],
+# 	[AC_MSG_ERROR([gtest/gtest.h not found.])])
+# ])
 
 PKG_CHECK_MODULES_STATIC([DEP_PKGCFG], [zlib])
 AC_CHECK_LIB([mbedcrypto], [mbedtls_cipher_setup], [], [AC_MSG_ERROR([mbedtls not found])])
 AC_CHECK_LIB([mbedtls], [mbedtls_ssl_init], [], [AC_MSG_ERROR([mbedtls not found])])
 AC_CHECK_LIB([mbedx509], [mbedtls_x509_crt_parse], [], [AC_MSG_ERROR([mbedtls not found])])
+
+AC_DEFINE_UNQUOTED([PRNE_BUILD_ENTROPY], ["`uuidgen -r`"])
 
 AC_CONFIG_FILES([Makefile src/Makefile])
 AC_OUTPUT

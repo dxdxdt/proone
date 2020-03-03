@@ -72,10 +72,10 @@ const char *prne_data_type_tostr (const prne_data_type_t t) {
 }
 
 prne_data_type_t prne_data_type_fstr (const char *str) {
-	if (strcmp(str, prne_data_type_tostr(PRNE_DATA_TYPE_CSTR)) == 0) {
+	if (prne_nstreq(str, prne_data_type_tostr(PRNE_DATA_TYPE_CSTR))) {
 		return PRNE_DATA_TYPE_CSTR;
 	}
-	if (strcmp(str, prne_data_type_tostr(PRNE_DATA_TYPE_BIN)) == 0) {
+	if (prne_nstreq(str, prne_data_type_tostr(PRNE_DATA_TYPE_BIN))) {
 		return PRNE_DATA_TYPE_BIN;
 	}
 	

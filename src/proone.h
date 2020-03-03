@@ -15,13 +15,15 @@
 struct prne_global {
 	uint8_t *host_cred_data;
 	size_t host_cred_size;
-	struct timespec god_start;
+	struct timespec parent_start;
+	struct timespec child_start;
 	uint_fast64_t run_cnt;
+	uint8_t boot_id[16];
+	uint8_t instance_id[16];
 	prne_resolv_wkr_ctx_t resolv;
-	int god_exit_evt;
 	int caught_signal;
-	pid_t god_pid;
-	pid_t proone_pid;
+	pid_t parent_pid;
+	pid_t child_pid;
 	int lock_shm_fd;
 	bool bin_ready;
 	bool is_child;
@@ -53,6 +55,8 @@ struct prne_shared_global {
 	uint_fast64_t bne_cnt;
 	// Number of successful infections.
 	uint_fast64_t infect_cnt;
+	// null-terminated name of new binary
+	char ny_bin_name[20];
 };
 
 static const intptr_t PRNE_RESOLV_WKR_ID = 0;

@@ -8,7 +8,7 @@ TARGET_FLAGS += -Os
 DEV_FLAGS += -Os
 endif
 
-AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -Wno-unused-parameter -D_GNU_SOURCE -DPRNE_BUILD_ENTROPY=\"`uuidgen -r`\" $(DEV_FLAGS)
+AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -Wno-unused-parameter -D_GNU_SOURCE $(DEV_FLAGS)
 
 noinst_LIBRARIES = libproone.a
 bin_PROGRAMS =\
@@ -21,6 +21,7 @@ bin_PROGRAMS =\
 	proone-resolv
 
 libproone_a_SOURCES =\
+	config.c\
 	protocol.c\
 	pack.c\
 	dvault.c\
@@ -63,4 +64,9 @@ proone_resolv_LDFLAGS = $(LIBS) $(DEP_PKGCFG_LIBS)
 proone_resolv_SOURCES = proone-resolv.c
 
 if TESTS
+bin_PROGRAMS += proone-test_proto
+
+proone_test_proto_LDADD = libproone.a
+proone_test_proto_LDFLAGS = $(LIBS) $(DEP_PKGCFG_LIBS)
+proone_test_proto_SOURCES = proone-test_proto.c
 endif

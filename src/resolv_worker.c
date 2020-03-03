@@ -120,7 +120,7 @@ static void resolv_free_q_ent (query_entry_t *q_ent) {
 }
 
 static bool resolv_gen_qname (const char *name, char **out, size_t *out_size) {
-	size_t len = strlen(name);
+	size_t len = prne_nstrlen(name);
 	char *ptr = (char*)name, *delim;
 	char *end = ptr + len;
 	size_t label_size;
@@ -145,7 +145,7 @@ static bool resolv_gen_qname (const char *name, char **out, size_t *out_size) {
 		}
 	}
 
-	ret_ptr = (char*)prne_malloc(1, len + 1);
+	ret_ptr = prne_alloc_str(len);
 	if (ret_ptr == NULL) {
 		return false;
 	}

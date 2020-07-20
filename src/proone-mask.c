@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <ctype.h>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -10,7 +11,7 @@
 #include "dvault.h"
 
 
-int main (const int argc, const char **args) {
+int main (const int argc, char **args) {
 	int exit_code = 0;
 	ssize_t fd_read_size;
 	size_t read_size = 0;
@@ -22,11 +23,27 @@ int main (const int argc, const char **args) {
 
 	if (argc <= 1) {
 		fprintf(stderr,
-			"Usage: %s <type>\n"
-			"<type>: 'cstr', 'bin'\n",
+			"Usage: %s <type> [salt]\n"
+			"<type>: 'cstr', 'bin'\n"
+			"[salt]: salt hex value\n",
 			args[0]);
 		exit_code = 2;
 		goto END;
+	}
+
+	if (argc >= 3) {
+		for (char *p = args[2]; *p != 0; p += 1) {
+			*p = (char)tolower(*p);
+		}
+
+		if (sscanf(args[2], "%hhx", &salt) != 1) {
+			perror("parsing salt: ");
+			exit_code = 1;
+			goto END;
+		}
+	}
+	else {
+		getrandom(&salt, sizeof(salt), 0);
 	}
 
 	type = prne_data_type_fstr(args[1]);
@@ -58,8 +75,6 @@ int main (const int argc, const char **args) {
 			exit_code = 1;
 			goto END;
 		}
-
-		getrandom(&salt, sizeof(salt), 0);
 
 		mask_result = prne_dvault_mask(type, salt, read_size, buf);
 		if (mask_result.result == PRNE_DVAULT_MASK_OK) {

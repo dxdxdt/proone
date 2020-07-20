@@ -51,4 +51,5 @@ prne_unpack_ctx_pt prne_alloc_unpack_ctx (const prne_bin_archive_t *archive, con
 void prne_free_unpack_ctx (prne_unpack_ctx_pt ctx);
 ssize_t prne_do_unpack (prne_unpack_ctx_pt ctx, uint8_t *out, const size_t out_len, prne_pack_ret_t *pr_out);
 
+// WARN: uses stdio func
 char *prne_pack_ret_tostr (const prne_pack_ret_t pr);

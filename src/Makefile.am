@@ -64,9 +64,13 @@ proone_resolv_LDFLAGS = $(LIBS) $(DEP_PKGCFG_LIBS)
 proone_resolv_SOURCES = proone-resolv.c
 
 if TESTS
-bin_PROGRAMS += proone-test_proto
+bin_PROGRAMS += proone-test_proto proone-test_util
 
 proone_test_proto_LDADD = libproone.a
 proone_test_proto_LDFLAGS = $(LIBS) $(DEP_PKGCFG_LIBS)
 proone_test_proto_SOURCES = proone-test_proto.c
+
+proone_test_util_LDADD = libproone.a
+proone_test_util_LDFLAGS = $(LIBS) $(DEP_PKGCFG_LIBS)
+proone_test_util_SOURCES = proone-test_util.c
 endif

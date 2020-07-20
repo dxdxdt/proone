@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 
 
@@ -106,7 +105,7 @@ void prne_free_dvault_mask_result (prne_dvault_mask_result_t *r) {
 prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const uint8_t salt, const size_t data_size, const uint8_t *data) {
 	size_t i;
 	prne_dvault_mask_result_t ret;
-	int f_ret;
+	char *p;
 
 	prne_init_dvault_mask_result(&ret);
 
@@ -127,16 +126,21 @@ prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const u
 		return ret;
 	}
 
-	f_ret = sprintf(ret.str, "\\x%02X\\x%02X\\x%02X\\x%02X",
-		type,
-		salt,
-		(int)((0xFF00 & (uint_fast16_t)data_size) >> 8),
-		(int)((0x00FF & (uint_fast16_t)data_size) >> 0));
-	assert(f_ret > 0);
+	p = ret.str;
+	p[0] = p[4] = p[8] = p[12] = '\\';
+	p[1] = p[5] = p[9] = p[13] = 'x';
+	prne_hex_tochar((uint_fast8_t)type, p + 2, true);
+	prne_hex_tochar((uint_fast8_t)salt, p + 6, true);
+	prne_hex_tochar((uint_fast8_t)((0xFF00 & (uint_fast16_t)data_size) >> 8), p + 10, true);
+	prne_hex_tochar((uint_fast8_t)((0x00FF & (uint_fast16_t)data_size) >> 0), p + 14, true);
+	p += 16;
 	for (i = 0; i < data_size; i += 1) {
-		f_ret = sprintf(ret.str + 4 * 4 + 4 * i, "\\x%02X", data[i] ^ PRNE_DVAULT_MASK[(i + (size_t)salt) % 256]);
-		assert(f_ret > 0);
+		p[0] = '\\';
+		p[1] = 'x';
+		prne_hex_tochar(data[i] ^ PRNE_DVAULT_MASK[(i + (size_t)salt) % 256], p + 2, true);
+		p += 4;
 	}
+	*p = 0;
 
 	return ret;
 }

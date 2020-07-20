@@ -1,6 +1,6 @@
 #include "util_rt.h"
 
-#include <stdio.h>
+#include <stdio.h> // TODO: remove dep
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -63,6 +63,9 @@ void prne_shutdown (const int fd, const int how) {
 void *prne_malloc (const size_t se, const size_t cnt) {
 	size_t size;
 
+	if (se == 0) {
+		return NULL;
+	}
 	if (SIZE_MAX / se < cnt) {
 		errno = ENOMEM;
 		return NULL;
@@ -79,6 +82,10 @@ void *prne_malloc (const size_t se, const size_t cnt) {
 void *prne_realloc (void *ptr, const size_t se, const size_t cnt) {
 	size_t size;
 
+	if (se == 0) {
+		prne_free(ptr);
+		return NULL;
+	}
 	if (SIZE_MAX / se < cnt) {
 		errno = ENOMEM;
 		return NULL;
@@ -196,46 +203,103 @@ size_t prne_str_shift_spaces (char *str, const size_t len) {
 	return ret;
 }
 
+bool prne_hex_fromstr (const char *str, uint_fast8_t *out) {
+	static const uint_fast8_t shift[2] = { 4, 0 };
+	size_t i;
+	uint_fast8_t ret[2];
+	char c;
+
+	for (i = 0; i < 2; i += 1) {
+		c = str[i];
+
+		if ('0' <= c && c <= '9') {
+			ret[i] = (c - '0') << shift[i];
+		}
+		else if ('a' <= c && c <= 'f') {
+			ret[i] = (c - 'a' + 10) << shift[i];
+		}
+		else if ('A' <= c && c <= 'F') {
+			ret[i] = (c - 'A' + 10) << shift[i];
+		}
+		else {
+			errno = EINVAL;
+			return false;
+		}
+	}
+
+	*out = ret[0] | ret[1];
+	return true;
+}
+
+void prne_hex_tochar (const uint_fast8_t in, char *out, const bool upper) {
+	static const uint_fast8_t mask[2] = { 0xF0, 0x0F };
+	static const uint_fast8_t shift[2] = { 4, 0 };
+	size_t i;
+	uint_fast8_t v;
+
+	for (i = 0; i < 2; i += 1) {
+		v = (in & mask[i]) >> shift[i];
+		if (v <= 9) {
+			out[i] = '0' + v;
+		}
+		else {
+			out[i] = (upper ? 'A' : 'a') + (v - 10);
+		}
+	}
+}
+
 bool prne_uuid_fromstr (const char *str, uint8_t *out) {
-	return sscanf(str, "%hhx%hhx%hhx%hhx-%hhx%hhx-%hhx%hhx-%hhx%hhx-%hhx%hhx%hhx%hhx%hhx%hhx",
-		&out[0],
-		&out[1],
-		&out[2],
-		&out[3],
-		&out[4],
-		&out[5],
-		&out[6],
-		&out[7],
-		&out[8],
-		&out[9],
-		&out[10],
-		&out[11],
-		&out[12],
-		&out[13],
-		&out[14],
-		&out[15]) == 16;
+	size_t i, ptr = 0;
+
+	if (prne_nstrlen(str) != 36) {
+		errno = EINVAL;
+		return false;
+	}
+
+	for (i = 0; i < 36;) {
+		switch (i) {
+		case 8:
+		case 13:
+		case 18:
+		case 23:
+			if (str[i] != '-') {
+				errno = EINVAL;
+				return false;
+			}
+			i += 1;
+			break;
+		default:
+			if (!prne_hex_fromstr(str + i, out + ptr)) {
+				return false;
+			}
+			ptr += 1;
+			i += 2;
+		}
+	}
+
+	return true;
 }
 
-bool prne_uuid_tostr (const uint8_t *in, const size_t out_size, char *out) {
-	return snprintf(out, out_size, "%hhx%hhx%hhx%hhx-%hhx%hhx-%hhx%hhx-%hhx%hhx-%hhx%hhx%hhx%hhx%hhx%hhx",
-		in[0],
-		in[1],
-		in[2],
-		in[3],
-		in[4],
-		in[5],
-		in[6],
-		in[7],
-		in[8],
-		in[9],
-		in[10],
-		in[11],
-		in[12],
-		in[13],
-		in[14],
-		in[15]) == 16;
-}
+void prne_uuid_tostr (const uint8_t *in, char *out) {
+	size_t i, ptr = 0;
 
+	for (i = 0; i < 16; i += 1) {
+		prne_hex_tochar(in[i], out + ptr, false);
+
+		switch (i) {
+		case 3:
+		case 5:
+		case 7:
+		case 9:
+			out[ptr + 2] = '-';
+			ptr += 3;
+			break;
+		default:
+			ptr += 2;
+		}
+	}
+	out[ptr] = 0;
+}
 
 struct timespec prne_sub_timespec (const struct timespec a, const struct timespec b) {
 	struct timespec ret;

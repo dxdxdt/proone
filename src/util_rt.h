@@ -52,8 +52,12 @@ size_t prne_nstrlen (const char *s);
 void prne_rnd_anum_str (mbedtls_ctr_drbg_context *rnd, char *str, const size_t len);
 char *prne_strnchr (const char *p, const char c, const size_t n);
 size_t prne_str_shift_spaces (char *str, const size_t len);
+
+bool prne_hex_fromstr (const char *str, uint_fast8_t *out);
+void prne_hex_tochar (const uint_fast8_t in, char *out, const bool upper);
+
 bool prne_uuid_fromstr (const char *str, uint8_t *out);
-bool prne_uuid_tostr (const uint8_t *in, const size_t out_size, char *out);
+void prne_uuid_tostr (const uint8_t *in, char *out);
 
 struct timespec prne_sub_timespec (const struct timespec a, const struct timespec b);
 double prne_real_timespec (const struct timespec ts);

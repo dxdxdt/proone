@@ -89,7 +89,7 @@ static void test_ser (void) {
 	test_pw[255] = test_id[255] = 0;
 	assert(strlen(test_id) == 255 && strlen(test_pw) == 255);
 
-	assert(getrandom(&salt, 1, 0) == 1);
+	assert(prne_geturandom(&salt, 1) == 1);
 
 	// free functions should accept NULL
 	prne_htbt_free_msg_head(NULL);

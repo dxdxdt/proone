@@ -324,7 +324,7 @@ static size_t resolv_next_pool_ptr (prne_resolv_wkr_ctx_t ctx, const size_t cnt)
 	size_t ret = 0;
 
 	if (mbedtls_ctr_drbg_random(ctx->ssl.ctr_drbg, (unsigned char*)&ret, sizeof(size_t)) != 0) {
-		getrandom(&ret, sizeof(size_t), 0);
+		abort();
 	}
 	return ret % cnt;
 }
@@ -334,7 +334,7 @@ static uint16_t resolv_next_qid (prne_resolv_wkr_ctx_t ctx) {
 
 	for (i = 0; i < UINT16_MAX; i += 1) {
 		if (mbedtls_ctr_drbg_random(ctx->ssl.ctr_drbg, (unsigned char*)&ret, sizeof(uint16_t)) != 0) {
-			getrandom(&ret, sizeof(uint16_t), 0);
+			abort();
 		}
 		ret = (ret % UINT16_MAX) + 1;
 		if (prne_imap_lookup(&ctx->qid_map, ret) == NULL) {

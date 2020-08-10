@@ -4,11 +4,12 @@ if DEBUG
 TARGET_FLAGS += -g -O0
 DEV_FLAGS += -g -O0 -DPRNE_DEBUG
 else
-TARGET_FLAGS += -Os
-DEV_FLAGS += -Os
+TARGET_FLAGS += -Os -g
+DEV_FLAGS += -Os -g
 endif
 
-AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -Wno-unused-parameter -D_GNU_SOURCE $(DEV_FLAGS)
+# TODO: Use -D_POSIX_C_SOURCE=200112L or -D_POSIX_C_SOURCE=2
+AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -D_GNU_SOURCE -Wno-unused-parameter  $(DEV_FLAGS)
 
 noinst_LIBRARIES = libproone.a
 bin_PROGRAMS =\
@@ -18,7 +19,9 @@ bin_PROGRAMS =\
 	proone-list-arch\
 	proone-mask\
 	proone-print-all-data\
-	proone-resolv
+	proone-resolv\
+	proone-arch-test\
+	proone-stress
 
 libproone_a_SOURCES =\
 	config.c\
@@ -62,6 +65,14 @@ proone_print_all_data_SOURCES = proone-print-all-data.c
 proone_resolv_LDADD = libproone.a
 proone_resolv_LDFLAGS = $(LIBS) $(DEP_PKGCFG_LIBS)
 proone_resolv_SOURCES = proone-resolv.c
+
+proone_arch_test_LDADD = libproone.a -lrt -lpthread $(LIBS) $(DEP_PKGCFG_LIBS)
+proone_arch_test_SOURCES = proone-arch-test.c
+proone_arch_test_LDFLAGS = -static
+
+proone_stress_LDADD = libproone.a -lrt -lpthread $(LIBS) $(DEP_PKGCFG_LIBS)
+proone_stress_LDFLAGS = -static
+proone_stress_SOURCES = proone-stress.c
 
 if TESTS
 bin_PROGRAMS += proone-test_proto proone-test_util

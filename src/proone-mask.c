@@ -9,6 +9,7 @@
 #include <sys/random.h>
 
 #include "dvault.h"
+#include "util_rt.h"
 
 
 int main (const int argc, char **args) {
@@ -43,7 +44,7 @@ int main (const int argc, char **args) {
 		}
 	}
 	else {
-		getrandom(&salt, sizeof(salt), 0);
+		prne_geturandom(&salt, sizeof(salt));
 	}
 
 	type = prne_data_type_fstr(args[1]);

@@ -19,18 +19,16 @@ typedef struct prne_htbt_bin_meta prne_htbt_bin_meta_t;
 
 typedef enum {
 	PRNE_ARCH_NONE = -1,
-	
+
+	PRNE_ARCH_I686,
+	PRNE_ARCH_X86_64,
 	PRNE_ARCH_ARMV4T,
 	PRNE_ARCH_ARMV7,
-	PRNE_ARCH_I686,
-	PRNE_ARCH_M68K,
+	PRNE_ARCH_AARCH64,
 	PRNE_ARCH_MIPS,
 	PRNE_ARCH_MPSL,
 	PRNE_ARCH_PPC,
-	PRNE_ARCH_RV32,
-	PRNE_ARCH_RV64,
 	PRNE_ARCH_SH4,
-	PRNE_ARCH_SPC,
 
 	NB_PRNE_ARCH
 } prne_arch_t;

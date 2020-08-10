@@ -72,3 +72,6 @@ void prne_free_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx);
 prne_pack_ret_t prne_stdin_base64_rf (void *ctx, const size_t req, uint8_t *out, size_t *out_len);
 
 bool prne_set_pipe_size (const int fd, const int size);
+
+// getrandom polyfill
+ssize_t prne_geturandom (void *buf, const size_t len);

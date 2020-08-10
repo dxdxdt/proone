@@ -15,66 +15,56 @@
 
 const char *prne_arch_tostr (const prne_arch_t x) {
 	switch (x){
+	case PRNE_ARCH_AARCH64:
+		return "aarch64";
 	case PRNE_ARCH_ARMV4T:
 		return "armv4t";
 	case PRNE_ARCH_ARMV7:
 		return "armv7";
+	case PRNE_ARCH_X86_64:
+		return "x86_64";
 	case PRNE_ARCH_I686:
 		return "i686";
-	case PRNE_ARCH_M68K:
-		return "m68k";
 	case PRNE_ARCH_MIPS:
 		return "mips";
 	case PRNE_ARCH_MPSL:
 		return "mpsl";
 	case PRNE_ARCH_PPC:
 		return "ppc";
-	case PRNE_ARCH_RV32:
-		return "rv32";
-	case PRNE_ARCH_RV64:
-		return "rv64";
 	case PRNE_ARCH_SH4:
 		return "sh4";
-	case PRNE_ARCH_SPC:
-		return "spc";
 	}
 	
 	return NULL;
 }
 
 prne_arch_t prne_arch_fstr (const char *str) {
+	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_AARCH64))) {
+		return PRNE_ARCH_AARCH64;
+	}
 	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_ARMV4T))) {
 		return PRNE_ARCH_ARMV4T;
 	}
-	else if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_ARMV7))) {
+	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_ARMV7))) {
 		return PRNE_ARCH_ARMV7;
 	}
-	else if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_I686))) {
+	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_I686))) {
 		return PRNE_ARCH_I686;
 	}
-	else if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_M68K))) {
-		return PRNE_ARCH_M68K;
+	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_X86_64))) {
+		return PRNE_ARCH_X86_64;
 	}
-	else if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_MIPS))) {
+	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_MIPS))) {
 		return PRNE_ARCH_MIPS;
 	}
-	else if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_MPSL))) {
+	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_MPSL))) {
 		return PRNE_ARCH_MPSL;
 	}
-	else if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_PPC))) {
+	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_PPC))) {
 		return PRNE_ARCH_PPC;
 	}
-	else if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_RV32))) {
-		return PRNE_ARCH_RV32;
-	}
-	else if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_RV64))) {
-		return PRNE_ARCH_RV64;
-	}
-	else if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_SH4))) {
+	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_SH4))) {
 		return PRNE_ARCH_SH4;
-	}
-	else if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_SPC))) {
-		return PRNE_ARCH_SPC;
 	}
 
 	return PRNE_ARCH_NONE;
@@ -200,13 +190,13 @@ prne_htbt_ser_rc_t prne_dec_host_cred (const uint8_t *data, const size_t len, pr
 	char *id = NULL, *pw = NULL;
 
 	if (!(3 <= len && len <= 3 + 255 + 255)) {
-		return PRNE_PACK_RC_FMT_ERR;
+		return PRNE_HTBT_SER_RC_FMT_ERR;
 	}
 
 	in_len = len - 1;
 	in = (uint8_t*)prne_malloc(1, in_len);
 	if (in == NULL) {
-		return PRNE_PACK_RC_ERRNO;
+		return PRNE_HTBT_SER_RC_ERRNO;
 	}
 	memcpy(in, data + 1, in_len);
 
@@ -858,7 +848,7 @@ prne_htbt_ser_rc_t prne_htbt_dser_cmd (const uint8_t *data, const size_t len, si
 	args = (char**)prne_malloc(sizeof(char*), argc + 1);
 	mem = (char*)prne_malloc(1, args_len);
 	if (args == NULL || mem == NULL) {
-		ret = PRNE_HTBT_STATUS_ERRNO;
+		ret = PRNE_HTBT_SER_RC_ERRNO;
 		goto END;
 	}
 

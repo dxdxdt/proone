@@ -8,7 +8,8 @@
 		"editor.insertSpaces": false,
 		"C_Cpp.default.cStandard": "c11",
 		"C_Cpp.default.defines": [
-			"_GNU_SOURCE",
+			// TODO: Use "_POSIX_C_SOURCE=200112L",
+			"-D_GNU_SOURCE",
 			"PRNE_DEBUG",
 			"PRNE_BUILD_ENTROPY=\"84532ab2-0857-4137-9daf-abd990684889\""],
 		"C_Cpp.default.compilerArgs": [

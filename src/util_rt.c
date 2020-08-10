@@ -446,3 +446,19 @@ bool prne_set_pipe_size (const int fd, const int size) {
 #endif
 		;
 }
+
+ssize_t prne_geturandom (void *buf, const size_t len) {
+	const int fd = open("/dev/urandom", O_RDONLY);
+	ssize_t ret;
+	int save_errno;
+
+	if (fd < 0) {
+		return -1;
+	}
+	ret = read(fd, buf, len);
+	save_errno = errno;
+	close(fd);
+	errno = save_errno;
+
+	return ret;
+}

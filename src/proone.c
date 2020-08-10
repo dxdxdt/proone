@@ -459,7 +459,7 @@ int main (const int argc, char **args) {
 	prne_g.is_child = false;
 	prne_init_bin_archive(&prne_g.bin_archive);
 	mbedtls_x509_crt_init(&prne_g.ssl.ca);
-	mbedtls_entropy_init(&prne_g.ssl.entpy);
+	prne_mbedtls_entropy_init(&prne_g.ssl.entpy);
 	mbedtls_ctr_drbg_init(&prne_g.ssl.rnd);
 	mbedtls_ssl_config_init(&prne_g.s_ssl.conf);
 	mbedtls_x509_crt_init(&prne_g.s_ssl.crt);

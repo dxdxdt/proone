@@ -1,9 +1,14 @@
 #include "mbedtls.h"
+#include "util_ct.h"
 
 #include <unistd.h>
 #include <errno.h>
+#include <string.h>
+#include <fcntl.h>
+#include <time.h>
 
 #include <mbedtls/ssl.h>
+#include <mbedtls/entropy_poll.h>
 
 
 int prne_mbedtls_x509_crt_verify_cb (void *param, mbedtls_x509_crt *crt, int crt_depth, uint32_t *flags) {
@@ -49,4 +54,58 @@ int prne_mbedtls_ssl_recv_cb (void *ctx, unsigned char *buf, size_t len) {
 	}
 
 	return ret;
+}
+
+static int prne_mbedtls_entropy_urand_src_f (void *data, unsigned char *output, size_t len, size_t *olen) {
+	const int fd = open("/dev/urandom", O_RDONLY);
+	int func_ret = 0;
+
+	if (fd < 0 || read(fd, output, len) != (ssize_t)len) {
+		func_ret = MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
+	}
+	*olen = len;
+
+	if (fd >= 0) {
+		close(fd);
+	}
+
+	return func_ret;
+}
+
+typedef struct {
+	pid_t pid;
+	pid_t ppid;
+	clock_t clock;
+	struct timespec now;
+} ent_buf_t;
+
+static int prne_mbedtls_entropy_proc_src_f (void *data, unsigned char *output, size_t len, size_t *olen) {
+	ent_buf_t buf;
+
+	memzero(&buf, sizeof(buf));
+	buf.pid = getpid();
+	buf.ppid = getppid();
+	buf.clock = clock();
+	clock_gettime(CLOCK_MONOTONIC, &buf.now);
+
+	*olen = prne_op_min(len, sizeof(buf));
+	memcpy(output, &buf, sizeof(*olen));
+
+	return 0;
+}
+
+void prne_mbedtls_entropy_init (mbedtls_entropy_context *ctx) {
+	mbedtls_entropy_init(ctx);
+
+	// Remove platform source, which could call getrandom()
+	for (int i = 0; i < ctx->source_count; i += 1) {
+		if (ctx->source[i].f_source == mbedtls_platform_entropy_poll) {
+			memmove(ctx->source + i, ctx->source + i + 1, sizeof(mbedtls_entropy_source_state) * (ctx->source_count - i - 1));
+			ctx->source_count -= 1;
+			// Add our own implementation as the one just got removed could be the only source.
+			mbedtls_entropy_add_source(ctx, prne_mbedtls_entropy_urand_src_f, NULL, MBEDTLS_ENTROPY_MIN_PLATFORM, MBEDTLS_ENTROPY_SOURCE_STRONG);
+			mbedtls_entropy_add_source(ctx, prne_mbedtls_entropy_proc_src_f, NULL, sizeof(ent_buf_t), MBEDTLS_ENTROPY_SOURCE_STRONG);
+			break;
+		}
+	}
 }

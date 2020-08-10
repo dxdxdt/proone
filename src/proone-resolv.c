@@ -20,6 +20,7 @@
 #include "util_ct.h"
 #include "llist.h"
 #include "resolv_worker.h"
+#include "mbedtls.h"
 
 
 static int caught_signal = 0;
@@ -324,7 +325,7 @@ int main (void) {
 	assert(regcomp(&prmpt_regex, "(A|AAAA|TXT)\\s+([a-z0-9\\-\\.]+)", REG_ICASE | REG_EXTENDED) == 0);
 	/* org regex: ^\s+$ */
 	assert(regcomp(&empty_line_regex, "^\\s+$", REG_NOSUB | REG_EXTENDED) == 0);
-	mbedtls_entropy_init(&entropy);
+	prne_mbedtls_entropy_init(&entropy);
 	mbedtls_ctr_drbg_init(&rnd);
 	assert(mbedtls_ctr_drbg_seed(&rnd, mbedtls_entropy_func, &entropy, (const uint8_t*)PRNE_BUILD_ENTROPY, sizeof(PRNE_BUILD_ENTROPY) - 1) == 0);
 	prne_init_wkr_sched_req(&wsr);

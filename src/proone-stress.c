@@ -23,6 +23,7 @@
 #include "util_ct.h"
 #include "util_rt.h"
 #include "llist.h"
+#include "mbedtls.h"
 
 
 typedef struct {
@@ -306,7 +307,7 @@ static void do_cycle (priv_ctx_t *priv_ctx, shared_ctx_t *ctx) {
 static void child_main (shared_ctx_t *ctx) {
 	priv_ctx_t priv_ctx;
 
-	mbedtls_entropy_init(&priv_ctx.ent);
+	prne_mbedtls_entropy_init(&priv_ctx.ent);
 	mbedtls_ctr_drbg_init(&priv_ctx.ctx);
 	assert(mbedtls_ctr_drbg_seed(&priv_ctx.ctx, mbedtls_entropy_func, &priv_ctx.ent, NULL, 0) == 0);
 	

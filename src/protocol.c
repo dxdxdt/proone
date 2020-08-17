@@ -33,6 +33,12 @@ const char *prne_arch_tostr (const prne_arch_t x) {
 		return "ppc";
 	case PRNE_ARCH_SH4:
 		return "sh4";
+	case PRNE_ARCH_M68K:
+		return "m68k";
+	case PRNE_ARCH_ARC:
+		return "arc";
+	case PRNE_ARCH_ARCEB:
+		return "arceb";
 	}
 	
 	return NULL;

@@ -27,6 +27,16 @@ const prne_arch_t prne_host_arch =
 		PRNE_ARCH_PPC
 	#elif defined(__SH4__)
 		PRNE_ARCH_SH4
+	#elif defined(__m68k__)
+		PRNE_ARCH_M68K
+	#elif defined(__arc__)
+		#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+			PRNE_ARCH_ARCEB
+		#elif __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+			PRNE_ARCH_ARC
+		#else
+			#error "FIXME!"
+		#endif
 	#else
 		#error "FIXME!"
 	#endif

@@ -13,3 +13,11 @@
 #if !defined(memzero)
 #define memzero(addr, len) memset(addr, 0, len)
 #endif
+
+#ifdef PRNE_DEBUG
+#define prne_dbgpf(...) fprintf(stderr, __VA_ARGS__)
+#define prne_dbgperr(str) perror(str)
+#else
+#define prne_dbgpf(fmt, ...)
+#define prne_dbgperr(str)
+#endif

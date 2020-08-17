@@ -19,7 +19,7 @@ int prne_mbedtls_x509_crt_verify_cb (void *param, mbedtls_x509_crt *crt, int crt
 int prne_mbedtls_ssl_send_cb (void *ctx, const unsigned char *buf, size_t len) {
 	const int fd = *(int*)ctx;
 	ssize_t ret;
-
+	
 	ret = write(fd, buf, len);
 	if (ret < 0) {
 		switch (errno) {
@@ -77,6 +77,7 @@ typedef struct {
 	pid_t ppid;
 	clock_t clock;
 	struct timespec now;
+	struct timespec datetime;
 } ent_buf_t;
 
 static int prne_mbedtls_entropy_proc_src_f (void *data, unsigned char *output, size_t len, size_t *olen) {
@@ -87,6 +88,7 @@ static int prne_mbedtls_entropy_proc_src_f (void *data, unsigned char *output, s
 	buf.ppid = getppid();
 	buf.clock = clock();
 	clock_gettime(CLOCK_MONOTONIC, &buf.now);
+	clock_gettime(CLOCK_REALTIME, &buf.datetime);
 
 	*olen = prne_op_min(len, sizeof(buf));
 	memcpy(output, &buf, sizeof(*olen));

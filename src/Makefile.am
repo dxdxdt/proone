@@ -15,7 +15,8 @@ bin_PROGRAMS =\
 	proone-mask\
 	proone-print-all-data\
 	proone-resolv\
-	proone-stress
+	proone-stress\
+	proone-ipaddr-arr
 
 libproone_a_SOURCES =\
 	config.c\
@@ -28,8 +29,8 @@ libproone_a_SOURCES =\
 	iset.c\
 	imap.c\
 	mbedtls.c\
-	worker.c\
-	resolv_worker.c
+	pth.c\
+	resolv.c
 
 proone_LDFLAGS = -static
 proone_LDADD = libproone.a
@@ -59,6 +60,8 @@ proone_print_all_data_SOURCES = proone-print-all-data.c
 proone_resolv_LDADD = libproone.a
 proone_resolv_LDFLAGS =
 proone_resolv_SOURCES = proone-resolv.c
+
+proone_ipaddr_arr_SOURCES = proone-ipaddr-arr.c
 
 proone_stress_LDADD = libproone.a
 proone_stress_LDFLAGS = -static

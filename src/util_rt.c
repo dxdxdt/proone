@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <time.h>
 
 #include <errno.h>
 #include <unistd.h>
@@ -12,41 +13,20 @@
 #include <sys/socket.h>
 
 #include <mbedtls/base64.h>
+#include <pthsem.h>
 
 
-void prne_ok_or_die (const int ret) {
-	if (ret < 0) {
-		abort();
-	}
-}
-
-void prne_true_or_die (const bool ret) {
+void prne_assert (const bool ret) {
 	if (!ret) {
-		abort();
+		volatile const int err = errno;
+
+		if (true || err) {
+			abort();
+		}
 	}
 }
 
 void prne_empty_func (void) {}
-
-bool prne_is_nonblock_errno (void) {
-	switch (errno) {
-#if EAGAIN == EWOULDBLOCK
-	case EAGAIN:
-#else
-	case EAGAIN:
-	case EWOULDBLOCK:
-#endif
-	case EINPROGRESS:
-		return true;
-	}
-	return false;
-}
-
-void prne_die_not_nonblock_err (void) {
-	if (!prne_is_nonblock_errno()) {
-		abort();
-	}
-}
 
 void prne_close (const int fd) {
 	if (fd >= 0) {
@@ -146,7 +126,7 @@ size_t prne_nstrlen (const char *s) {
 }
 
 void prne_rnd_anum_str (mbedtls_ctr_drbg_context *rnd, char *str, const size_t len) {
-	static const char SET[] = "qwertyuiopasdfghjklzxcvbnm0123456789";
+	static const char SET[] = { 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'z', 'x', 'c', 'v', 'b', 'n', 'm', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' };
 	size_t i = 0;
 	uint32_t n;
 
@@ -337,6 +317,12 @@ struct timespec prne_min_timespec (const struct timespec a, const struct timespe
 
 struct timespec prne_max_timespec (const struct timespec a, const struct timespec b) {
 	return prne_cmp_timespec(a, b) > 0 ? a : b;
+}
+
+struct timespec prne_gettime (const clockid_t cid) {
+	struct timespec ret;
+	prne_assert(clock_gettime(cid, &ret) == 0);
+	return ret;
 }
 
 char *prne_enc_base64_mem (const uint8_t *data, const size_t size) {

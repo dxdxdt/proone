@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <time.h>
 
+#include <sys/poll.h>
+
 #include <mbedtls/ctr_drbg.h>
 
 
@@ -32,11 +34,8 @@ bool prne_strendsw (const char *str, const char *w) {
 }
 #endif
 
-void prne_ok_or_die (const int ret);
-void prne_true_or_die (const bool ret);
+void prne_assert (const bool ret);
 void prne_empty_func (void);
-bool prne_is_nonblock_errno (void);
-void prne_die_not_nonblock_err (void);
 void prne_close (const int fd);
 void prne_shutdown (const int fd, const int how);
 
@@ -64,6 +63,7 @@ double prne_real_timespec (const struct timespec ts);
 int prne_cmp_timespec (const struct timespec a, const struct timespec b);
 struct timespec prne_min_timespec (const struct timespec a, const struct timespec b);
 struct timespec prne_max_timespec (const struct timespec a, const struct timespec b);
+struct timespec prne_gettime (const clockid_t cid);
 
 char *prne_enc_base64_mem (const uint8_t *data, const size_t size);
 bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data, size_t *size);

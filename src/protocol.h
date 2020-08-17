@@ -7,7 +7,6 @@
 
 #include <netinet/in.h>
 
-
 typedef struct prne_net_endpoint prne_net_endpoint_t;
 typedef struct prne_ip_addr prne_ip_addr_t;
 typedef struct prne_host_cred prne_host_cred_t;
@@ -29,6 +28,9 @@ typedef enum {
 	PRNE_ARCH_MPSL,
 	PRNE_ARCH_PPC,
 	PRNE_ARCH_SH4,
+	PRNE_ARCH_M68K,
+	PRNE_ARCH_ARC,
+	PRNE_ARCH_ARCEB,
 
 	NB_PRNE_ARCH
 } prne_arch_t;

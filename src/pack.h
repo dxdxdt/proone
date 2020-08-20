@@ -40,6 +40,17 @@ struct prne_pack_ret {
 	int err;
 };
 
+struct prne_stdin_base64_rf_ctx;
+typedef struct prne_stdin_base64_rf_ctx prne_stdin_base64_rf_ctx_t;
+
+struct prne_stdin_base64_rf_ctx {
+	size_t line_len;
+	size_t out_len;
+	char line_buf[78];
+	uint8_t out_buf[58];
+};
+
+
 typedef prne_pack_ret_t(*prne_bin_archive_read_ft)(void *ctx, const size_t req, uint8_t *out, size_t *out_len);
 
 
@@ -53,3 +64,7 @@ ssize_t prne_do_unpack (prne_unpack_ctx_pt ctx, uint8_t *out, const size_t out_l
 
 // WARN: uses stdio func
 char *prne_pack_ret_tostr (const prne_pack_ret_t pr);
+
+void prne_init_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx);
+void prne_free_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx);
+prne_pack_ret_t prne_stdin_base64_rf (void *ctx, const size_t req, uint8_t *out, size_t *out_len);

@@ -7,6 +7,7 @@
 
 struct prne_resolv;
 typedef struct prne_resolv prne_resolv_t;
+typedef struct prne_resolv_ns_pool prne_resolv_ns_pool_t;
 
 struct prne_resolv_prm;
 struct prne_resolv_fut;
@@ -40,6 +41,12 @@ typedef enum {
 	NB_PRNE_RESOLV_QT
 } prne_resolv_query_type_t;
 
+struct prne_resolv_ns_pool {
+	prne_net_endpoint_t *arr;
+	size_t cnt;
+	bool ownership;
+};
+
 struct prne_resolv_prm {
 	void *ctx;
 	prne_resolv_fut_t *fut;
@@ -61,6 +68,13 @@ struct prne_resolv_rr {
 	uint16_t rd_len;
 };
 
+/* Default Nameserver Pools
+*
+* For testing only. Referencing these will increase the size of the binary.
+*/
+extern const prne_resolv_ns_pool_t PRNE_RESOLV_DEF_IPV4_POOL;
+extern const prne_resolv_ns_pool_t PRNE_RESOLV_DEF_IPV6_POOL;
+
 // honor bind-utils' choice of words
 #define PRNE_RESOLV_RCODE_NOERROR	0
 #define PRNE_RESOLV_RCODE_FORMERR	1
@@ -79,10 +93,13 @@ struct prne_resolv_rr {
 #define PRNE_RESOLV_RTYPE_AAAA	28
 
 
-prne_resolv_t *prne_alloc_resolv (prne_worker_t *wkr, mbedtls_ctr_drbg_context *ctr_drbg);
+prne_resolv_t *prne_alloc_resolv (prne_worker_t *wkr, mbedtls_ctr_drbg_context *ctr_drbg, const prne_resolv_ns_pool_t pool_v4, const prne_resolv_ns_pool_t pool_v6);
 bool prne_resolv_prm_gethostbyname (prne_resolv_t *ctx, const char *name, const prne_ipv_t ipv, prne_pth_cv_t *cv, prne_resolv_prm_t *out);
 bool prne_resolv_prm_gettxtrec (prne_resolv_t *ctx, const char *name, prne_pth_cv_t *cv, prne_resolv_prm_t *out);
 
+void prne_resolv_init_ns_pool (prne_resolv_ns_pool_t *pool);
+void prne_resolv_free_ns_pool (prne_resolv_ns_pool_t *pool);
+bool prne_resolv_alloc_ns_pool (prne_resolv_ns_pool_t *pool, const size_t cnt);
 void prne_resolv_init_prm (prne_resolv_prm_t *prm);
 void prne_resolv_free_prm (prne_resolv_prm_t *prm);
 void prne_init_resolv_fut (prne_resolv_fut_t *fut);

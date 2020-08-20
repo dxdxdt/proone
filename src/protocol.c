@@ -45,32 +45,10 @@ const char *prne_arch_tostr (const prne_arch_t x) {
 }
 
 prne_arch_t prne_arch_fstr (const char *str) {
-	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_AARCH64))) {
-		return PRNE_ARCH_AARCH64;
-	}
-	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_ARMV4T))) {
-		return PRNE_ARCH_ARMV4T;
-	}
-	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_ARMV7))) {
-		return PRNE_ARCH_ARMV7;
-	}
-	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_I686))) {
-		return PRNE_ARCH_I686;
-	}
-	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_X86_64))) {
-		return PRNE_ARCH_X86_64;
-	}
-	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_MIPS))) {
-		return PRNE_ARCH_MIPS;
-	}
-	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_MPSL))) {
-		return PRNE_ARCH_MPSL;
-	}
-	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_PPC))) {
-		return PRNE_ARCH_PPC;
-	}
-	if (prne_nstreq(str, prne_arch_tostr(PRNE_ARCH_SH4))) {
-		return PRNE_ARCH_SH4;
+	for (prne_arch_t i = PRNE_ARCH_NONE + 1; i < NB_PRNE_ARCH; i += 1) {
+		if (prne_nstreq(str, prne_arch_tostr(i))) {
+			return i;
+		}
 	}
 
 	return PRNE_ARCH_NONE;
@@ -175,60 +153,42 @@ prne_htbt_ser_rc_t prne_enc_host_cred (uint8_t *data, const size_t len, size_t *
 		return PRNE_HTBT_SER_RC_FMT_ERR;
 	}
 
-	*actual = 3 + id_len + pw_len;
+	*actual = 2 + id_len + pw_len;
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
-	data[0] = salt;
-	data[1] = (uint8_t)id_len;
-	data[2] = (uint8_t)pw_len;
-	memcpy(data + 3, in->id, id_len);
-	memcpy(data + 3 + id_len, in->pw, pw_len);
-	prne_dvault_invert_mem(id_len + pw_len + 2, data + 1, salt);
+	data[0] = (uint8_t)id_len;
+	data[1] = (uint8_t)pw_len;
+	memcpy(data + 2, in->id, id_len);
+	memcpy(data + 2 + id_len, in->pw, pw_len);
 	return PRNE_HTBT_SER_RC_OK;
 }
 
 prne_htbt_ser_rc_t prne_dec_host_cred (const uint8_t *data, const size_t len, prne_host_cred_t *out) {
-	uint8_t *in = NULL;
-	size_t in_len;
 	prne_htbt_ser_rc_t ret = PRNE_HTBT_SER_RC_OK;
 	char *id = NULL, *pw = NULL;
 
-	if (!(3 <= len && len <= 3 + 255 + 255)) {
+	if (!(2 <= len && len <= 2 + 255 + 255)) {
 		return PRNE_HTBT_SER_RC_FMT_ERR;
 	}
 
-	in_len = len - 1;
-	in = (uint8_t*)prne_malloc(1, in_len);
-	if (in == NULL) {
-		return PRNE_HTBT_SER_RC_ERRNO;
-	}
-	memcpy(in, data + 1, in_len);
-
-	prne_dvault_invert_mem(in_len, in, data[0]);
-	if ((uint_fast16_t)in[0] + (uint_fast16_t)in[1] > in_len - 2) {
-		ret = PRNE_HTBT_SER_RC_FMT_ERR;
-		goto END;
-	}
-
-	id = prne_alloc_str(in[0]);
-	pw = prne_alloc_str(in[1]);
+	id = prne_alloc_str(data[0]);
+	pw = prne_alloc_str(data[1]);
 	if (id == NULL || pw == NULL) {
 		ret = PRNE_HTBT_SER_RC_ERRNO;
 		goto END;
 	}
-	memcpy(id, in + 2, in[0]);
-	id[in[0]] = 0;
-	memcpy(pw, in + 2 + in[0], in[1]);
-	pw[in[1]] = 0;
+	memcpy(id, data + 2, data[0]);
+	id[data[0]] = 0;
+	memcpy(pw, data + 2 + data[0], data[1]);
+	pw[data[1]] = 0;
 
 	out->id = id;
 	out->pw = pw;
 	id = pw = NULL;
 
 END:
-	prne_free(in);
 	prne_free(id);
 	prne_free(pw);
 

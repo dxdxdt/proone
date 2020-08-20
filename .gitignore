@@ -15,8 +15,9 @@ Makefile.in
 /install-sh
 /missing
 
-/src/*.o
+/src/*.[ao]
+/src/proone
+/src/dvault.bin
+/src/testlist
 /builds/*
-/scripts/pack_test
-/scripts/*.log
 /src/proone_conf

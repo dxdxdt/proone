@@ -6,6 +6,7 @@
 #include "iset.h"
 #include "protocol.h"
 #include "mbedtls.h"
+#include "config.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -36,12 +37,6 @@ typedef enum {
 } resolv_ctx_state_t;
 
 typedef struct {
-	prne_net_endpoint_t *arr;
-	size_t cnt;
-	bool ownership;
-} resolv_dnssrv_pool_t;
-
-typedef struct {
 	prne_resolv_t *owner;
 	prne_llist_entry_t *qlist_ent;
 	char *qname;
@@ -58,8 +53,8 @@ struct prne_resolv {
 	size_t read_cnt_len;
 	size_t write_cnt_len;
 	struct pollfd act_sck_pfd;
-	size_t ptr_dnssrv4, ptr_dnssrv6;
-	resolv_dnssrv_pool_t dnssrv_4, dnssrv_6;
+	size_t ptr_nspool4, ptr_nspool6;
+	prne_resolv_ns_pool_t nspool4, nspool6;
 	pth_mutex_t lock;
 	pth_cond_t cond;
 	resolv_ctx_state_t ctx_state;
@@ -74,6 +69,40 @@ struct prne_resolv {
 	} ssl;
 };
 
+static prne_net_endpoint_t RESOLV_DEF_IPV4_EP_ARR[] = {
+	{ { { PRNE_RESOLV_NS_IPV4_GOOGLE_A }, PRNE_IPV_4 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV4_GOOGLE_B }, PRNE_IPV_4 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV4_CLOUDFLARE_A }, PRNE_IPV_4 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV4_CLOUDFLARE_B }, PRNE_IPV_4 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV4_QUAD9_A }, PRNE_IPV_4 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV4_QUAD9_B }, PRNE_IPV_4 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV4_CLEANBROWSING_A }, PRNE_IPV_4 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV4_CLEANBROWSING_B }, PRNE_IPV_4 }, 853 }
+};
+
+const prne_resolv_ns_pool_t PRNE_RESOLV_DEF_IPV4_POOL = {
+	RESOLV_DEF_IPV4_EP_ARR,
+	sizeof(RESOLV_DEF_IPV4_EP_ARR)/sizeof(prne_net_endpoint_t),
+	false
+};
+
+static prne_net_endpoint_t RESOLV_DEF_IPV6_EP_ARR[] = {
+	{ { { PRNE_RESOLV_NS_IPV6_GOOGLE_A }, PRNE_IPV_6 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV6_GOOGLE_B }, PRNE_IPV_6 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV6_CLOUDFLARE_A }, PRNE_IPV_6 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV6_CLOUDFLARE_B }, PRNE_IPV_6 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV6_QUAD9_A }, PRNE_IPV_6 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV6_QUAD9_B }, PRNE_IPV_6 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV6_CLEANBROWSING_A }, PRNE_IPV_6 }, 853 },
+	{ { { PRNE_RESOLV_NS_IPV6_CLEANBROWSING_B }, PRNE_IPV_6 }, 853 }
+};
+
+const prne_resolv_ns_pool_t PRNE_RESOLV_DEF_IPV6_POOL = {
+	RESOLV_DEF_IPV6_EP_ARR,
+	sizeof(RESOLV_DEF_IPV6_EP_ARR)/sizeof(prne_net_endpoint_t),
+	false
+};
+
 #define DECL_CTX_PTR(p) prne_resolv_t *ctx = (prne_resolv_t*)p
 
 static const struct timespec RESOLV_RSRC_ERR_PAUSE = { 1, 0 }; // 1s
@@ -83,48 +112,6 @@ static const struct timespec RESOLV_SCK_OP_TIMEOUT = { 10, 0 }; // 10s
 static const struct timespec RESOLV_SCK_IDLE_TIMEOUT = { 15, 0 }; // 15s
 static const struct timespec RESOLV_SCK_CLOSE_TIMEOUT = { 1, 0 }; // 1s
 static const size_t RESOLV_PIPELINE_SIZE = 4; 
-
-static prne_net_endpoint_t DEF_IPV4_EP[] = {
-	// Google
-	{ { { 0x8, 0x8, 0x8, 0x8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 }, PRNE_IPV_4 }, 853 },
-	{ { { 0x8, 0x8, 0x4, 0x4, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 }, PRNE_IPV_4 }, 853 },
-	// Cloudflare
-	{ { { 0x1, 0x1, 0x1, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 }, PRNE_IPV_4 }, 853 },
-	{ { { 0x1, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 }, PRNE_IPV_4 }, 853 },
-	// Quad9
-	{ { { 0x9, 0x9, 0x9, 0xa, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 }, PRNE_IPV_4 }, 853 },
-	{ { { 0x95, 0x70, 0x70, 0xa, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 }, PRNE_IPV_4 }, 853 },
-	// CleanBrowsing
-	{ { { 0xb9, 0xe4, 0xa8, 0x9, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 }, PRNE_IPV_4 }, 853 },
-	{ { { 0xb9, 0xe4, 0xa9, 0x9, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 }, PRNE_IPV_4 }, 853 }
-};
-
-static resolv_dnssrv_pool_t RESOLV_DEF_IPV4_POOL = {
-	DEF_IPV4_EP,
-	sizeof(DEF_IPV4_EP)/sizeof(prne_net_endpoint_t),
-	false
-};
-
-static prne_net_endpoint_t DEF_IPV6_EP[] = {
-	// Google
-	{ { { 0x20, 0x1, 0x48, 0x60, 0x48, 0x60, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x88, 0x88 }, PRNE_IPV_6 }, 853 },
-	{ { { 0x20, 0x1, 0x48, 0x60, 0x48, 0x60, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x88, 0x44 }, PRNE_IPV_6 }, 853 },
-	// Cloudflare
-	{ { { 0x26, 0x6, 0x47, 0x0, 0x47, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x11, 0x11 }, PRNE_IPV_6 }, 853 },
-	{ { { 0x26, 0x6, 0x47, 0x0, 0x47, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x10, 0x1 }, PRNE_IPV_6 }, 853 },
-	// Quad9
-	{ { { 0x26, 0x20, 0x0, 0xfe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfe }, PRNE_IPV_6 }, 853 },
-	{ { { 0x26, 0x20, 0x0, 0xfe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x9 }, PRNE_IPV_6 }, 853 },
-	// CleanBrowsing
-	{ { { 0x2a, 0xd, 0x2a, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2 }, PRNE_IPV_6 }, 853 },
-	{ { { 0x2a, 0xd, 0x2a, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2 }, PRNE_IPV_6 }, 853 }
-};
-
-static resolv_dnssrv_pool_t RESOLV_DEF_IPV6_POOL = {
-	DEF_IPV6_EP,
-	sizeof(DEF_IPV6_EP)/sizeof(prne_net_endpoint_t),
-	false
-};
 
 static int resolv_set_cmn_fd_opt (const int fd) {
 	// TODO: no FD_CLOEXEC
@@ -357,8 +344,8 @@ static void resolv_close_sck (prne_resolv_t *ctx, const struct timespec *pause, 
 		prne_unint_pth_nanosleep(*pause);
 	}
 	if (change_srvr) {
-		ctx->ptr_dnssrv4 = resolv_next_pool_ptr(ctx, ctx->dnssrv_4.cnt);
-		ctx->ptr_dnssrv6 = resolv_next_pool_ptr(ctx, ctx->dnssrv_6.cnt);
+		ctx->ptr_nspool4 = resolv_next_pool_ptr(ctx, ctx->nspool4.cnt);
+		ctx->ptr_nspool6 = resolv_next_pool_ptr(ctx, ctx->nspool6.cnt);
 	}
 }
 
@@ -385,7 +372,7 @@ static bool resolv_ensure_act_dns_fd (prne_resolv_t *ctx) {
 			struct sockaddr_in6 addr;
 
 			memzero(&addr, sizeof(addr));
-			prne_net_ep_tosin6(ctx->dnssrv_6.arr + ctx->ptr_dnssrv4, &addr);
+			prne_net_ep_tosin6(ctx->nspool6.arr + ctx->ptr_nspool4, &addr);
 			if (connect(pfs[0].fd, (const struct sockaddr*)&addr, sizeof(addr)) < 0 && errno != EINPROGRESS) {
 				prne_close(pfs[0].fd);
 				pfs[0].fd = -1;
@@ -402,7 +389,7 @@ static bool resolv_ensure_act_dns_fd (prne_resolv_t *ctx) {
 			struct sockaddr_in addr;
 
 			memzero(&addr, sizeof(addr));
-			prne_net_ep_tosin4(ctx->dnssrv_4.arr + ctx->ptr_dnssrv6, &addr);
+			prne_net_ep_tosin4(ctx->nspool4.arr + ctx->ptr_nspool6, &addr);
 			if (connect(pfs[1].fd, (const struct sockaddr*)&addr, sizeof(addr)) < 0 && errno != EINPROGRESS) {
 				prne_close(pfs[1].fd);
 				pfs[1].fd = -1;				
@@ -1184,12 +1171,8 @@ static void resolv_wkr_free (void *p) {
 		return;
 	}
 
-	if (ctx->dnssrv_4.ownership) {
-		prne_free(ctx->dnssrv_4.arr);
-	}
-	if (ctx->dnssrv_6.ownership) {
-		prne_free(ctx->dnssrv_6.arr);
-	}
+	prne_resolv_free_ns_pool(&ctx->nspool4);
+	prne_resolv_free_ns_pool(&ctx->nspool6);
 	prne_free_llist(&ctx->qlist);
 	prne_free_imap(&ctx->qid_map);
 	mbedtls_ssl_config_free(&ctx->ssl.conf);
@@ -1248,7 +1231,7 @@ static void *resolv_wkr_entry (void *p) {
 	return NULL;
 }
 
-prne_resolv_t *prne_alloc_resolv (prne_worker_t *wkr, mbedtls_ctr_drbg_context *ctr_drbg) {
+prne_resolv_t *prne_alloc_resolv (prne_worker_t *wkr, mbedtls_ctr_drbg_context *ctr_drbg, const prne_resolv_ns_pool_t pool_v4, const prne_resolv_ns_pool_t pool_v6) {
 	prne_resolv_t *ctx = NULL;
 
 	if (wkr == NULL || ctr_drbg == NULL) {
@@ -1272,10 +1255,10 @@ prne_resolv_t *prne_alloc_resolv (prne_worker_t *wkr, mbedtls_ctr_drbg_context *
 	pth_mutex_init(&ctx->lock);
 	pth_cond_init(&ctx->cond);
 
-	ctx->dnssrv_4 = RESOLV_DEF_IPV4_POOL;
-	ctx->dnssrv_6 = RESOLV_DEF_IPV6_POOL;
-	ctx->ptr_dnssrv4 = resolv_next_pool_ptr(ctx, ctx->dnssrv_4.cnt);
-	ctx->ptr_dnssrv6 = resolv_next_pool_ptr(ctx, ctx->dnssrv_6.cnt);
+	ctx->nspool4 = pool_v4;
+	ctx->nspool6 = pool_v6;
+	ctx->ptr_nspool4 = resolv_next_pool_ptr(ctx, ctx->nspool4.cnt);
+	ctx->ptr_nspool6 = resolv_next_pool_ptr(ctx, ctx->nspool6.cnt);
 	if (mbedtls_ssl_config_defaults(&ctx->ssl.conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) != 0) {
 		goto ERR;
 	}
@@ -1350,6 +1333,37 @@ void prne_resolv_free_prm (prne_resolv_prm_t *prm) {
 
 	prm->ctx = NULL;
 	prm->fut = NULL;
+}
+
+void prne_resolv_init_ns_pool (prne_resolv_ns_pool_t *pool) {
+	pool->arr = NULL;
+	pool->cnt = 0;
+	pool->ownership = true;
+}
+
+void prne_resolv_free_ns_pool (prne_resolv_ns_pool_t *pool) {
+	if (pool->ownership) {
+		prne_free(pool->arr);
+	}
+	pool->arr = NULL;
+	pool->cnt = 0;
+	pool->ownership = true;
+}
+
+bool prne_resolv_alloc_ns_pool (prne_resolv_ns_pool_t *pool, const size_t cnt) {
+	void *ny;
+
+	ny = prne_realloc(pool->ownership ? pool->arr : NULL, sizeof(prne_net_endpoint_t), cnt);
+	if (ny != NULL) {
+		pool->arr = (prne_net_endpoint_t*)ny;
+		pool->cnt = cnt;
+		pool->ownership = true;
+		memzero(pool->arr, cnt * sizeof(prne_net_endpoint_t));
+		
+		return true;
+	}
+
+	return false;
 }
 
 void prne_resolv_init_prm (prne_resolv_prm_t *prm) {

@@ -304,3 +304,54 @@ char *prne_pack_ret_tostr (const prne_pack_ret_t pr) {
 	}
 	return buf;
 }
+
+void prne_init_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx) {
+	ctx->line_len = 0;
+	ctx->out_len = 0;
+}
+
+void prne_free_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx) {
+	ctx->line_len = 0;
+	ctx->out_len = 0;
+}
+
+prne_pack_ret_t prne_stdin_base64_rf (void *in_ctx, const size_t req, uint8_t *out, size_t *out_len) {
+	prne_stdin_base64_rf_ctx_t *ctx = (prne_stdin_base64_rf_ctx_t*)in_ctx;
+	size_t rem = req, have;
+	prne_pack_ret_t ret;
+
+	ret.rc = PRNE_PACK_RC_OK;
+	ret.err = 0;
+	*out_len = 0;
+
+	while (true) {
+		have = prne_op_min(rem, ctx->out_len);
+		memcpy(out, ctx->out_buf, have);
+		memmove(ctx->out_buf, ctx->out_buf + have, ctx->out_len - have);
+		rem -= have;
+		ctx->out_len -= have;
+		out += have;
+		*out_len += have;
+
+		if (rem == 0) {
+			break;
+		}
+
+		if (fgets(ctx->line_buf, sizeof(ctx->line_buf), stdin) == NULL) {
+			if (feof(stdin)) {
+				break;
+			}
+			ret.rc = PRNE_PACK_RC_ERRNO;
+			ret.err = errno;
+			break;
+		}
+		ctx->line_len = prne_str_shift_spaces(ctx->line_buf, strlen(ctx->line_buf));
+
+		if ((ret.err = mbedtls_base64_decode(ctx->out_buf, sizeof(ctx->out_buf), &ctx->out_len, (unsigned char*)ctx->line_buf, ctx->line_len)) != 0) {
+			ret.rc = PRNE_PACK_RC_MBEDTLS_ERR;
+			break;
+		}
+	}
+
+	return ret;
+}

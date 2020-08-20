@@ -65,7 +65,7 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 		size_t verb_len, obj_len;
 		bool has_prm = false;
 
-		prne_assert(rm[1].rm_so >= 0 && rm[2].rm_so >= 0);
+		prne_dbgast(rm[1].rm_so >= 0 && rm[2].rm_so >= 0);
 
 		verb = line + rm[1].rm_so;
 		verb_len = rm[1].rm_eo - rm[1].rm_so;
@@ -262,7 +262,7 @@ int main (void) {
 	prne_assert(mbedtls_ctr_drbg_seed(&rnd, mbedtls_entropy_func, &entropy, (const uint8_t*)PRNE_BUILD_ENTROPY, sizeof(PRNE_BUILD_ENTROPY) - 1) == 0);
 	prne_init_llist(&prm_list);
 	
-	resolv = prne_alloc_resolv(&wkr_arr[0], &rnd);
+	resolv = prne_alloc_resolv(&wkr_arr[0], &rnd, PRNE_RESOLV_DEF_IPV4_POOL, PRNE_RESOLV_DEF_IPV6_POOL);
 	prne_assert(resolv != NULL);
 
 	wkr_arr[1].entry = stdin_wkr_entry;

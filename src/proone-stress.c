@@ -56,7 +56,7 @@ static void child_signal_handler (const int sn);
 static void sendall(const int sn);
 
 int main (const int argc, const char **args) {
-	static const size_t ALIGNED_SHARED_SIZE = prne_malign_to(sizeof(shared_t), 8);
+	static const size_t ALIGNED_SHARED_SIZE = prne_salign_next(sizeof(shared_t), 8);
 #define END_ON_ERR(retval, val, fname, eq)\
 	if ((eq && retval != val) || (!eq && retval == val)) {\
 		perror(fname);\

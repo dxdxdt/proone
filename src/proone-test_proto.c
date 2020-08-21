@@ -28,14 +28,13 @@ int main (void) {
 
 static void test_ser (void) {
 	static size_t actual;
-	static char test_id[256];
-	static char test_pw[256];
 	static prne_htbt_msg_head_t mh_a, mh_b;
 	static prne_htbt_status_t s_a, s_b;
 	static prne_host_cred_t hc_a, hc_b;
-	static uint8_t salt;
 	static uint8_t *cred_data = NULL;
 	static size_t cred_data_len = 0;
+	static char *encoded_cred_str = NULL;
+	static size_t encoded_cred_str_len = 0;
 	static prne_htbt_host_info_t hi_a, hi_b;
 	static prne_htbt_cmd_t cmd_a, cmd_b;
 	static char *test_args[] = {
@@ -69,7 +68,7 @@ static void test_ser (void) {
 		"123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", 
 		"123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", 
 		"123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", 
-		"123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", NULL
+		"123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "123", "12", NULL
 	};
 	static char *too_long_mem_args[] = {
 		"1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", "1234567", 
@@ -81,16 +80,7 @@ static void test_ser (void) {
 	};
 	static prne_htbt_bin_meta_t bm_a, bm_b;
 	static const uint8_t prog_ver[] = PRNE_PROG_VER;
-
-	// init
-	for (size_t i = 0; i < 255; i += 1) {
-		test_id[i] = (char)(i + 1);
-		test_pw[254 - i] = (char)(i + 1);
-	}
-	test_pw[255] = test_id[255] = 0;
-	assert(strlen(test_id) == 255 && strlen(test_pw) == 255);
-
-	assert(prne_geturandom(&salt, 1) == 1);
+	static const char CRED_STR[] = "qwertyuiop[]asdfghjkl;'zxcvbnm,./`1234567890-=~!@#$%^&*()_+|\\";
 
 	// free functions should accept NULL
 	prne_htbt_free_msg_head(NULL);
@@ -160,21 +150,30 @@ static void test_ser (void) {
 	prne_htbt_free_status(&s_b);	
 
 	// empty cred
+	// zero-size alloc
 	prne_init_host_cred(&hc_a);
 	prne_init_host_cred(&hc_b);
 	assert(prne_alloc_host_cred(&hc_a, 0, 0));
 	hc_a.id[0] = 0;
 	hc_a.pw[0] = 0;
-	assert(prne_enc_host_cred(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, salt, &hc_a) == PRNE_HTBT_SER_RC_OK);
+	assert(prne_enc_host_cred(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, &hc_a) == PRNE_HTBT_SER_RC_OK);
+	assert(prne_dec_host_cred(proto_buf, proto_buf_cnt_len, &hc_b) == PRNE_HTBT_SER_RC_OK);
+	assert(prne_eq_host_cred(&hc_a, &hc_b));
+	prne_free_host_cred(&hc_a);
+	prne_free_host_cred(&hc_b);
+	// no alloc
+	prne_init_host_cred(&hc_a);
+	prne_init_host_cred(&hc_b);
+	assert(prne_enc_host_cred(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, &hc_a) == PRNE_HTBT_SER_RC_OK);
 	assert(prne_dec_host_cred(proto_buf, proto_buf_cnt_len, &hc_b) == PRNE_HTBT_SER_RC_OK);
 	assert(prne_eq_host_cred(&hc_a, &hc_b));
 	prne_free_host_cred(&hc_a);
 	prne_free_host_cred(&hc_b);
 	// normal case
-	assert(prne_alloc_host_cred(&hc_a, 255, 255));
-	strcpy(hc_a.id, test_id);
-	strcpy(hc_a.pw, test_pw);
-	assert(prne_enc_host_cred(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, salt, &hc_a) == PRNE_HTBT_SER_RC_OK);
+	assert(prne_alloc_host_cred(&hc_a, strlen(CRED_STR), strlen(CRED_STR)));
+	strcpy(hc_a.id, CRED_STR);
+	strcpy(hc_a.pw, CRED_STR);
+	assert(prne_enc_host_cred(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, &hc_a) == PRNE_HTBT_SER_RC_OK);
 	cred_data_len = proto_buf_cnt_len;
 	cred_data = (uint8_t*)prne_malloc(1, proto_buf_cnt_len);
 	memcpy(cred_data, proto_buf, proto_buf_cnt_len);
@@ -183,41 +182,53 @@ static void test_ser (void) {
 	prne_free_host_cred(&hc_a);
 	prne_free_host_cred(&hc_b);
 
+	// Base64 encode the cred data
+	encoded_cred_str = prne_enc_base64_mem(cred_data, cred_data_len);
+	assert(encoded_cred_str != NULL);
+	encoded_cred_str_len = strlen(encoded_cred_str);
+	assert(encoded_cred_str_len < 256);
+
 	// host info
 	prne_htbt_init_host_info(&hi_a);
 	prne_htbt_init_host_info(&hi_b);
-	prne_htbt_alloc_host_info(&hi_a, cred_data_len);
+	// without ownership of host_cred
 	hi_a.parent_uptime = 0xABBABABEFEFFFFFE;
 	hi_a.child_uptime = 0xDEADBEEFAABBCCDD;
-	hi_a.rerun_cnt = 0x1122334455667788;
+	hi_a.crash_cnt = 0x11223344;
 	hi_a.bne_cnt = 0x8899AABBCCDDEEFF;
 	hi_a.infect_cnt = 0xABBAABBAABBAABBA;
 	hi_a.parent_pid = 0xDEADBEEF;
 	hi_a.child_pid = 0xBABEBABE;
+	hi_a.host_cred = encoded_cred_str;
 	memcpy(hi_a.prog_ver, prog_ver, sizeof(prog_ver));
 	memcpy(hi_a.boot_id, "\x30\x1d\x25\x39\x90\x85\x42\xfd\x90\xb6\x20\x0b\x4a\x3b\x08\x55", 16);
 	memcpy(hi_a.instance_id, "\x25\xdc\x7e\xa2\x4a\xc6\x4a\x29\x9f\xac\xbe\x18\x42\x33\xc4\x85", 16);
-	memcpy(hi_a.cred, cred_data, cred_data_len);
 	hi_a.arch = prne_host_arch;
 	assert(prne_htbt_ser_host_info(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, &hi_a) == PRNE_HTBT_SER_RC_OK);
 	assert(
-		proto_buf_cnt_len == 99 + cred_data_len &&
+		proto_buf_cnt_len == 94 + encoded_cred_str_len &&
 		memcmp(proto_buf, prog_ver, 16) == 0 &&
 		memcmp(
 			proto_buf + 16,
-			"\x30\x1d\x25\x39\x90\x85\x42\xfd\x90\xb6\x20\x0b\x4a\x3b\x08\x55"
-			"\x25\xdc\x7e\xa2\x4a\xc6\x4a\x29\x9f\xac\xbe\x18\x42\x33\xc4\x85"
-			"\xAB\xBA\xBA\xBE\xFE\xFF\xFF\xFE"
-			"\xDE\xAD\xBE\xEF\xAA\xBB\xCC\xDD"
-			"\x11\x22\x33\x44\x55\x66\x77\x88"
-			"\x88\x99\xAA\xBB\xCC\xDD\xEE\xFF"
-			"\xAB\xBA\xAB\xBA\xAB\xBA\xAB\xBA"
-			"\xDE\xAD\xBE\xEF"
-			"\xBA\xBE\xBA\xBE"
-			"\x02\x01",
-			82) == 0 &&
-		proto_buf[16 + 82] == (uint8_t)prne_host_arch &&
-		memcmp(proto_buf + 16 + 82 + 1, cred_data, cred_data_len) == 0);
+			"\x30\x1d\x25\x39\x90\x85\x42\xfd\x90\xb6\x20\x0b\x4a\x3b\x08\x55" // boot_id
+			"\x25\xdc\x7e\xa2\x4a\xc6\x4a\x29\x9f\xac\xbe\x18\x42\x33\xc4\x85" // instance_id
+			"\xAB\xBA\xBA\xBE\xFE\xFF\xFF\xFE" // parent_uptime
+			"\xDE\xAD\xBE\xEF\xAA\xBB\xCC\xDD" // child_uptime
+			"\x88\x99\xAA\xBB\xCC\xDD\xEE\xFF" // bne_cnt
+			"\xAB\xBA\xAB\xBA\xAB\xBA\xAB\xBA" // infect_cnt
+			"\x11\x22\x33\x44" // crash_cnt
+			"\xDE\xAD\xBE\xEF" // parent_pid
+			"\xBA\xBE\xBA\xBE", // child_pid
+			76) == 0 &&
+		(size_t)proto_buf[16 + 76] == encoded_cred_str_len &&
+		proto_buf[16 + 76 + 1] == (uint8_t)prne_host_arch &&
+		memcmp(proto_buf + 16 + 76 + 1 + 1, encoded_cred_str, encoded_cred_str_len) == 0);
+	assert(prne_htbt_dser_host_info(proto_buf, proto_buf_cnt_len, &actual, &hi_b) == PRNE_HTBT_SER_RC_OK);
+	assert(prne_htbt_eq_host_info(&hi_a, &hi_b));
+	hi_a.host_cred = NULL;
+	// with ownership of host_cred
+	prne_htbt_alloc_host_info(&hi_a, cred_data_len);
+	assert(prne_htbt_ser_host_info(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, &hi_a) == PRNE_HTBT_SER_RC_OK);
 	assert(prne_htbt_dser_host_info(proto_buf, proto_buf_cnt_len, &actual, &hi_b) == PRNE_HTBT_SER_RC_OK);
 	assert(prne_htbt_eq_host_info(&hi_a, &hi_b));
 	prne_htbt_free_host_info(&hi_a);
@@ -258,7 +269,10 @@ static void test_ser (void) {
 	prne_htbt_free_bin_meta(&bm_b);
 
 
+	prne_free(encoded_cred_str);
 	prne_free(cred_data);
+	encoded_cred_str = NULL;
+	encoded_cred_str_len = 0;
 	cred_data = NULL;
 	cred_data_len = 0;
 }

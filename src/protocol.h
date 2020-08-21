@@ -87,14 +87,14 @@ typedef enum {
 	* 	uint8_t instance_id[16]
 	* 	uint64_t parent_uptime	: in seconds
 	* 	uint64_t child_uptime	: in seconds
-	* 	uint64_t rerun_cnt		: rerun count
 	* 	uint64_t bne_cnt		: break-and-entry count
 	* 	uint64_t infect_cnt		: infect count ( <= 'bne_cnt')
+	*	uint32_t crash_cnt
 	* 	uint32_t parent_pid
 	* 	uint32_t child_pid
-	* 	uint16_t cred_size
+	* 	uint8_t host_cred_len
 	* 	uint8_t arch			: `prne_arch_t` value
-	* 	uint8_t cred[cred_size]
+	* 	uint8_t host_cred[host_cred_len]
 	*/
 	PRNE_HTBT_OP_HOST_INFO,
 	/* Hand Over Operation
@@ -120,7 +120,8 @@ typedef enum {
 	* TODO
 	*
 	* Followed by
-	* 	uint16_t args_len	: the length of 'args'
+	*	uint4_t rsv
+	* 	uint12_t args_len	: the length of 'args'
 	* 	char args[len]		: the series of null-terminated string for exec*()
 	*/
 	PRNE_HTBT_OP_RUN_CMD,
@@ -129,7 +130,8 @@ typedef enum {
 	*
 	* Followed by:
 	* 	uint24_t bin_len
-	* 	uint16_t args_len
+	*	uint4_t rsv
+	* 	uint12_t args_len
 	* 	char args[args_len]
 	* 	uint8_t bin[bin_len]
 	*/
@@ -139,7 +141,8 @@ typedef enum {
 	*
 	* Followed by:
 	* 	uint24_t bin_len
-	* 	uint16_t args_len
+	*	uint4_t rsv
+	* 	uint12_t args_len
 	* 	char args[args_len]
 	* 	uint8_t bin[bin_len]
 	*/
@@ -190,7 +193,6 @@ struct prne_htbt_status {
 struct prne_htbt_host_info {
 	uint64_t parent_uptime;
 	uint64_t child_uptime;
-	uint64_t rerun_cnt;
 	uint64_t bne_cnt;
 	uint64_t infect_cnt;
 	uint32_t parent_pid;
@@ -198,8 +200,8 @@ struct prne_htbt_host_info {
 	uint8_t prog_ver[16];
 	uint8_t boot_id[16];
 	uint8_t instance_id[16];
-	uint8_t *cred;
-	uint16_t cred_size;
+	char *host_cred;
+	uint32_t crash_cnt;
 	prne_arch_t arch;
 };
 
@@ -224,7 +226,7 @@ typedef prne_htbt_ser_rc_t(prne_htbt_dser_ft)(const uint8_t *data, const size_t 
 #define PRNE_HTBT_PROTO_MIN_BUF ((size_t)3 + 99 + 3 + 255 + 255) // PRNE_HTBT_OP_HOST_INFO
 #define PRNE_HTBT_PROTO_PORT (uint16_t)64420
 #define PRNE_HTBT_ARGS_MAX 1024 // _POSIX_ARG_MAX equiv
-#define PRNE_HTBT_ARG_MEM_MAX 4096 // bash limit
+#define PRNE_HTBT_ARG_MEM_MAX 4095 // bash limit
 
 
 const char *prne_arch_tostr (const prne_arch_t x);
@@ -247,11 +249,11 @@ void prne_init_host_cred (prne_host_cred_t *hc);
 bool prne_alloc_host_cred (prne_host_cred_t *hc, const uint8_t id_len, const uint8_t pw_len);
 void prne_free_host_cred (prne_host_cred_t *hc);
 bool prne_eq_host_cred (const prne_host_cred_t *a, const prne_host_cred_t *b);
-prne_htbt_ser_rc_t prne_enc_host_cred (uint8_t *data, const size_t len, size_t *actual, const uint8_t salt, const prne_host_cred_t *in);
+prne_htbt_ser_rc_t prne_enc_host_cred (uint8_t *data, const size_t len, size_t *actual, const prne_host_cred_t *in);
 prne_htbt_ser_rc_t prne_dec_host_cred (const uint8_t *data, const size_t len, prne_host_cred_t *out);
 
 void prne_htbt_init_host_info (prne_htbt_host_info_t *hi);
-bool prne_htbt_alloc_host_info (prne_htbt_host_info_t *hi, const size_t cred_size);
+bool prne_htbt_alloc_host_info (prne_htbt_host_info_t *hi, const size_t cred_strlen);
 void prne_htbt_free_host_info (prne_htbt_host_info_t *hi);
 bool prne_htbt_eq_host_info (const prne_htbt_host_info_t *a, const prne_htbt_host_info_t *b);
 
@@ -266,7 +268,7 @@ void prne_htbt_free_bin_meta (prne_htbt_bin_meta_t *nb);
 bool prne_htbt_eq_bin_meta (const prne_htbt_bin_meta_t *a, const prne_htbt_bin_meta_t *b);
 
 prne_htbt_ser_rc_t prne_htbt_ser_msg_head (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_msg_head_t *in);
-prne_htbt_ser_rc_t prne_htbt_ser_status (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_status_t *in); // TODO: test
+prne_htbt_ser_rc_t prne_htbt_ser_status (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_status_t *in);
 prne_htbt_ser_rc_t prne_htbt_ser_host_info (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_host_info_t *in);
 prne_htbt_ser_rc_t prne_htbt_ser_cmd (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_cmd_t *in);
 prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_bin_meta_t *in);

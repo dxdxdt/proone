@@ -99,13 +99,7 @@ size_t prne_getpagesize (void) {
 }
 
 bool prne_nstreq (const char *a, const char *b) {
-	if (a == NULL && b == NULL) {
-		return true;
-	}
-	if (a == NULL || b == NULL) {
-		return false;
-	}
-	return strcmp(a, b) == 0;
+	return strcmp(a == NULL ? "" : a, b == NULL ? "" : b) == 0;
 }
 
 size_t prne_nstrlen (const char *s) {

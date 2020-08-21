@@ -1,7 +1,7 @@
 BIN_ALIGNMENT = 8
 
 # TODO: Use -D_POSIX_C_SOURCE=200112L or -D_POSIX_C_SOURCE=2
-AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -D_GNU_SOURCE -Wno-unused-parameter -DPRNE_BIN_ALIGNMENT=$(BIN_ALIGNMENT)
+AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -D_GNU_SOURCE -Wno-unused-parameter -DPRNE_BIN_ALIGNMENT=$(BIN_ALIGNMENT) -fdata-sections -ffunction-sections -Wl,--gc-sections
 if DEBUG
 AM_CFLAGS += -g -O0 -DPRNE_DEBUG
 else
@@ -11,6 +11,7 @@ endif
 noinst_LIBRARIES = libproone.a
 my_DATA = proone testlist
 mydir = $(bindir)
+
 bin_PROGRAMS =\
 	proone.bin\
 	proone-mkdvault\

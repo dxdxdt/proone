@@ -28,7 +28,9 @@ AC_CHECK_LIB([mbedtls], [mbedtls_ssl_init], [], [AC_MSG_ERROR([mbedtls not found
 AC_CHECK_LIB([mbedx509], [mbedtls_x509_crt_parse], [], [AC_MSG_ERROR([mbedtls not found])])
 AC_CHECK_LIB([pthsem], [pth_init], [], [AC_MSG_ERROR([pthsem not found])])
 
-AC_DEFINE_UNQUOTED([PRNE_BUILD_ENTROPY], ["`uuidgen -r`"])
+AC_DEFINE_UNQUOTED(
+	[PRNE_BUILD_ENTROPY],
+	[{ $(xxd -l16 -ps /dev/urandom | sed -E s/\(\\S{2}\)/0x\&,\ /g | sed -E s/,\ \$//) }])
 
 AC_CONFIG_FILES([Makefile src/Makefile])
 AC_OUTPUT

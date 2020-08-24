@@ -14,7 +14,7 @@ void prne_init_worker (prne_worker_t *w) {
 
 void prne_free_worker (prne_worker_t *w) {
 	if (w->ctx != NULL) {
-		prne_assert(w->free_ctx != NULL);	
+		prne_assert(w->free_ctx != NULL);
 		w->free_ctx(w->ctx);
 		w->ctx = NULL;
 	}
@@ -46,22 +46,16 @@ bool prne_pth_cond_timedwait (prne_pth_cv_t *cv, const struct timespec *timeout,
 
 	if (timeout != NULL) {
 		ev = pth_event(PTH_EVENT_TIME, pth_timeout(timeout->tv_sec, timeout->tv_nsec / 1000));
-		if (ev == NULL) {
-			return -1;
-		}
+		prne_assert(ev != NULL);
 	}
 	else {
 		ev = NULL;
 	}
 
-	if (pth_mutex_acquire(cv->lock, FALSE, NULL)) {
-		ret = pth_cond_await(cv->cond, cv->lock, ev);
-		prne_assert(pth_mutex_release(cv->lock));
-	}
-	else {
-		ret = false;
-	}
-	
+	prne_assert(pth_mutex_acquire(cv->lock, FALSE, NULL));
+	ret = pth_cond_await(cv->cond, cv->lock, ev) != 0;
+	prne_assert(pth_mutex_release(cv->lock));
+
 	if (ev != NULL && pth_event_occurred(ev)) {
 		ret = true;
 		reached = true;

@@ -44,7 +44,7 @@ void *prne_malloc (const size_t se, const size_t cnt) {
 	if (size == 0) {
 		return NULL;
 	}
-	
+
 	return malloc(size);
 }
 
@@ -73,7 +73,7 @@ void *prne_calloc (const size_t se, const size_t cnt) {
 	if (se == 0 || cnt == 0) {
 		return NULL;
 	}
-	
+
 	return calloc(se, cnt);
 }
 
@@ -281,6 +281,15 @@ double prne_real_timespec (const struct timespec ts) {
 	return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
 }
 
+struct timespec prne_ms_timespec (const long ms) {
+	struct timespec ret;
+
+	ret.tv_sec = ms / 1000;
+	ret.tv_nsec = (ms - ret.tv_sec * 1000) * 1000000;
+
+	return ret;
+}
+
 int prne_cmp_timespec (const struct timespec a, const struct timespec b) {
 	if (a.tv_sec < b.tv_sec) {
 		return -1;
@@ -303,6 +312,20 @@ struct timespec prne_max_timespec (const struct timespec a, const struct timespe
 struct timespec prne_gettime (const clockid_t cid) {
 	struct timespec ret;
 	prne_assert(clock_gettime(cid, &ret) == 0);
+	return ret;
+}
+
+struct timeval prne_ts2tv (const struct timespec ts) {
+	struct timeval ret;
+	ret.tv_sec = ts.tv_sec;
+	ret.tv_usec = ts.tv_nsec / 1000;
+	return ret;
+}
+
+struct timeval prne_ms_timeval (const long ms) {
+	struct timeval ret;
+	ret.tv_sec = ms / 1000;
+	ret.tv_usec = (ms - ret.tv_sec * 1000) * 1000;
 	return ret;
 }
 
@@ -351,16 +374,6 @@ bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data,
 	*data = ret;
 	*size = ret_size;
 	return true;
-}
-
-bool prne_set_pipe_size (const int fd, const int size) {
-	return 
-#if defined(F_SETPIPE_SZ)
-		fcntl(fd, F_SETPIPE_SZ, size) == 0
-#elif defined(FIONREAD)
-		ioctl(fd, FIONREAD, &size) == 0
-#endif
-		;
 }
 
 ssize_t prne_geturandom (void *buf, const size_t len) {

@@ -1,5 +1,6 @@
 #include "protocol.h"
 #include "util_rt.h"
+#include "endian.h"
 #include "dvault.h"
 
 #include <string.h>
@@ -40,7 +41,7 @@ const char *prne_arch_tostr (const prne_arch_t x) {
 	case PRNE_ARCH_ARCEB:
 		return "arceb";
 	}
-	
+
 	return NULL;
 }
 
@@ -116,7 +117,7 @@ bool prne_alloc_host_cred (prne_host_cred_t *hc, const uint8_t id_len, const uin
 
 	id = prne_alloc_str(id_len);
 	pw = prne_alloc_str(pw_len);
-	if (id == NULL || pw == NULL) { 
+	if (id == NULL || pw == NULL) {
 		prne_free(id);
 		prne_free(pw);
 		return false;
@@ -412,7 +413,7 @@ prne_htbt_ser_rc_t prne_htbt_ser_status (uint8_t *mem, const size_t mem_len, siz
 	if (mem_len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
-	
+
 	mem[0] = (uint8_t)in->code;
 	mem[1] = prne_getmsb32(in->err, 0);
 	mem[2] = prne_getmsb32(in->err, 1);
@@ -528,7 +529,7 @@ prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (uint8_t *mem, const size_t mem_len, s
 
 prne_htbt_ser_rc_t prne_htbt_dser_msg_head (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_msg_head_t *out) {
 	*actual = 3;
-	
+
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
@@ -645,7 +646,7 @@ prne_htbt_ser_rc_t prne_htbt_dser_cmd (const uint8_t *data, const size_t len, si
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
-	
+
 	args_len = prne_recmb_msb16(0x0F & data[0], data[1]);
 	*actual += args_len;
 

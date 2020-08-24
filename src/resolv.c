@@ -111,12 +111,7 @@ static const struct timespec RESOLV_QUERY_TIMEOUT = { 15, 0 }; // 15s
 static const struct timespec RESOLV_SCK_OP_TIMEOUT = { 10, 0 }; // 10s
 static const struct timespec RESOLV_SCK_IDLE_TIMEOUT = { 15, 0 }; // 15s
 static const struct timespec RESOLV_SCK_CLOSE_TIMEOUT = { 1, 0 }; // 1s
-static const size_t RESOLV_PIPELINE_SIZE = 4; 
-
-static int resolv_set_cmn_fd_opt (const int fd) {
-	// TODO: no FD_CLOEXEC
-	return fcntl(fd, F_SETFL, O_NONBLOCK) == 0 ? fcntl(fd, F_SETFD, FD_CLOEXEC) : -1;
-}
+static const size_t RESOLV_PIPELINE_SIZE = 4;
 
 static void resolv_free_q_ent (query_entry_t *q_ent) {
 	if (q_ent == NULL) {
@@ -350,7 +345,6 @@ static void resolv_close_sck (prne_resolv_t *ctx, const struct timespec *pause, 
 }
 
 static bool resolv_ensure_act_dns_fd (prne_resolv_t *ctx) {
-	static const int ov_nodelay = 1;
 	static socklen_t optval_len = sizeof(int);
 	size_t i;
 	struct pollfd pfs[2];
@@ -358,42 +352,48 @@ static bool resolv_ensure_act_dns_fd (prne_resolv_t *ctx) {
 	const struct timespec *err_sleep = NULL;
 	bool ret = false;
 
-	pfs[0].fd = socket(AF_INET6, SOCK_STREAM, 0);
-	pfs[1].fd = socket(AF_INET, SOCK_STREAM, 0);
-	pfs[0].events = POLLOUT;
-	pfs[1].events = POLLOUT;
-	if (pfs[0].fd >= 0) {
-		setsockopt(pfs[0].fd, SOL_TCP, TCP_NODELAY, &ov_nodelay, sizeof(int));
-		if (resolv_set_cmn_fd_opt(pfs[0].fd) < 0) {
-			prne_close(pfs[0].fd);
-			pfs[0].fd = -1;
-		}
-		else {
-			struct sockaddr_in6 addr;
+	{
+		static const int ov_nodelay = 1;
+		static const int ARR_DOMAIN[] = { AF_INET6, AF_INET };
+		static const socklen_t ARR_SL[] = {
+			sizeof(struct sockaddr_in6),
+			sizeof(struct sockaddr_in) };
+		struct sockaddr_in6 sa6;
+		struct sockaddr_in sa4;
+		struct sockaddr *arr_sa[] = {
+			(struct sockaddr*)&sa6,
+			(struct sockaddr*)&sa4 };
 
-			memzero(&addr, sizeof(addr));
-			prne_net_ep_tosin6(ctx->nspool6.arr + ctx->ptr_nspool4, &addr);
-			if (connect(pfs[0].fd, (const struct sockaddr*)&addr, sizeof(addr)) < 0 && errno != EINPROGRESS) {
-				prne_close(pfs[0].fd);
-				pfs[0].fd = -1;
-			}
-		}
-	}
-	if (pfs[1].fd >= 0) {
-		setsockopt(pfs[1].fd, SOL_TCP, TCP_NODELAY, &ov_nodelay, sizeof(int));
-		if (resolv_set_cmn_fd_opt(pfs[1].fd) < 0) {
-			prne_close(pfs[1].fd);
-			pfs[1].fd = -1;
-		}
-		else {
-			struct sockaddr_in addr;
+		memzero(&sa6, sizeof(sa6));
+		memzero(&sa4, sizeof(sa4));
+		prne_net_ep_tosin6(ctx->nspool6.arr + ctx->ptr_nspool6, &sa6);
+		prne_net_ep_tosin4(ctx->nspool4.arr + ctx->ptr_nspool4, &sa4);
 
-			memzero(&addr, sizeof(addr));
-			prne_net_ep_tosin4(ctx->nspool4.arr + ctx->ptr_nspool6, &addr);
-			if (connect(pfs[1].fd, (const struct sockaddr*)&addr, sizeof(addr)) < 0 && errno != EINPROGRESS) {
-				prne_close(pfs[1].fd);
-				pfs[1].fd = -1;				
+		for (i = 0; i < 2; i += 1) {
+			pfs[i].fd = socket(ARR_DOMAIN[i], SOCK_STREAM, 0);
+			pfs[i].events = POLLOUT;
+			if (pfs[i].fd < 0) {
+				goto ERR;
 			}
+			if (fcntl(pfs[i].fd, F_SETFL, O_NONBLOCK) != 0) {
+				goto ERR;
+			}
+			setsockopt(
+				pfs[i].fd,
+				SOL_TCP,
+				TCP_NODELAY,
+				&ov_nodelay,
+				sizeof(int));
+			if (connect(pfs[i].fd, arr_sa[i], ARR_SL[i]) < 0 &&
+				errno != EINPROGRESS)
+			{
+				goto ERR;
+			}
+
+			continue;
+	ERR:
+			prne_close(pfs[i].fd);
+			pfs[i].fd = -1;
 		}
 	}
 
@@ -582,7 +582,7 @@ static int resolv_mapped_qname_cmp (prne_imap_t *map, const uint8_t *a, const ui
 			ret = 1;
 			break;
 		}
-		
+
 		p[0] += 1;
 		p[1] += 1;
 	} while (true);
@@ -629,7 +629,7 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 	// ID
 	{
 		const prne_imap_tuple_t *tpl;
-		
+
 		qid = ((uint16_t)data[0] << 8) | (uint16_t)data[1];
 		tpl = prne_imap_lookup(&ctx->qid_map, qid);
 		ret = tpl != NULL;
@@ -647,7 +647,7 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 		else {
 			qent = NULL;
 		}
-		prne_imap_erase(&ctx->qid_map, qid);		
+		prne_imap_erase(&ctx->qid_map, qid);
 	}
 	// QR
 	if ((data[2] & 0x80) == 0) {
@@ -709,7 +709,7 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 		*err_flag = true;
 		goto END;
 	}
-	
+
 	p += 4;
 	// decode answer RRs
 	for (i = 0; i < ancount; i += 1) {
@@ -747,7 +747,7 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 			loop_cnt = 2;
 			break;
 		case PRNE_RESOLV_RTYPE_CNAME:
-		case PRNE_RESOLV_RTYPE_MX: 
+		case PRNE_RESOLV_RTYPE_MX:
 		case PRNE_RESOLV_RTYPE_NS:
 		case PRNE_RESOLV_RTYPE_PTR:
 			loop_cnt = 1;
@@ -826,7 +826,7 @@ QNAME_START:
 		rr_tuple_t *tpl;
 
 		qent->fut.rr = (prne_resolv_rr_t*)prne_malloc(sizeof(prne_resolv_rr_t), ret_list.size);
-		if (qent->fut.rr == NULL) {	
+		if (qent->fut.rr == NULL) {
 			qr = PRNE_RESOLV_QR_ERR;
 			err = errno;
 			goto END;
@@ -856,7 +856,7 @@ QNAME_START:
 			}
 			else {
 				qent->fut.rr[i].rd_data = NULL;
-				qent->fut.rr[i].rd_len = 0;				
+				qent->fut.rr[i].rd_len = 0;
 			}
 
 			i += 1;
@@ -865,7 +865,7 @@ QNAME_START:
 	}
 
 	qr = PRNE_RESOLV_QR_OK;
-	
+
 END:
 	cur = rr_list.head;
 	while (cur != NULL) {
@@ -905,7 +905,7 @@ static void resolv_write_dns_msg (query_entry_t *qent, uint8_t *mem) {
 	// QR: 0, Opcode: 0, AA:0, TC: 0, RD: 1, RA: 0, Z: 0, RCODE: 0
 	mem[2] = 0x01;
 	mem[3] = 0x00;
-	// QDCOUNT: 1 
+	// QDCOUNT: 1
 	mem[4] = 0x00;
 	mem[5] = 0x01;
 	// ANCOUNT, NSCOUNT, ARCOUNT: 0
@@ -1028,7 +1028,7 @@ LOOP:
 		else {
 			pfd_events = POLLIN;
 		}
-		
+
 		if (!resolv_ensure_conn(ctx)) {
 			goto LOOP;
 		}
@@ -1131,7 +1131,7 @@ LOOP:
 
 static void resolv_proc_close (prne_resolv_t *ctx) {
 	int pollret;
-	
+
 	do {
 		switch (mbedtls_ssl_close_notify(&ctx->ssl.ctx)) {
 		case MBEDTLS_ERR_SSL_WANT_READ:
@@ -1203,6 +1203,7 @@ static void *resolv_wkr_entry (void *p) {
 
 			if (ctx->act_sck_pfd.fd >= 0) {
 				ev = pth_event(PTH_EVENT_TIME, pth_timeout(RESOLV_SCK_IDLE_TIMEOUT.tv_sec, 0));
+				prne_assert(ev != NULL);
 			}
 			else {
 				ev = NULL;
@@ -1218,7 +1219,7 @@ static void *resolv_wkr_entry (void *p) {
 		prne_assert(pth_mutex_release(&ctx->lock));
 
 		if (sck_close) {
-			resolv_proc_close(ctx);	
+			resolv_proc_close(ctx);
 		}
 		resolv_proc_q(ctx);
 	}
@@ -1287,7 +1288,7 @@ bool prne_resolv_prm_gethostbyname (prne_resolv_t *wkr, const char *name, const 
 	bool ret;
 	query_entry_t *q_ent;
 	prne_resolv_query_type_t qt;
-	
+
 	switch (ipv) {
 	case PRNE_IPV_4: qt = PRNE_RESOLV_QT_A; break;
 	case PRNE_IPV_6: qt = PRNE_RESOLV_QT_AAAA; break;
@@ -1359,7 +1360,7 @@ bool prne_resolv_alloc_ns_pool (prne_resolv_ns_pool_t *pool, const size_t cnt) {
 		pool->cnt = cnt;
 		pool->ownership = true;
 		memzero(pool->arr, cnt * sizeof(prne_net_endpoint_t));
-		
+
 		return true;
 	}
 
@@ -1426,7 +1427,7 @@ const char *prne_resolv_rcode_tostr (const prne_resolv_rcode_t rc) {
 	case PRNE_RESOLV_RCODE_SERVFAIL: return "SERVFAIL";
 	case PRNE_RESOLV_RCODE_NXDOMAIN: return "NXDOMAIN";
 	case PRNE_RESOLV_RCODE_NOTIMP: return "NOTIMP";
-	case PRNE_RESOLV_RCODE_REFUSED: return "REFUSED";	
+	case PRNE_RESOLV_RCODE_REFUSED: return "REFUSED";
 	}
 	return NULL;
 }

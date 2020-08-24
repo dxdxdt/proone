@@ -48,15 +48,17 @@ void prne_uuid_tostr (const uint8_t *in, char *out);
 
 struct timespec prne_sub_timespec (const struct timespec a, const struct timespec b);
 double prne_real_timespec (const struct timespec ts);
+struct timespec prne_ms_timespec (const long ms);
 int prne_cmp_timespec (const struct timespec a, const struct timespec b);
 struct timespec prne_min_timespec (const struct timespec a, const struct timespec b);
 struct timespec prne_max_timespec (const struct timespec a, const struct timespec b);
 struct timespec prne_gettime (const clockid_t cid);
 
+struct timeval prne_ts2tv (const struct timespec ts);
+struct timeval prne_ms_timeval (const long ms);
+
 char *prne_enc_base64_mem (const uint8_t *data, const size_t size);
 bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data, size_t *size);
-
-bool prne_set_pipe_size (const int fd, const int size);
 
 // getrandom polyfill
 ssize_t prne_geturandom (void *buf, const size_t len);

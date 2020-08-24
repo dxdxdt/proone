@@ -54,11 +54,11 @@ static bool printable_str (const char *str, const size_t n) {
 		}
 	}
 	return true;
-} 
+}
 
 static void proc_prompt_line (char *line, const size_t line_len) {
 	static regmatch_t rm[3];
-	
+
 	if (regexec(&prmpt_regex, line, 3, rm, 0) == 0) {
 		prne_resolv_prm_t *prm = (prne_resolv_prm_t*)prne_malloc(sizeof(prne_resolv_prm_t), 1);
 		char *verb, *obj;
@@ -102,7 +102,7 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 
 static void *stdin_wkr_entry (void *ctx) {
 	while (main_flag) {
-		static char line_buf[512]; 
+		static char line_buf[512];
 		static size_t line_buf_cnt = 0;
 		static bool missed_line = false;
 		int read_len;
@@ -138,7 +138,7 @@ static void *stdin_wkr_entry (void *ctx) {
 				line_buf_cnt -= consumed;
 			}
 			else {
-				line_buf_cnt = 0;	
+				line_buf_cnt = 0;
 				if (!missed_line) {
 					fprintf(stderr, "* Line too long!\n");
 				}
@@ -153,7 +153,7 @@ static void *stdin_wkr_entry (void *ctx) {
 			break;
 		}
 
-		fflush(stderr);	
+		fflush(stderr);
 	}
 
 	return NULL;
@@ -170,7 +170,7 @@ static void *stdout_wkr_entry (void *ctx) {
 		cur = prm_list.head;
 		while (cur != NULL) {
 			prm = (prne_resolv_prm_t*)cur->element;
-			
+
 			if (prm->fut != NULL && prm->fut->qr != PRNE_RESOLV_QR_NONE) {
 				static char ntop_buf[INET6_ADDRSTRLEN];
 				const char *qr_str, *status_str;
@@ -259,9 +259,9 @@ int main (void) {
 	prne_assert(regcomp(&empty_line_regex, "^\\s+$", REG_NOSUB | REG_EXTENDED) == 0);
 	prne_mbedtls_entropy_init(&entropy);
 	mbedtls_ctr_drbg_init(&rnd);
-	prne_assert(mbedtls_ctr_drbg_seed(&rnd, mbedtls_entropy_func, &entropy, (const uint8_t*)PRNE_BUILD_ENTROPY, sizeof(PRNE_BUILD_ENTROPY) - 1) == 0);
+	prne_assert(mbedtls_ctr_drbg_seed(&rnd, mbedtls_entropy_func, &entropy, NULL, 0) == 0);
 	prne_init_llist(&prm_list);
-	
+
 	resolv = prne_alloc_resolv(&wkr_arr[0], &rnd, PRNE_RESOLV_DEF_IPV4_POOL, PRNE_RESOLV_DEF_IPV6_POOL);
 	prne_assert(resolv != NULL);
 

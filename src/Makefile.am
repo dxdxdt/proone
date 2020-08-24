@@ -7,6 +7,8 @@ AM_CFLAGS += -g -O0 -DPRNE_DEBUG
 else
 AM_CFLAGS += -g -Os
 endif
+# Override AM's default to remove "-I." flag
+DEFAULT_INCLUDES =
 
 noinst_LIBRARIES = libproone.a
 my_DATA = proone testlist
@@ -48,6 +50,7 @@ proone: proone.bin dvault.bin
 	./build-utils.sh append-uint32 0 proone
 	cat dvault.bin >> proone
 
+proone_bin_CFLAGS = $(AM_CFLAGS) -fwhole-program
 proone_bin_LDFLAGS = -static
 proone_bin_LDADD = libproone.a
 proone_bin_SOURCES =\

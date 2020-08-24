@@ -1,6 +1,7 @@
 #include "dvault.h"
 #include "util_rt.h"
 #include "util_ct.h"
+#include "endian.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -22,7 +23,7 @@ static void invert_entry (const prne_data_key_t key, prne_data_type_t *type, con
 	m_salt = m_data[m_offsets[key]];
 	m_unmasked = m_data + m_offsets[key] + 1;
 	prne_dvault_invert_mem(3, m_unmasked, m_salt, 0, m_mask);
-	
+
 	*type = (prne_data_type_t)m_unmasked[0];
 	entry_len = ((size_t)m_unmasked[1] << 8) | ((size_t)m_unmasked[2] << 0);
 	m_unmasked_size = 3 + entry_len;
@@ -51,7 +52,7 @@ prne_data_type_t prne_data_type_fstr (const char *str) {
 	if (prne_nstreq(str, prne_data_type_tostr(PRNE_DATA_TYPE_BIN))) {
 		return PRNE_DATA_TYPE_BIN;
 	}
-	
+
 	return PRNE_DATA_TYPE_NONE;
 }
 
@@ -83,7 +84,7 @@ prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const u
 
 	if (data_size > 0xFFFF - 4) {
 		ret.result = PRNE_DVAULT_MASK_TOO_LARGE;
-		return ret;		   
+		return ret;
 	}
 	ret.size = data_size + 4;
 

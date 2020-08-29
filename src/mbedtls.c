@@ -1,11 +1,12 @@
 #include "mbedtls.h"
 #include "util_ct.h"
+#include "util_rt.h"
 
-#include <unistd.h>
 #include <errno.h>
 #include <string.h>
+
+#include <unistd.h>
 #include <fcntl.h>
-#include <time.h>
 
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy_poll.h>
@@ -19,7 +20,7 @@ int prne_mbedtls_x509_crt_verify_cb (void *param, mbedtls_x509_crt *crt, int crt
 int prne_mbedtls_ssl_send_cb (void *ctx, const unsigned char *buf, size_t len) {
 	const int fd = *(int*)ctx;
 	ssize_t ret;
-	
+
 	ret = write(fd, buf, len);
 	if (ret < 0) {
 		switch (errno) {
@@ -83,7 +84,7 @@ typedef struct {
 static int prne_mbedtls_entropy_proc_src_f (void *data, unsigned char *output, size_t len, size_t *olen) {
 	ent_buf_t buf;
 
-	memzero(&buf, sizeof(buf));
+	prne_memzero(&buf, sizeof(buf));
 	buf.pid = getpid();
 	buf.ppid = getppid();
 	buf.clock = clock();
@@ -109,5 +110,50 @@ void prne_mbedtls_entropy_init (mbedtls_entropy_context *ctx) {
 			mbedtls_entropy_add_source(ctx, prne_mbedtls_entropy_proc_src_f, NULL, sizeof(ent_buf_t), MBEDTLS_ENTROPY_SOURCE_STRONG);
 			break;
 		}
+	}
+}
+
+bool prne_mbedtls_pth_handle (
+	mbedtls_ssl_context *ssl,
+	int(*mbedtls_f)(mbedtls_ssl_context*),
+	const int fd,
+	pth_event_t ev)
+{
+	int pollret;
+	struct pollfd pfd;
+
+	pfd.fd = fd;
+
+	while (true) {
+		switch (mbedtls_f(ssl)) {
+		case MBEDTLS_ERR_SSL_WANT_READ:
+			pfd.events = POLLIN;
+			break;
+		case MBEDTLS_ERR_SSL_WANT_WRITE:
+			pfd.events = POLLOUT;
+			break;
+		case 0:
+			return true;
+		default:
+			return false;
+		}
+
+		do {
+			pollret = pth_poll_ev(&pfd, 1, -1, ev);
+			if (pollret < 0) {
+				if (errno == EINTR) {
+					continue;
+				}
+				else {
+					return false;
+				}
+			}
+			if (pollret == 0 || pth_event_status(ev) == PTH_STATUS_OCCURRED) {
+				return false;
+			}
+			if (pfd.revents & (POLLERR | POLLNVAL | POLLHUP)) {
+				return false;
+			}
+		} while (false);
 	}
 }

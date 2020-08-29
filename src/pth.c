@@ -26,12 +26,12 @@ void prne_fin_worker (prne_worker_t *w) {
 	}
 }
 
-bool prne_pth_cv_notify (prne_pth_cv_t *cv) {
+bool prne_pth_cv_notify (pth_mutex_t *lock, pth_cond_t *cond, bool broadcast) {
 	bool ret;
 
-	if (pth_mutex_acquire(cv->lock, FALSE, NULL)) {
-		ret = pth_cond_notify(cv->cond, cv->broadcast) == 0;
-		prne_assert(pth_mutex_release(cv->lock));
+	if (pth_mutex_acquire(lock, FALSE, NULL)) {
+		ret = pth_cond_notify(cond, broadcast) != 0;
+		prne_dbgtrap(pth_mutex_release(lock));
 	}
 	else {
 		ret = false;
@@ -40,71 +40,6 @@ bool prne_pth_cv_notify (prne_pth_cv_t *cv) {
 	return ret;
 }
 
-bool prne_pth_cond_timedwait (prne_pth_cv_t *cv, const struct timespec *timeout, bool *to_reached) {
-	pth_event_t ev;
-	bool ret, reached;
-
-	if (timeout != NULL) {
-		ev = pth_event(PTH_EVENT_TIME, pth_timeout(timeout->tv_sec, timeout->tv_nsec / 1000));
-		prne_assert(ev != NULL);
-	}
-	else {
-		ev = NULL;
-	}
-
-	prne_assert(pth_mutex_acquire(cv->lock, FALSE, NULL));
-	ret = pth_cond_await(cv->cond, cv->lock, ev) != 0;
-	prne_assert(pth_mutex_release(cv->lock));
-
-	if (ev != NULL && pth_event_occurred(ev)) {
-		ret = true;
-		reached = true;
-	}
-	else {
-		reached = false;
-	}
-
-	if (to_reached != NULL) {
-		*to_reached = reached;
-	}
-
-	pth_event_free(ev, FALSE);
-	return ret;
-}
-
-int prne_unint_pth_poll (struct pollfd *fds, nfds_t nfds, const struct timespec *timeout) {
-	pth_event_t ev;
-	int ret;
-
-	if (timeout != NULL) {
-		ev = pth_event(PTH_EVENT_TIME, pth_timeout(timeout->tv_sec, timeout->tv_nsec / 1000));
-		if (ev == NULL) {
-			return -1;
-		}
-	}
-	else {
-		ev = NULL;
-	}
-
-	do {
-		ret = pth_poll_ev(fds, nfds, -1, ev);
-		if (ev != NULL && pth_event_occurred(ev)) {
-			ret = 0;
-			break;
-		}
-		if (ret < 0 && errno == EINTR) {
-			continue;
-		}
-	} while (false);
-
-	pth_event_free(ev, FALSE);
-	return ret;
-}
-
-void prne_unint_pth_nanosleep (struct timespec dur) {
-	struct timespec rem;
-
-	while (pth_nanosleep(&dur, &rem) < 0 && errno == EINTR) {
-		dur = rem;
-	}
+pth_time_t prne_pth_tstimeout (const struct timespec ts) {
+	return pth_timeout(ts.tv_sec, ts.tv_nsec / 1000);
 }

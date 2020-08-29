@@ -11,21 +11,17 @@
 #include <mbedtls/ctr_drbg.h>
 
 
-#if 0
-bool prne_strendsw (const char *str, const char *w) {
-	const size_t len_str = strlen(str);
-	const size_t len_w = strlen(w);
-
-	if (len_str < len_w) {
-		return false;
-	}
-	return strcmp(str + (len_str - len_w), w) == 0;
-}
-#endif
-
 void prne_empty_func (void);
 void prne_close (const int fd);
 void prne_shutdown (const int fd, const int how);
+/* prne_sck_fcntl(fd)
+*
+* Sets FD_CLOEXEC and O_NONBLOCK. Failure to set FD_CLOEXEC is ignored.
+*/
+bool prne_sck_fcntl (const int fd);
+int prne_chfd (const int old, const int ny);
+
+void prne_memzero(void *addr, const size_t len);
 
 void *prne_malloc (const size_t se, const size_t cnt);
 void *prne_realloc (void *ptr, const size_t se, const size_t cnt);
@@ -39,6 +35,7 @@ size_t prne_nstrlen (const char *s);
 void prne_rnd_anum_str (mbedtls_ctr_drbg_context *rnd, char *str, const size_t len);
 char *prne_strnchr (const char *p, const char c, const size_t n);
 size_t prne_str_shift_spaces (char *str, const size_t len);
+void prne_transstr (char *str,  int(*trans_f)(int));
 
 bool prne_hex_fromstr (const char *str, uint_fast8_t *out);
 void prne_hex_tochar (const uint_fast8_t in, char *out, const bool upper);

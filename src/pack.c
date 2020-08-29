@@ -146,7 +146,7 @@ prne_unpack_ctx_pt prne_alloc_unpack_ctx (const prne_bin_archive_t *archive, con
 		pr.err = errno;
 		goto ERR;
 	}
-	memzero(&ret->zs, sizeof(ret->zs));
+	prne_memzero(&ret->zs, sizeof(ret->zs));
 	if (Z_OK != (pr.err = inflateInit(&ret->zs))) {
 		prne_free(ret);
 		ret = NULL;

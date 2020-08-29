@@ -4,6 +4,7 @@
 #include "imap.h"
 #include "resolv.h"
 #include "proone_conf/x509.h"
+#include "proone_conf/config.h"
 
 #include <stdio.h>
 #include <string.h>

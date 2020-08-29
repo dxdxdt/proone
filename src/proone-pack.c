@@ -61,9 +61,9 @@ int main (const int argc, const char **args) {
 	}
 
 	// init
-	memzero(encounter_arr, sizeof(archive_tuple_t*) * NB_PRNE_ARCH);
-	memzero(archive_arr, sizeof(archive_tuple_t) * NB_PRNE_ARCH);
-	memzero(&zs, sizeof(z_stream));
+	prne_memzero(encounter_arr, sizeof(archive_tuple_t*) * NB_PRNE_ARCH);
+	prne_memzero(archive_arr, sizeof(archive_tuple_t) * NB_PRNE_ARCH);
+	prne_memzero(&zs, sizeof(z_stream));
 
 	if ((z_ret = deflateInit(&zs, Z_BEST_COMPRESSION)) != Z_OK) {
 		report_zerror(z_ret, "deflateInit()");

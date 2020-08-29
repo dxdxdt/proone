@@ -102,15 +102,15 @@ static void test_uuid (void) {
 	uint8_t out_arr[16];
 	char out_str[37];
 
-	memzero(out_arr, 16);
-	memzero(out_str, 37);
+	prne_memzero(out_arr, 16);
+	prne_memzero(out_str, 37);
 	assert(prne_uuid_fromstr(sample_str, out_arr));
 	assert(memcmp(sample_arr, out_arr, 16) == 0);
 	prne_uuid_tostr(out_arr, out_str);
 	assert(memcmp(sample_str, out_str, 37) == 0);
 
 	memset(out_arr, 0xFF, 16);
-	memzero(out_str, 37);
+	prne_memzero(out_str, 37);
 	assert(prne_uuid_fromstr(empty_str, out_arr));
 	assert(memcmp(empty_arr, out_arr, 16) == 0);
 	prne_uuid_tostr(out_arr, out_str);

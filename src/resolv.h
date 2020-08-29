@@ -154,6 +154,7 @@ bool prne_resolv_prm_gettxtrec (prne_resolv_t *ctx, const char *name, prne_pth_c
 void prne_resolv_init_ns_pool (prne_resolv_ns_pool_t *pool);
 void prne_resolv_free_ns_pool (prne_resolv_ns_pool_t *pool);
 bool prne_resolv_alloc_ns_pool (prne_resolv_ns_pool_t *pool, const size_t cnt);
+prne_resolv_ns_pool_t prne_resolv_own_ns_pool(const prne_resolv_ns_pool_t *pool, const bool ownership);
 void prne_resolv_init_prm (prne_resolv_prm_t *prm);
 void prne_resolv_free_prm (prne_resolv_prm_t *prm);
 void prne_init_resolv_fut (prne_resolv_fut_t *fut);

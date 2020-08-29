@@ -29,6 +29,31 @@ void prne_shutdown (const int fd, const int how) {
 	}
 }
 
+bool prne_sck_fcntl (const int fd) {
+	fcntl(fd, F_SETFD, FD_CLOEXEC);
+	return fcntl(fd, F_SETFL, O_NONBLOCK) == 0;
+}
+
+int prne_chfd (const int old, const int ny) {
+	int ret;
+
+	if (old == ny) {
+		return old;
+	}
+
+	ret = dup2(old, ny);
+	if (ret < 0) {
+		return ret;
+	}
+	close(old);
+
+	return ret;
+}
+
+void prne_memzero(void *addr, const size_t len) {
+	memset(addr, 0, len);
+}
+
 void *prne_malloc (const size_t se, const size_t cnt) {
 	size_t size;
 
@@ -162,6 +187,12 @@ size_t prne_str_shift_spaces (char *str, const size_t len) {
 	}
 
 	return ret;
+}
+
+void prne_transstr (char *str,  int(*trans_f)(int)) {
+	for (; *str != 0; str += 1) {
+		*str = (char)trans_f(*str);
+	}
 }
 
 bool prne_hex_fromstr (const char *str, uint_fast8_t *out) {

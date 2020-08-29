@@ -1,7 +1,6 @@
 BIN_ALIGNMENT = 8
 
-# TODO: Use -D_POSIX_C_SOURCE=200112L or -D_POSIX_C_SOURCE=2
-AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -D_GNU_SOURCE -Wno-unused-parameter -DPRNE_BIN_ALIGNMENT=$(BIN_ALIGNMENT) -fdata-sections -ffunction-sections -Wl,--gc-sections
+AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -D_POSIX_C_SOURCE=199506L -Wno-unused-parameter -DPRNE_BIN_ALIGNMENT=$(BIN_ALIGNMENT) -fdata-sections -ffunction-sections -Wl,--gc-sections
 if DEBUG
 AM_CFLAGS += -g -O0 -DPRNE_DEBUG
 else
@@ -22,7 +21,8 @@ bin_PROGRAMS =\
 	proone-list-arch\
 	proone-resolv\
 	proone-stress\
-	proone-ipaddr-arr
+	proone-ipaddr-arr\
+	proone-htbthost
 
 proone_tests =\
 	proone-test_proto\
@@ -40,7 +40,9 @@ libproone_a_SOURCES =\
 	imap.c\
 	mbedtls.c\
 	pth.c\
-	resolv.c
+	resolv.c\
+	htbt.c\
+	iobuf.c
 
 proone: proone.bin dvault.bin
 	cp -fa proone.bin proone
@@ -63,7 +65,6 @@ proone_mkdvault_LDADD = libproone.a
 proone_mkdvault_SOURCES = proone-mkdvault.c
 
 proone_pack_LDADD = libproone.a
-proone_pack_LDFLAGS =
 proone_pack_SOURCES = proone-pack.c
 
 proone_unpack_LDADD = libproone.a
@@ -71,12 +72,13 @@ proone_unpack_LDFLAGS =
 proone_unpack_SOURCES = proone-unpack.c
 
 proone_list_arch_LDADD = libproone.a
-proone_list_arch_LDFLAGS =
 proone_list_arch_SOURCES = proone-list-arch.c
 
 proone_resolv_LDADD = libproone.a
-proone_resolv_LDFLAGS =
 proone_resolv_SOURCES = proone-resolv.c
+
+proone_htbthost_LDADD = libproone.a
+proone_htbthost_SOURCES = proone-htbthost.c
 
 proone_ipaddr_arr_SOURCES = proone-ipaddr-arr.c
 

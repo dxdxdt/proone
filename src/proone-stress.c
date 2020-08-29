@@ -37,7 +37,7 @@ typedef struct {
 
 typedef struct {
 	mbedtls_entropy_context ent;
-	mbedtls_ctr_drbg_context ctx;	
+	mbedtls_ctr_drbg_context ctx;
 } priv_ctx_t;
 
 shared_t *shared = NULL;
@@ -70,7 +70,7 @@ int main (const int argc, const char **args) {
 	size_t shm_size;
 	uint8_t *shm_ptr = MAP_FAILED;
 	bool is_parent = true;
-	
+
 	parent = getpid();
 
 	{
@@ -90,7 +90,7 @@ int main (const int argc, const char **args) {
 
 		assert(pagesize % sizeof(unsigned long) == 0);
 	}
-	
+
 	if (argc < 2) {
 		fprintf(stderr,
 			"Usage: %s <nproc> [page num range]\n"
@@ -137,7 +137,7 @@ DROP:
 	shm_ptr = mmap(NULL, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, zfd, 0);
 	END_ON_ERR(shm_ptr, MAP_FAILED, "mmap()", false);
 	close(zfd);
-	zfd = -1;	
+	zfd = -1;
 
 	// prep shared
 	shared = (shared_t*)shm_ptr;
@@ -157,7 +157,7 @@ DROP:
 		else if (f_ret == 0) {
 			struct sigaction sa;
 
-			memzero(&sa, sizeof(struct sigaction));
+			prne_memzero(&sa, sizeof(struct sigaction));
 			sa.sa_handler = child_signal_handler;
 			sigaction(SIGINT, &sa, NULL);
 
@@ -174,7 +174,7 @@ DROP:
 	{
 		struct sigaction sa;
 
-		memzero(&sa, sizeof(struct sigaction));
+		prne_memzero(&sa, sizeof(struct sigaction));
 		sa.sa_handler = handle_signal;
 
 		sigaction(SIGINT, &sa, NULL);
@@ -185,7 +185,7 @@ DROP:
 
 	clock_gettime(CLOCK_MONOTONIC, &last_report);
 
-	
+
 	while (shared->good) {
 		pause();
 	}
@@ -226,7 +226,7 @@ static void handle_signal (const int sn) {
 			sendall(SIGTERM);
 		}
 		sigaction(SIGINT, NULL, NULL);
-		sigaction(SIGTERM, NULL, NULL);		
+		sigaction(SIGTERM, NULL, NULL);
 		break;
 	case SIGCHLD:
 		if (shared->good) {
@@ -310,7 +310,7 @@ static void child_main (shared_ctx_t *ctx) {
 	prne_mbedtls_entropy_init(&priv_ctx.ent);
 	mbedtls_ctr_drbg_init(&priv_ctx.ctx);
 	assert(mbedtls_ctr_drbg_seed(&priv_ctx.ctx, mbedtls_entropy_func, &priv_ctx.ent, NULL, 0) == 0);
-	
+
 	while (shared->good) {
 		do_cycle(&priv_ctx, ctx);
 		ctx->nb_cycles += 1;

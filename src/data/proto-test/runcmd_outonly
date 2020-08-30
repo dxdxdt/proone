@@ -1,0 +1,20 @@
+# msg id 0xA03, init
+8A03
+# PRNE_HTBT_OP_RUN_CMD
+05
+	# args_len = 40
+	00 28
+	# "/bin/dd"
+	2f 62 69 6e 2f 64 64 00
+	# "if=/dev/urandom"
+	69 66 3d 2f 64 65 76 2f 75 72 61 6e 64 6f 6d 00
+	# "bs=4096"
+	62 73 3d 34 30 39 36 00
+	# "count=4"
+	63 6f 75 6e 74 3d 34 00
+# msg id 0xA03, init
+8A03
+# PRNE_HTBT_OP_STDIO
+08
+	# stdio err = 0, fin = 1, len = 0
+	4000

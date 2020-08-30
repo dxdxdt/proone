@@ -1,0 +1,16 @@
+####################
+# run "sleep 5" detached
+####################
+
+# msg id 0xA01, init
+8A01
+# PRNE_HTBT_OP_RUN_CMD
+05
+# detached, args_len = 19
+04 13
+	# "/bin/sh"
+	2f 62 69 6e 2f 73 68 00
+	# "-c"
+	2d 63 00
+	# "sleep 5"
+	73 6c 65 65 70 20 35 00

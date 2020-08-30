@@ -1,0 +1,21 @@
+# msg id 0xA03, init
+8A04
+# PRNE_HTBT_OP_RUN_CMD
+05
+	# args_len = 08
+	00 08
+	# "/bin/sh"
+	2f 62 69 6e 2f 73 68 00
+# msg id 0xA03, init
+8A04
+# PRNE_HTBT_OP_STDIO
+08
+	# stdio err = 0, fin = 1, len = 77
+	404D
+	# for (( i = 0; i < 4096; i += 1 )); do
+	#	echo -n "A" >&1
+	#	echo -n "B" >&2
+	# done
+	666f722028282069203d20303b2069203c20343039363b2069202b3d2031
+	2029293b20646f0a096563686f202d6e20224122203e26310a096563686f
+	202d6e20224222203e26320a646f6e650a

@@ -396,6 +396,20 @@ bool prne_htbt_eq_bin_meta (const prne_htbt_bin_meta_t *a, const prne_htbt_bin_m
 		prne_htbt_eq_cmd(&a->cmd, &b->cmd);
 }
 
+void prne_htbt_init_hover (prne_htbt_hover_t *ho) {
+	prne_memzero(ho, sizeof(prne_htbt_hover_t));
+}
+
+void prne_htbt_free_hover (prne_htbt_hover_t *ho) {}
+
+bool prne_htbt_eq_hover (const prne_htbt_hover_t *a, const prne_htbt_hover_t *b) {
+	return
+		memcmp(a->v4.addr, b->v4.addr, 4) == 0 &&
+		memcmp(a->v6.addr, b->v6.addr, 16) == 0 &&
+		a->v4.port == b->v4.port &&
+		a->v6.port == b->v6.port;
+}
+
 void prne_htbt_init_stdio (prne_htbt_stdio_t *s) {
 	s->len = 0;
 	s->err = false;

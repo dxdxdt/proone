@@ -364,9 +364,12 @@ static void htbt_lbd_fab_unimpl (
 static void htbt_lbd_srv_hostinfo (
 	htbt_lbd_client_t *ctx,
 	pth_event_t root_ev,
+	const size_t off,
 	const prne_htbt_msg_head_t *mh)
 {
 	prne_htbt_host_info_t hi;
+
+	prne_iobuf_shift(ctx->iobuf + 0, -off);
 
 	if (ctx->parent->param.cb_f.hostinfo == NULL) {
 		htbt_lbd_fab_unimpl(ctx, mh->id, root_ev);
@@ -399,26 +402,29 @@ static bool htbt_relay_child (
 	const int conn,
 	mbedtls_ssl_context *ssl,
 	prne_iobuf_t *iobuf,
+	const uint16_t msg_id,
 	int *c_in,
 	int *c_out,
 	int *c_err)
 {
 	bool ret = true;
 	struct pollfd pfd[4];
-	prne_htbt_stdio_t head[2];
+	prne_htbt_msg_head_t mh;
+	prne_htbt_stdio_t sh[2];
 	int f_ret, pending, out_p = 0;
 	size_t actual;
+	ssize_t consume;
 
 	pfd[0].fd = conn;
 	pfd[1].fd = *c_in;
 	pfd[2].fd = *c_out;
 	pfd[3].fd = *c_err;
-	prne_htbt_init_stdio(head + 0);
-	prne_htbt_init_stdio(head + 1);
+	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_stdio(sh + 0);
+	prne_htbt_init_stdio(sh + 1);
 
-	while ((!head[0].fin && head[0].len > 0) ||
+	while ((!sh[0].fin && sh[0].len > 0) ||
 		iobuf[1].len > 0 ||
-		pfd[1].fd >= 0 ||
 		pfd[2].fd >= 0 ||
 		pfd[3].fd >= 0)
 	{
@@ -426,11 +432,11 @@ static bool htbt_relay_child (
 		if (iobuf[1].len > 0) {
 			pfd[0].events |= POLLOUT;
 		}
-		if (iobuf[0].avail > 0 && !(head[0].fin && head[0].len == 0)) {
+		if (iobuf[0].avail > 0 && !(sh[0].fin && sh[0].len == 0)) {
 			pfd[0].events |= POLLIN;
 		}
 
-		if (head[0].len > 0 && iobuf[0].len > 0) {
+		if (sh[0].len > 0 && iobuf[0].len > 0) {
 			pfd[1].events = POLLOUT;
 		}
 		else {
@@ -451,8 +457,39 @@ static bool htbt_relay_child (
 			ret = false;
 			break;
 		}
-		if (f_ret == 0) {
+		if (f_ret == 0 || (pfd[0].revents & (POLLNVAL | POLLHUP | POLLERR))) {
 			break;
+		}
+
+		if (!sh[0].fin && sh[0].len == 0) {
+			do {
+				if (prne_htbt_dser_msg_head(
+					iobuf[0].m,
+					iobuf[0].len,
+					&actual,
+					&mh) != PRNE_HTBT_SER_RC_OK)
+				{
+					break;
+				}
+				consume = actual;
+				if (mh.id != msg_id ||
+					mh.is_rsp ||
+					mh.op != PRNE_HTBT_OP_STDIO)
+				{
+					sh[0].fin = true;
+					break;
+				}
+				if (prne_htbt_dser_stdio(
+					iobuf[0].m + consume,
+					iobuf[0].len - consume,
+					&actual,
+					sh + 0) != PRNE_HTBT_SER_RC_OK)
+				{
+					break;
+				}
+				consume += actual;
+				prne_iobuf_shift(iobuf + 0, -consume);
+			} while (false);
 		}
 
 		if (pfd[0].revents & POLLIN) {
@@ -460,27 +497,14 @@ static bool htbt_relay_child (
 				ssl,
 				iobuf[0].m + iobuf[0].len,
 				iobuf[0].avail);
-			if (f_ret <= 0) {
+			if (f_ret < 0) {
 				break;
 			}
 			else {
 				prne_iobuf_shift(iobuf + 0, f_ret);
-				if (head[0].len == 0) {
-					if (prne_htbt_dser_stdio(
-						iobuf[0].m,
-						iobuf[0].len,
-						&actual,
-						head + 0) == PRNE_HTBT_SER_RC_OK)
-					{
-						prne_iobuf_shift(iobuf + 0, -actual);
-						if (head[0].len == 0 && head[0].fin) {
-							close(*c_in);
-							*c_in = -1;
-						}
-					}
-				}
 			}
 		}
+
 		if (pfd[0].revents & POLLOUT) {
 			f_ret = mbedtls_ssl_write(
 				ssl,
@@ -495,58 +519,69 @@ static bool htbt_relay_child (
 					pending -= f_ret;
 				}
 				else {
-					head[1].len -= f_ret;
-					if (head[1].len == 0) {
+					sh[1].len -= f_ret;
+					if (sh[1].len == 0) {
 						out_p = (out_p + 1) % 2;
 					}
 				}
 			}
 		}
-		if (pfd[0].revents & (POLLNVAL | POLLHUP | POLLERR)) {
-			pfd[0].fd = -1;
-		}
 
-		if (pfd[1].fd < 0 && head[0].len > 0) {
-			const ssize_t consume = prne_op_min(iobuf[0].len, head[0].len);
+		if (pfd[1].fd < 0 && sh[0].len > 0) {
+			consume = prne_op_min(iobuf[0].len, sh[0].len);
 
 			prne_iobuf_shift(iobuf + 0, -consume);
-			head[0].len -= consume;
+			sh[0].len -= consume;
 		}
 		else if (pfd[1].revents) {
-			const ssize_t consume = prne_op_min(iobuf[0].len, head[0].len);
+			consume = prne_op_min(iobuf[0].len, sh[0].len);
 
 			f_ret = write(*c_in, iobuf[0].m, consume);
-			if (f_ret <= 0) {
+			if (f_ret > 0) {
+				consume = f_ret;
+			}
+			else {
 				pfd[1].fd = -1;
 			}
 
 			prne_iobuf_shift(iobuf + 0, -consume);
-			head[0].len -= consume;
-			if (head[0].len == 0 && head[0].fin) {
-				close(*c_in);
-				*c_in = -1;
-				pfd[0].fd = -1;
-			}
+			sh[0].len -= consume;
+		}
+
+		if (sh[0].fin && sh[0].len == 0 && pfd[1].fd >= 0) {
+			close(*c_in);
+			*c_in = -1;
+			pfd[1].fd = -1;
 		}
 
 		if (pfd[2 + out_p].revents) {
-			if (head[1].len == 0) {
+			if (sh[1].len == 0) {
 				prne_assert(ioctl(pfd[2 + out_p].fd, FIONREAD, &pending) == 0);
 
-				head[1].len = (size_t)prne_op_min(
+				sh[1].len = (size_t)prne_op_min(
 					pending,
 					PRNE_HTBT_STDIO_LEN_MAX);
-				head[1].err = out_p != 0;
-				head[1].fin = head[1].len == 0;
-				prne_htbt_ser_stdio(
+				sh[1].err = out_p != 0;
+				sh[1].fin = sh[1].len == 0;
+				mh.id = msg_id;
+				mh.is_rsp = true;
+				mh.op = PRNE_HTBT_OP_STDIO;
+
+				prne_assert(prne_htbt_ser_msg_head(
 					iobuf[1].m + iobuf[1].len,
 					iobuf[1].avail,
 					&actual,
-					head + 1);
-				pending = (size_t)actual;
-				prne_iobuf_shift(iobuf + 1, actual);
+					&mh) == PRNE_HTBT_SER_RC_OK);
+				pending = (int)actual;
+				prne_assert(prne_htbt_ser_stdio(
+					iobuf[1].m + iobuf[1].len + pending,
+					iobuf[1].avail - pending,
+					&actual,
+					sh + 1) == PRNE_HTBT_SER_RC_OK);
+				pending += (int)actual;
+				prne_iobuf_shift(iobuf + 1, pending);
 
-				if (head[1].fin) {
+				if (sh[1].fin) {
 					pfd[2 + out_p].fd = -1;
 				}
 			}
@@ -554,21 +589,16 @@ static bool htbt_relay_child (
 				f_ret = read(
 					pfd[2 + out_p].fd,
 					iobuf[1].m + iobuf[1].len,
-					prne_op_min(head[1].len, iobuf[1].avail));
+					prne_op_min(sh[1].len, iobuf[1].avail));
 				prne_dbgast(f_ret > 0);
 				prne_iobuf_shift(iobuf + 1, f_ret);
 			}
 		}
 	}
 
-	prne_htbt_free_stdio(head + 0);
-	prne_htbt_free_stdio(head + 1);
-	close(*c_in);
-	close(*c_out);
-	close(*c_err);
-	*c_in = -1;
-	*c_out = -1;
-	*c_err = -1;
+	prne_htbt_free_stdio(sh + 0);
+	prne_htbt_free_stdio(sh + 1);
+	prne_htbt_free_msg_head(&mh);
 
 	return ret;
 }
@@ -583,6 +613,7 @@ static void htbt_do_cmd (
 	const int conn,
 	mbedtls_ssl_context *ssl,
 	prne_iobuf_t *iobuf,
+	const uint16_t msg_id,
 	prne_htbt_status_code_t *out_status,
 	int32_t *out_err)
 {
@@ -591,7 +622,7 @@ static void htbt_do_cmd (
 	int cerr[2] = { -1, -1 };
 	int errp[2] = { -1, -1 };
 	pid_t child = -1;
-	int f_ret;
+	int f_ret, chld_status;
 
 	if (pipe(errp) != 0 ||
 		fcntl(errp[0], F_SETFD, FD_CLOEXEC) != 0 ||
@@ -615,9 +646,15 @@ static void htbt_do_cmd (
 			close(errp[0]);
 
 			if (detach) {
-				if (setsid() < 0) {
+				child = fork();
+				if (child < 0) {
 					break;
 				}
+				else if (child > 0) {
+					exit(0);
+				}
+
+				setsid();
 				close(STDIN_FILENO);
 				// Inherit these if DEBUG
 #if !defined(PRNE_DEBUG)
@@ -664,12 +701,14 @@ static void htbt_do_cmd (
 
 	*out_status = PRNE_HTBT_STATUS_OK;
 	if (detach) {
-		*out_err = 0;
-		child = -1;
+		if (pth_waitpid(child, &chld_status, WUNTRACED) == child &&
+			!WIFSTOPPED(chld_status))
+		{
+			child = -1;
+			*out_err = 0;
+		}
 	}
 	else {
-		int status;
-
 		prne_close(cin[0]);
 		prne_close(cout[1]);
 		prne_close(cerr[1]);
@@ -683,23 +722,24 @@ static void htbt_do_cmd (
 			goto END;
 		}
 
-		if (htbt_relay_child(conn, ssl, iobuf, &cin[1], &cout[0], &cerr[0])) {
-			if (pth_waitpid(child, &status, WUNTRACED) < 0) {
+		if (htbt_relay_child(conn, ssl, iobuf, msg_id, &cin[1], &cout[0], &cerr[0])) {
+			if (pth_waitpid(child, &chld_status, WUNTRACED) < 0) {
 				*out_status = PRNE_HTBT_STATUS_ERRNO;
 				*out_err = errno;
 				goto END;
 			}
-			else if (WIFEXITED(status)) {
-				*out_err = WEXITSTATUS(status);
+			else if (WIFEXITED(chld_status)) {
+				*out_err = WEXITSTATUS(chld_status);
+				child = -1;
 			}
-			else if (WIFSIGNALED(status)) {
-				*out_err = 128 + WTERMSIG(status);
+			else if (WIFSIGNALED(chld_status)) {
+				*out_err = 128 + WTERMSIG(chld_status);
+				child = -1;
 			}
 			else {
 				// child has been stopped just right before exit
 				*out_err = -1;
 			}
-			child = -1;
 		}
 		else {
 			*out_status = PRNE_HTBT_STATUS_ERRNO;
@@ -742,20 +782,23 @@ static bool htbt_lbd_srv_run_cmd (
 		ctx->iobuf[0].len - off,
 		&actual,
 		&cmd);
-	if (s_ret != PRNE_HTBT_SER_RC_MORE_BUF) {
-		prne_iobuf_shift(ctx->iobuf + 0, -(off + actual));
-	}
-	if (s_ret == PRNE_HTBT_SER_RC_FMT_ERR) {
-		htbt_lbd_raise_protoerr(ctx, mh->id, 0, root_ev);
+	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
 		goto END;
 	}
-	if (s_ret != PRNE_HTBT_SER_RC_OK) {
+	else {
+		prne_iobuf_shift(ctx->iobuf + 0, -(off + actual));
+	}
+	if (s_ret == PRNE_HTBT_SER_RC_ERRNO) {
 		htbt_lbd_fab_status(
 			ctx,
 			PRNE_HTBT_STATUS_ERRNO,
 			errno,
 			mh->id,
 			root_ev);
+		goto END;
+	}
+	if (s_ret != PRNE_HTBT_SER_RC_OK) {
+		htbt_lbd_raise_protoerr(ctx, mh->id, 0, root_ev);
 		goto END;
 	}
 
@@ -767,6 +810,7 @@ static bool htbt_lbd_srv_run_cmd (
 			ctx->fd,
 			&ctx->ssl,
 			ctx->iobuf,
+			mh->id,
 			&status,
 			&err);
 		htbt_lbd_fab_status(ctx, status, err, mh->id, root_ev);
@@ -784,49 +828,55 @@ static bool htbt_lbd_consume_inbuf (
 	prne_htbt_ser_rc_t s_ret;
 	prne_htbt_msg_head_t f_head;
 	size_t actual;
-	bool ret = true;
+	bool ret = false;
 
 	prne_htbt_init_msg_head(&f_head);
 
-	s_ret = prne_htbt_dser_msg_head(
-		ctx->iobuf[0].m,
-		ctx->iobuf[0].len,
-		&actual,
-		&f_head);
-	if (s_ret != PRNE_HTBT_SER_RC_OK) {
-		ret = false;
-		goto END;
-	}
-	if (f_head.is_rsp ||
-		(f_head.op != PRNE_HTBT_OP_NOOP && f_head.id == 0))
-	{
-		htbt_lbd_raise_protoerr(ctx, f_head.id, 0, root_ev);
-		ret = false;
-		goto END;
-	}
+	while (ctx->valid) {
+		prne_htbt_free_msg_head(&f_head);
+		prne_htbt_init_msg_head(&f_head);
 
-	f_head.is_rsp = true;
-	switch (f_head.op) {
-	case PRNE_HTBT_OP_NOOP:
-		prne_iobuf_shift(ctx->iobuf + 0, -actual);
-		break;
-	case PRNE_HTBT_OP_HOST_INFO:
-		htbt_lbd_srv_hostinfo(ctx, root_ev, &f_head);
-		break;
-	case PRNE_HTBT_OP_RUN_CMD:
-		ret = htbt_lbd_srv_run_cmd(ctx, root_ev, actual, &f_head);
-		break;
-	case PRNE_HTBT_OP_RUN_BIN:
-	case PRNE_HTBT_OP_HOVER:
-	case PRNE_HTBT_OP_NY_BIN:
-	default:
-		htbt_lbd_raise_protoerr(
-			ctx,
-			f_head.id,
-			PRNE_HTBT_STATUS_UNIMPL,
-			root_ev);
-		ret = false;
-		break;
+		s_ret = prne_htbt_dser_msg_head(
+			ctx->iobuf[0].m,
+			ctx->iobuf[0].len,
+			&actual,
+			&f_head);
+		if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
+			break;
+		}
+		if (s_ret != PRNE_HTBT_SER_RC_OK ||
+			f_head.is_rsp ||
+			(f_head.op != PRNE_HTBT_OP_NOOP && f_head.id == 0))
+		{
+			htbt_lbd_raise_protoerr(ctx, f_head.id, 0, root_ev);
+			goto END;
+		}
+
+		f_head.is_rsp = true;
+		ret = true;
+		switch (f_head.op) {
+		case PRNE_HTBT_OP_NOOP:
+			prne_iobuf_shift(ctx->iobuf + 0, -actual);
+			break;
+		case PRNE_HTBT_OP_HOST_INFO:
+			htbt_lbd_srv_hostinfo(ctx, root_ev, actual, &f_head);
+			break;
+		case PRNE_HTBT_OP_RUN_CMD:
+			if (!htbt_lbd_srv_run_cmd(ctx, root_ev, actual, &f_head)) {
+				goto END;
+			}
+			break;
+		case PRNE_HTBT_OP_RUN_BIN:
+		case PRNE_HTBT_OP_HOVER:
+		case PRNE_HTBT_OP_NY_BIN:
+		default:
+			htbt_lbd_raise_protoerr(
+				ctx,
+				f_head.id,
+				PRNE_HTBT_STATUS_UNIMPL,
+				root_ev);
+			goto END;
+		}
 	}
 
 END:
@@ -913,6 +963,7 @@ static void *htbt_lbd_client_entry (void *p) {
 			}
 		}
 	}
+	htbt_lbd_consume_outbuf(ctx, ctx->iobuf[1].len, ev_timeout);
 
 END:
 	pth_event_free(ev, TRUE);

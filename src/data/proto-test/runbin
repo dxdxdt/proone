@@ -1,0 +1,26 @@
+# msg id 0xA05, init
+8A05
+# PRNE_HTBT_OP_RUN_BIN
+07
+	# bin_len = 147
+	000093
+	# detach = 0, args_len = 0
+	0000
+	# #!/bin/bash
+	# outfile=$(mktemp /tmp/prne.XXXX)
+	# echo "$outfile"
+	# for (( i = 0; i < 10; i += 1 )); do
+	# 	echo "hello world?!" >> "$outfile"
+	# done
+	# sleep 10
+	23212f62696e2f626173680a6f757466696c653d24286d6b74656d70202f
+	746d702f70726e652e58585858290a6563686f2022246f757466696c6522
+	0a666f722028282069203d20303b2069203c2031303b2069202b3d203120
+	29293b20646f0a096563686f202268656c6c6f20776f726c643f2122203e
+	3e2022246f757466696c65220a646f6e650a736c6565702031300a
+# msg id 0xA05, init
+8A05
+# PRNE_HTBT_OP_STDIO
+08
+	# stdio err = 0, fin = 1, len = 0
+	4000

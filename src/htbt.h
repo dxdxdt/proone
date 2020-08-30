@@ -11,7 +11,7 @@ typedef struct prne_htbt prne_htbt_t;
 typedef struct prne_htbt_param prne_htbt_param_t;
 typedef bool(*prne_htbt_cnc_txtrec_ft)(char *out);
 typedef bool(*prne_htbt_hostinfo_ft)(prne_htbt_host_info_t *out);
-typedef char*(*prne_htbt_tmpfile_ft)(const size_t req_size);
+typedef char*(*prne_htbt_tmpfile_ft)(size_t req_size, const mode_t mode);
 typedef bool(*prne_htbt_cmd_ft)(const prne_htbt_cmd_t *cmd);
 typedef bool(*prne_htbt_bin_ft)(const char *path, const prne_htbt_cmd_t *cmd);
 

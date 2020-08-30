@@ -711,12 +711,14 @@ prne_htbt_ser_rc_t prne_htbt_dser_cmd (const uint8_t *data, const size_t len, si
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
-	mem = (char*)prne_malloc(1, args_len);
-	if (mem == NULL) {
-		ret = PRNE_HTBT_SER_RC_ERRNO;
-		goto END;
+	if (args_len > 0) {
+		mem = (char*)prne_malloc(1, args_len);
+		if (mem == NULL) {
+			ret = PRNE_HTBT_SER_RC_ERRNO;
+			goto END;
+		}
+		memcpy(mem, data + 2, args_len);
 	}
-	memcpy(mem, data + 2, args_len);
 
 	saved_errno = errno;
 	errno = 0;

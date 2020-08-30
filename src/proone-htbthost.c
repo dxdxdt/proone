@@ -234,6 +234,63 @@ static bool parse_param (const char *arg) {
 	return true;
 }
 
+static char *mktmpfile (size_t req_size, const mode_t mode) {
+	static int ctr = 0;
+	uint8_t *z = NULL;
+	size_t z_size;
+	ssize_t consume;
+	char *path = NULL, *ret = NULL;
+	int fd = -1, len;
+
+	z_size = prne_getpagesize();
+	z = prne_calloc(1, z_size);
+	if (z == NULL) {
+		z_size = 1;
+		z = prne_malloc(1, 1);
+		z[0] = 0;
+	}
+
+	len = snprintf(NULL, 0, "htbthost-tmp.%d", ctr);
+	if (len < 0) {
+		goto END;
+	}
+	path = prne_alloc_str(len);
+	if (path == NULL) {
+		goto END;
+	}
+	prne_memzero(path, len + 1);
+	if (len != snprintf(path, len + 1, "htbthost-tmp.%d", ctr)) {
+		goto END;
+	}
+
+	// TODO: Polyfill
+	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+	if (fd < 0) {
+		goto END;
+	}
+	fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+	while (req_size > 0) {
+		consume = prne_op_min(z_size, req_size);
+		if (pth_write(fd, z, consume) != (int)consume) {
+			goto END;
+		}
+		req_size -= consume;
+	}
+
+	ret = path;
+	path = NULL;
+	ctr += 1;
+END:
+	if (path != NULL && fd >= 0) {
+		unlink(path);
+	}
+	prne_free(path);
+	prne_close(fd);
+	prne_free(z);
+	return ret;
+}
+
 
 int main (const int argc, const char **args) {
 	static mbedtls_entropy_context entropy;
@@ -378,6 +435,7 @@ int main (const int argc, const char **args) {
 		param.cncp_ssl_conf = &ssl.cncp.conf;
 		param.ctr_drbg = &rnd;
 		param.resolv = resolv;
+		param.cb_f.tmpfile = mktmpfile;
 		param.cb_f.cnc_txtrec = cb_txtrec;
 		param.cb_f.hostinfo = cb_hostinfo;
 

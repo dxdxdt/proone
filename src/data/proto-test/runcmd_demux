@@ -1,4 +1,4 @@
-# msg id 0xA03, init
+# msg id 0xA04, init
 8A04
 # PRNE_HTBT_OP_RUN_CMD
 05
@@ -6,7 +6,7 @@
 	00 08
 	# "/bin/sh"
 	2f 62 69 6e 2f 73 68 00
-# msg id 0xA03, init
+# msg id 0xA04, init
 8A04
 # PRNE_HTBT_OP_STDIO
 08

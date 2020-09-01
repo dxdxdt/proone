@@ -182,6 +182,7 @@ typedef enum {
 	* An int32_t that follows is not used.
 	*/
 	PRNE_HTBT_STATUS_AGAIN,
+	PRNE_HTBT_STATUS_TIMEDOUT,
 
 	NB_PRNE_HTBT_STATUS
 } prne_htbt_status_code_t;

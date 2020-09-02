@@ -165,7 +165,7 @@ static void *stdout_wkr_entry (void *ctx) {
 	bool output = false;
 
 	while (main_flag || prm_list.size > 0) {
-		pth_mutex_acquire(prm_cv.lock, FALSE, NULL);
+		prne_assert(pth_mutex_acquire(prm_cv.lock, FALSE, NULL));
 		pth_cond_await(prm_cv.cond, prm_cv.lock, NULL);
 		pth_mutex_release(prm_cv.lock);
 

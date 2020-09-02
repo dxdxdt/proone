@@ -410,6 +410,11 @@ bool prne_htbt_eq_hover (const prne_htbt_hover_t *a, const prne_htbt_hover_t *b)
 		a->v6.port == b->v6.port;
 }
 
+bool prne_htbt_cp_hover (const prne_htbt_hover_t *a, prne_htbt_hover_t *b) {
+	memcpy(b, a, sizeof(prne_htbt_hover_t));
+	return true;
+}
+
 void prne_htbt_init_stdio (prne_htbt_stdio_t *s) {
 	s->len = 0;
 	s->err = false;
@@ -526,6 +531,22 @@ prne_htbt_ser_rc_t prne_htbt_ser_host_info (uint8_t *mem, const size_t mem_len, 
 	mem[92] = (uint8_t)host_cred_len;
 	mem[93] = (uint8_t)in->arch;
 	memcpy(mem + 94, in->host_cred, host_cred_len);
+
+	return PRNE_HTBT_SER_RC_OK;
+}
+
+prne_htbt_ser_rc_t prne_htbt_ser_hover (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_hover_t *in) {
+	*actual = 24;
+	if (*actual < mem_len) {
+		return PRNE_HTBT_SER_RC_MORE_BUF;
+	}
+
+	memcpy(mem, in->v4.addr, 4);
+	mem[4] = prne_getmsb16(in->v4.port, 0);
+	mem[5] = prne_getmsb16(in->v4.port, 1);
+	memcpy(mem + 6, in->v6.addr, 16);
+	mem[22] = prne_getmsb16(in->v6.port, 0);
+	mem[23] = prne_getmsb16(in->v6.port, 1);
 
 	return PRNE_HTBT_SER_RC_OK;
 }
@@ -688,6 +709,20 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (const uint8_t *data, const size_t l
 	out->arch = (prne_arch_t)data[93];
 	memcpy(out->host_cred, data + 94, cred_size);
 	out->host_cred[cred_size] = 0;
+
+	return PRNE_HTBT_SER_RC_OK;
+}
+
+prne_htbt_ser_rc_t prne_htbt_dser_hover (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_hover_t *out) {
+	*actual = 24;
+	if (*actual < len) {
+		return PRNE_HTBT_SER_RC_MORE_BUF;
+	}
+
+	memcpy(out->v4.addr, data, 4);
+	out->v4.port = prne_recmb_msb16(data[4], data[5]);
+	memcpy(out->v6.addr, data + 6, 16);
+	out->v6.port = prne_recmb_msb16(data[22], data[23]);
 
 	return PRNE_HTBT_SER_RC_OK;
 }

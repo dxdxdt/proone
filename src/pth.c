@@ -26,18 +26,10 @@ void prne_fin_worker (prne_worker_t *w) {
 	}
 }
 
-bool prne_pth_cv_notify (pth_mutex_t *lock, pth_cond_t *cond, bool broadcast) {
-	bool ret;
-
-	if (pth_mutex_acquire(lock, FALSE, NULL)) {
-		ret = pth_cond_notify(cond, broadcast) != 0;
-		prne_dbgtrap(pth_mutex_release(lock));
-	}
-	else {
-		ret = false;
-	}
-
-	return ret;
+void prne_pth_cv_notify (pth_mutex_t *lock, pth_cond_t *cond, bool broadcast) {
+	prne_assert(pth_mutex_acquire(lock, FALSE, NULL));
+	prne_assert(pth_cond_notify(cond, broadcast));
+	pth_mutex_release(lock);
 }
 
 pth_time_t prne_pth_tstimeout (const struct timespec ts) {

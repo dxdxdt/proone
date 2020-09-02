@@ -26,6 +26,7 @@ struct prne_htbt_cbset {
 struct prne_htbt_param {
 	mbedtls_ssl_config *lbd_ssl_conf;
 	mbedtls_ssl_config *cncp_ssl_conf;
+	mbedtls_ssl_config *main_ssl_conf;
 	mbedtls_ctr_drbg_context *ctr_drbg;
 	prne_resolv_t *resolv;
 	prne_htbt_cbset_t cb_f;

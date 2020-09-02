@@ -183,6 +183,7 @@ typedef enum {
 	*/
 	PRNE_HTBT_STATUS_AGAIN,
 	PRNE_HTBT_STATUS_TIMEDOUT,
+	PRNE_HTBT_STATUS_LIMIT,
 
 	NB_PRNE_HTBT_STATUS
 } prne_htbt_status_code_t;
@@ -252,7 +253,7 @@ struct prne_htbt_stdio {
 };
 
 typedef void(*prne_htbt_init_ft)(void *ptr);
-typedef void(*prne_htbt_free_ft)(const void *ptr);
+typedef void(*prne_htbt_free_ft)(void *ptr);
 typedef bool(*prne_htbt_eq_ft)(const void *a, const void *b);
 typedef prne_htbt_ser_rc_t(*prne_htbt_ser_ft)(uint8_t *mem, const size_t mem_len, size_t *actual, const void *in);
 typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(const uint8_t *data, const size_t len, size_t *actual, void *out);
@@ -318,6 +319,7 @@ bool prne_htbt_eq_bin_meta (const prne_htbt_bin_meta_t *a, const prne_htbt_bin_m
 void prne_htbt_init_hover (prne_htbt_hover_t *ho);
 void prne_htbt_free_hover (prne_htbt_hover_t *ho);
 bool prne_htbt_eq_hover (const prne_htbt_hover_t *a, const prne_htbt_hover_t *b);
+bool prne_htbt_cp_hover (const prne_htbt_hover_t *a, prne_htbt_hover_t *b);
 
 void prne_htbt_init_stdio (prne_htbt_stdio_t *s);
 void prne_htbt_free_stdio (prne_htbt_stdio_t *s);
@@ -326,6 +328,7 @@ bool prne_htbt_eq_stdio (const prne_htbt_stdio_t *a, const prne_htbt_stdio_t *b)
 prne_htbt_ser_rc_t prne_htbt_ser_msg_head (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_msg_head_t *in);
 prne_htbt_ser_rc_t prne_htbt_ser_status (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_status_t *in);
 prne_htbt_ser_rc_t prne_htbt_ser_host_info (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_host_info_t *in);
+prne_htbt_ser_rc_t prne_htbt_ser_hover (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_hover_t *in);
 prne_htbt_ser_rc_t prne_htbt_ser_cmd (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_cmd_t *in);
 prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_bin_meta_t *in);
 prne_htbt_ser_rc_t prne_htbt_ser_stdio (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_stdio_t *in);
@@ -333,6 +336,7 @@ prne_htbt_ser_rc_t prne_htbt_ser_stdio (uint8_t *mem, const size_t mem_len, size
 prne_htbt_ser_rc_t prne_htbt_dser_msg_head (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_msg_head_t *out);
 prne_htbt_ser_rc_t prne_htbt_dser_status (uint8_t *data, const size_t len, size_t *actual, prne_htbt_status_t *out);
 prne_htbt_ser_rc_t prne_htbt_dser_host_info (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_host_info_t *out);
+prne_htbt_ser_rc_t prne_htbt_dser_hover (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_hover_t *out);
 prne_htbt_ser_rc_t prne_htbt_dser_cmd (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_cmd_t *out);
 prne_htbt_ser_rc_t prne_htbt_dser_bin_meta (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_bin_meta_t *out);
 prne_htbt_ser_rc_t prne_htbt_dser_stdio (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_stdio_t *out);

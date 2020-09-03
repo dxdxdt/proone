@@ -151,9 +151,6 @@ bool prne_mbedtls_pth_handle (
 			if (pollret == 0 || pth_event_status(ev) == PTH_STATUS_OCCURRED) {
 				return false;
 			}
-			if (pfd.revents & (POLLERR | POLLNVAL | POLLHUP)) {
-				return false;
-			}
 		} while (false);
 	}
 }

@@ -34,6 +34,11 @@
 			"label": "Build resolv",
 			"type": "shell",
 			"command": "make -C ./src proone-resolv"
+		},
+		{
+			"label": "Build proone",
+			"type": "shell",
+			"command": "make -C ./src proone"
 		}
 	]
 }

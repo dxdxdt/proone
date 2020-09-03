@@ -258,6 +258,7 @@ typedef bool(*prne_htbt_eq_ft)(const void *a, const void *b);
 typedef prne_htbt_ser_rc_t(*prne_htbt_ser_ft)(uint8_t *mem, const size_t mem_len, size_t *actual, const void *in);
 typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(const uint8_t *data, const size_t len, size_t *actual, void *out);
 
+#define PRNE_HTBT_TLS_ALP			"prne-htbt"
 #define PRNE_HTBT_MSG_ID_MIN		1
 #define PRNE_HTBT_MSG_ID_MAX		INT16_MAX
 #define PRNE_HTBT_MSG_ID_DELTA		INT16_MAX

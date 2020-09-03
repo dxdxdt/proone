@@ -140,9 +140,7 @@ int main (void) {
 	pos += 256;
 
 	add_bin(PRNE_DATA_KEY_PROG_VER, PRNE_PROG_VER);
-	add_cstr(
-		PRNE_DATA_KEY_PROC_LIM_SHM,
-		"/31e4f17c-db76-4332-af48-fd9fb8453f8f");
+	add_bin(PRNE_DATA_KEY_SHG_SALT, PRNE_SHG_SALT);
 	add_bin(PRNE_DATA_KEY_X509_CA_CRT, PRNE_X509_CA_CRT);
 	add_bin(PRNE_DATA_KEY_X509_DH, PRNE_X509_DH);
 	add_bin(PRNE_DATA_KEY_X509_S_CRT, PRNE_X509_S_CRT);

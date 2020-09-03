@@ -44,6 +44,32 @@
 			"setupCommands": [],
 			"preLaunchTask": "Build resolv",
 			"miDebuggerPath": "/usr/bin/gdb"
+		},
+		{
+			"name": "proone",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone",
+			"args": [],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [
+				{
+					"description": "Follow parent fork",
+					"text": "set follow-fork-mode parent",
+					"ignoreFailures": false
+				},
+				{
+					"description": "Ignore SIGPIPE",
+					"text": "handle SIGPIPE nostop print",
+					"ignoreFailures": false
+				}
+			],
+			"preLaunchTask": "Build proone",
+			"miDebuggerPath": "/usr/bin/gdb"
 		}
 	]
 }

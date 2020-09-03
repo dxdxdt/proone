@@ -138,6 +138,7 @@ static void load_ssl_conf (
 	mbedtls_pk_context *c_key,
 	mbedtls_ctr_drbg_context *rnd)
 {
+	static const char *ALP_LIST[] = { PRNE_HTBT_TLS_ALP, NULL };
 	static const uint8_t
 		CA_CRT[] = PRNE_X509_CA_CRT,
 		S_CRT[] = PRNE_X509_S_CRT,
@@ -178,6 +179,18 @@ static void load_ssl_conf (
 	mbedtls_ssl_conf_ca_chain(c_conf, ca, NULL);
 	mbedtls_ssl_conf_verify(c_conf, prne_mbedtls_x509_crt_verify_cb, NULL);
 	mbedtls_ssl_conf_rng(c_conf, mbedtls_ctr_drbg_random, rnd);
+
+	if (htbthost_param.verify) {
+		assert(
+			mbedtls_ssl_conf_alpn_protocols(c_conf, ALP_LIST) == 0 &&
+			mbedtls_ssl_conf_alpn_protocols(s_conf, ALP_LIST) == 0);
+		mbedtls_ssl_conf_authmode(c_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+		mbedtls_ssl_conf_authmode(s_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+	}
+	else {
+		mbedtls_ssl_conf_authmode(c_conf, MBEDTLS_SSL_VERIFY_NONE);
+		mbedtls_ssl_conf_authmode(s_conf, MBEDTLS_SSL_VERIFY_NONE);
+	}
 }
 
 static void mbedtls_dbg_f(void *ctx, int level, const char *filename, int line, const char *msg) {
@@ -418,14 +431,6 @@ int main (const int argc, const char **args) {
 		&ssl.c.crt,
 		&ssl.c.key,
 		&rnd);
-	mbedtls_ssl_conf_authmode(
-		&ssl.s.conf,
-		htbthost_param.verify ?
-			MBEDTLS_SSL_VERIFY_REQUIRED : MBEDTLS_SSL_VERIFY_NONE);
-	mbedtls_ssl_conf_authmode(
-		&ssl.c.conf,
-		htbthost_param.verify ?
-			MBEDTLS_SSL_VERIFY_REQUIRED : MBEDTLS_SSL_VERIFY_NONE);
 	prne_assert(mbedtls_ssl_config_defaults(
 		&ssl.cncp.conf,
 		MBEDTLS_SSL_IS_CLIENT,

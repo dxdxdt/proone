@@ -471,6 +471,7 @@ int main (const int argc, const char **args) {
 		param.cb_f.hostinfo = cb_hostinfo;
 		param.cb_f.tmpfile = mktmpfile;
 		param.cb_f.ny_bin = cb_ny_bin;
+		param.blackhole = open("/dev/null", O_WRONLY);
 
 		w = wkr_arr + 1;
 		htbt = prne_alloc_htbt(w, param);

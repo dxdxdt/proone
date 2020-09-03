@@ -244,16 +244,17 @@ static bool resolv_qq (prne_resolv_t *ctx, const char *name, prne_pth_cv_t *cv, 
 		goto ERR;
 	}
 
-	prne_assert(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
+	prne_dbgtrap(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
 	q_ent->qlist_ent = prne_llist_append(&ctx->qlist, q_ent);
 	if (q_ent->qlist_ent == NULL) {
 		pth_mutex_release(&ctx->lock);
 		goto ERR;
 	}
 	q_ent->tp_queued = prne_gettime(CLOCK_MONOTONIC);
-	prne_assert(pth_cond_notify(&ctx->cond, FALSE));
+	prne_dbgtrap(pth_cond_notify(&ctx->cond, FALSE));
 	pth_mutex_release(&ctx->lock);
 
+	prne_resolv_free_prm(out);
 	out->ctx = q_ent;
 	out->fut = &q_ent->fut;
 	*ny_q_ent = q_ent;
@@ -626,7 +627,7 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 	prne_llist_entry_t *cur;
 	query_entry_t *qent;
 	const uint8_t *qname, *alias, *end = data + len, *p, *rname;
-	size_t i, j, loop_cnt;
+	size_t i, j, loop_cnt, sane_len;
 	bool ret;
 
 	if (len < 12) {
@@ -758,6 +759,22 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 		tpl->ttl = ((uint_fast32_t)p[4]) | ((uint_fast32_t)p[5]) | ((uint_fast32_t)p[6]) | ((uint_fast32_t)p[7]);
 		tpl->data_len = ((uint_fast16_t)p[8] << 8) | (uint_fast16_t)p[9];
 		rname = tpl->data = p + 10;
+
+		// sanity check
+		switch (tpl->rtype) {
+		case PRNE_RESOLV_RTYPE_A: sane_len = 4; break;
+		case PRNE_RESOLV_RTYPE_AAAA: sane_len = 16; break;
+		case PRNE_RESOLV_RTYPE_TXT: sane_len = 1; break;
+		default: sane_len = 0;
+		}
+		if (sane_len > tpl->data_len ||
+			(tpl->rtype == PRNE_RESOLV_RTYPE_TXT &&
+			tpl->data_len - 1 < tpl->data[0]))
+		{
+			qr = PRNE_RESOLV_QR_PRO_ERR;
+			*err_flag = true;
+			goto END;
+		}
 
 		switch (tpl->rtype) {
 		case PRNE_RESOLV_RTYPE_SOA:
@@ -1190,9 +1207,9 @@ static void resolv_wkr_free (void *p) {
 
 static void resolv_wkr_fin (void *p) {
 	DECL_CTX_PTR(p);
-	prne_assert(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
+	prne_dbgtrap(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
 	ctx->ctx_state = RESOLV_CTX_STATE_FIN_CALLED;
-	prne_assert(pth_cond_notify(&ctx->cond, FALSE));
+	prne_dbgtrap(pth_cond_notify(&ctx->cond, FALSE));
 	pth_mutex_release(&ctx->lock);
 }
 
@@ -1203,7 +1220,7 @@ static void *resolv_wkr_entry (void *p) {
 	while (ctx->ctx_state == RESOLV_CTX_STATE_OK) {
 		sck_close = false;
 
-		prne_assert(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
+		prne_dbgtrap(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
 		if (ctx->qlist.size == 0) {
 			pth_event_t ev;
 
@@ -1339,6 +1356,10 @@ bool prne_resolv_prm_gettxtrec (prne_resolv_t *wkr, const char *name, prne_pth_c
 }
 
 void prne_resolv_free_prm (prne_resolv_prm_t *prm) {
+	if (prm == NULL) {
+		return;
+	}
+
 	if (prm->ctx != NULL) {
 		query_entry_t *ent = (query_entry_t*)prm->ctx;
 
@@ -1351,7 +1372,6 @@ void prne_resolv_free_prm (prne_resolv_prm_t *prm) {
 		}
 		resolv_free_q_ent(ent);
 	}
-
 	prm->ctx = NULL;
 	prm->fut = NULL;
 }

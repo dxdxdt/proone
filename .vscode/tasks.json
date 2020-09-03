@@ -29,6 +29,11 @@
 			"label": "Build htbthost",
 			"type": "shell",
 			"command": "make -C ./src proone-htbthost"
+		},
+		{
+			"label": "Build resolv",
+			"type": "shell",
+			"command": "make -C ./src proone-resolv"
 		}
 	]
 }

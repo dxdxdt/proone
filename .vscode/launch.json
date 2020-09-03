@@ -9,7 +9,7 @@
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone-htbthost",
-			"args": ["test", "--no-verify"],
+			"args": [ "test", "--no-verify" ],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
@@ -20,9 +20,29 @@
 					"description": "Follow parent fork",
 					"text": "set follow-fork-mode parent",
 					"ignoreFailures": false
+				},
+				{
+					"description": "Ignore SIGPIPE",
+					"text": "handle SIGPIPE nostop print",
+					"ignoreFailures": false
 				}
 			],
 			"preLaunchTask": "Build htbthost",
+			"miDebuggerPath": "/usr/bin/gdb"
+		},
+		{
+			"name": "resolv",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-resolv",
+			"args": [],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [],
+			"preLaunchTask": "Build resolv",
 			"miDebuggerPath": "/usr/bin/gdb"
 		}
 	]

@@ -258,10 +258,14 @@ typedef bool(*prne_htbt_eq_ft)(const void *a, const void *b);
 typedef prne_htbt_ser_rc_t(*prne_htbt_ser_ft)(uint8_t *mem, const size_t mem_len, size_t *actual, const void *in);
 typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(const uint8_t *data, const size_t len, size_t *actual, void *out);
 
-#define PRNE_HTBT_PROTO_PORT (uint16_t)64420
-#define PRNE_HTBT_ARGS_MAX 255 // _POSIX_ARG_MAX equiv
-#define PRNE_HTBT_ARG_MEM_MAX 1023
-#define PRNE_HTBT_STDIO_LEN_MAX 0x0FFF
+#define PRNE_HTBT_MSG_ID_MIN		1
+#define PRNE_HTBT_MSG_ID_MAX		INT16_MAX
+#define PRNE_HTBT_MSG_ID_DELTA		INT16_MAX
+#define PRNE_HTBT_PROTO_PORT		(uint16_t)64420
+// _POSIX_ARG_MAX equiv
+#define PRNE_HTBT_ARGS_MAX			255
+#define PRNE_HTBT_ARG_MEM_MAX		1023
+#define PRNE_HTBT_STDIO_LEN_MAX		0x0FFF
 
 /* PRNE_HTBT_PROTO_MIN_BUF
 *

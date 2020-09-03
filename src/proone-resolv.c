@@ -66,6 +66,7 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 		bool has_prm = false;
 
 		prne_dbgast(rm[1].rm_so >= 0 && rm[2].rm_so >= 0);
+		prne_resolv_init_prm(prm);
 
 		verb = line + rm[1].rm_so;
 		verb_len = rm[1].rm_eo - rm[1].rm_so;
@@ -92,6 +93,7 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 		}
 		else {
 			perror("* Queue failed");
+			prne_resolv_free_prm(prm);
 			prne_free(prm);
 		}
 	}
@@ -225,6 +227,7 @@ static void *stdout_wkr_entry (void *ctx) {
 				printf(";\n");
 
 				prne_resolv_free_prm(prm);
+				prne_free(prm);
 				cur = prne_llist_erase(&prm_list, cur);
 			}
 			else {

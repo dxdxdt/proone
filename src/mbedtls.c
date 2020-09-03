@@ -13,7 +13,7 @@
 
 
 int prne_mbedtls_x509_crt_verify_cb (void *param, mbedtls_x509_crt *crt, int crt_depth, uint32_t *flags) {
-	*flags &= ~MBEDTLS_X509_BADCERT_EXPIRED;
+	*flags &= ~(uint32_t)MBEDTLS_X509_BADCERT_EXPIRED;
 	return 0;
 }
 

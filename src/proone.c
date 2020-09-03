@@ -774,7 +774,7 @@ int main (const int argc, const char **args) {
 
 		if (prne_g.child_pid > 0) {
 			static int status;
-			static bool has_ny_bin;
+			static bool has_ny_bin = false;
 			static int caught_signal = 0;
 
 			prne_dbgpf("* Child: %d\n", prne_g.child_pid);
@@ -799,10 +799,12 @@ int main (const int argc, const char **args) {
 				}
 			} while (false);
 
-			has_ny_bin = strlen(prne_s_g->ny_bin_path) > 0;
+			if (prne_s_g != NULL) {
+				has_ny_bin = strlen(prne_s_g->ny_bin_path) > 0;
 
-			if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-				prne_s_g->crash_cnt += 1;
+				if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
+					prne_s_g->crash_cnt += 1;
+				}
 			}
 
 			if (WIFEXITED(status)) {

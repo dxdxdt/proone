@@ -73,5 +73,5 @@ struct prne_shared_global {
 
 
 extern struct prne_global prne_g;
-// TODO: could be NULL on some environments
+// could be NULL on some environments
 extern struct prne_shared_global *prne_s_g;

@@ -22,7 +22,8 @@ bin_PROGRAMS =\
 	proone-resolv\
 	proone-stress\
 	proone-ipaddr-arr\
-	proone-htbthost
+	proone-htbthost\
+	proone-mkcnc
 
 proone_tests =\
 	proone-test_proto\
@@ -79,6 +80,9 @@ proone_resolv_SOURCES = proone-resolv.c
 
 proone_htbthost_LDADD = libproone.a
 proone_htbthost_SOURCES = proone-htbthost.c
+
+proone_mkcnc_LDADD = libproone.a
+proone_mkcnc_SOURCES = proone-mkcnc.c
 
 proone_ipaddr_arr_SOURCES = proone-ipaddr-arr.c
 

@@ -70,6 +70,22 @@
 			],
 			"preLaunchTask": "Build proone",
 			"miDebuggerPath": "/usr/bin/gdb"
-		}
+		},
+
+		{
+			"name": "test_proto",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-test_proto",
+			"args": [],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [],
+			"preLaunchTask": "Build test_proto",
+			"miDebuggerPath": "/usr/bin/gdb"
+		},
 	]
 }

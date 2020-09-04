@@ -150,34 +150,45 @@ prne_htbt_ser_rc_t prne_enc_host_cred (uint8_t *data, const size_t len, size_t *
 	const size_t id_len = prne_nstrlen(in->id);
 	const size_t pw_len = prne_nstrlen(in->pw);
 
-	if (id_len > 255 || pw_len > 255) {
+	*actual = id_len + pw_len + 2;
+	if (*actual > 255) {
 		return PRNE_HTBT_SER_RC_FMT_ERR;
 	}
-
-	*actual = 2 + id_len + pw_len;
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
-	data[0] = (uint8_t)id_len;
-	data[1] = (uint8_t)pw_len;
-	memcpy(data + 2, in->id, id_len);
-	memcpy(data + 2 + id_len, in->pw, pw_len);
+	memcpy(data, in->id, id_len);
+	data[id_len] = 0;
+	memcpy(data + id_len + 1, in->pw, pw_len);
+	data[id_len + 1 + pw_len] = 0;
+
 	return PRNE_HTBT_SER_RC_OK;
 }
 
 prne_htbt_ser_rc_t prne_dec_host_cred (const uint8_t *data, const size_t len, prne_host_cred_t *out) {
-	if (!(2 <= len && len <= 2 + 255 + 255)) {
+	size_t id_len, pw_len;
+	char *id, *pw, *end;
+
+	id = (char*)data;
+	end = prne_strnchr((const char*)data, 0, len);
+	if (end == NULL) {
 		return PRNE_HTBT_SER_RC_FMT_ERR;
 	}
+	id_len = end - id;
 
-	if (!prne_alloc_host_cred(out, data[0], data[1])) {
+	pw = id + id_len + 1;
+	end = prne_strnchr(pw, 0, len - id_len - 1);
+	if (end == NULL) {
+		return PRNE_HTBT_SER_RC_FMT_ERR;
+	}
+	pw_len = end - pw;
+
+	if (!prne_alloc_host_cred(out, id_len, pw_len)) {
 		return PRNE_HTBT_SER_RC_ERRNO;
 	}
-	memcpy(out->id, data + 2, data[0]);
-	out->id[data[0]] = 0;
-	memcpy(out->pw, data + 2 + data[0], data[1]);
-	out->pw[data[1]] = 0;
+	memcpy(out->id, id, id_len + 1);
+	memcpy(out->pw, pw, pw_len + 1);
 
 	return PRNE_HTBT_SER_RC_OK;
 }
@@ -537,7 +548,7 @@ prne_htbt_ser_rc_t prne_htbt_ser_host_info (uint8_t *mem, const size_t mem_len, 
 
 prne_htbt_ser_rc_t prne_htbt_ser_hover (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_hover_t *in) {
 	*actual = 24;
-	if (*actual < mem_len) {
+	if (mem_len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
@@ -715,7 +726,7 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (const uint8_t *data, const size_t l
 
 prne_htbt_ser_rc_t prne_htbt_dser_hover (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_hover_t *out) {
 	*actual = 24;
-	if (*actual < len) {
+	if (*actual > len) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 

@@ -302,7 +302,6 @@ void prne_init_host_cred (prne_host_cred_t *hc);
 bool prne_alloc_host_cred (prne_host_cred_t *hc, const uint8_t id_len, const uint8_t pw_len);
 void prne_free_host_cred (prne_host_cred_t *hc);
 bool prne_eq_host_cred (const prne_host_cred_t *a, const prne_host_cred_t *b);
-// TODO: base64 encode
 prne_htbt_ser_rc_t prne_enc_host_cred (uint8_t *data, const size_t len, size_t *actual, const prne_host_cred_t *in);
 prne_htbt_ser_rc_t prne_dec_host_cred (const uint8_t *data, const size_t len, prne_host_cred_t *out);
 

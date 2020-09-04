@@ -39,6 +39,12 @@
 			"label": "Build proone",
 			"type": "shell",
 			"command": "make -C ./src proone"
+		},
+
+		{
+			"label": "Build test_proto",
+			"type": "shell",
+			"command": "make -C ./src proone-test_proto"
 		}
 	]
 }

@@ -6,11 +6,11 @@
 #include <string.h>
 
 
-static uint8_t *m_data = NULL;
-static const uint8_t *m_mask = NULL;
-static uint16_t *m_offsets = NULL;
-static uint8_t *m_unmasked = NULL;
-static size_t m_unmasked_size = 0;
+static uint8_t *m_data;
+static const uint8_t *m_mask;
+static uint16_t *m_offsets;
+static uint8_t *m_unmasked;
+static size_t m_unmasked_size;
 static uint8_t m_salt;
 
 

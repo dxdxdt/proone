@@ -33,7 +33,7 @@ struct prne_shared_global *prne_s_g = NULL;
 sigset_t ss_exit, ss_all;
 
 static prne_worker_t wkr_arr[2];
-static size_t wkr_cnt = 0;
+static size_t wkr_cnt;
 
 
 static void alloc_resolv (void) {
@@ -705,7 +705,7 @@ static void run_ny_bin (void) {
 
 
 int main (const int argc, const char **args) {
-	static int exit_code = 0;
+	static int exit_code;
 	static bool loop = true;
 
 	sigemptyset(&ss_exit);
@@ -774,8 +774,8 @@ int main (const int argc, const char **args) {
 
 		if (prne_g.child_pid > 0) {
 			static int status;
-			static bool has_ny_bin = false;
-			static int caught_signal = 0;
+			static bool has_ny_bin;
+			static int caught_signal;
 
 			prne_dbgpf("* Child: %d\n", prne_g.child_pid);
 

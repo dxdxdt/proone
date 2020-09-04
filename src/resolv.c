@@ -357,7 +357,7 @@ static void resolv_close_sck (prne_resolv_t *ctx, const struct timespec *pause, 
 }
 
 static bool resolv_ensure_act_dns_fd (prne_resolv_t *ctx) {
-	static socklen_t optval_len = sizeof(int);
+	socklen_t optval_len = sizeof(int);
 	size_t i;
 	struct pollfd pfs[2];
 	int optval, pollret;

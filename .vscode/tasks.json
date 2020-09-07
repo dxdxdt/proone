@@ -36,10 +36,16 @@
 			"command": "make -C ./src proone-resolv"
 		},
 		{
+			"label": "Build pack",
+			"type": "shell",
+			"command": "make -C ./src dvault.bin proone-pack"
+		},
+		{
 			"label": "Build proone",
 			"type": "shell",
 			"command": "make -C ./src proone"
 		},
+
 
 		{
 			"label": "Build test_proto",

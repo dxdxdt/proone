@@ -217,7 +217,8 @@ struct prne_htbt_host_info {
 	uint8_t prog_ver[16];
 	uint8_t boot_id[16];
 	uint8_t instance_id[16];
-	char *host_cred;
+	uint8_t *host_cred;
+	size_t host_cred_len;
 	uint32_t crash_cnt;
 	prne_arch_t arch;
 };
@@ -284,6 +285,7 @@ typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(const uint8_t *data, const size_t
 
 const char *prne_arch_tostr (const prne_arch_t x);
 prne_arch_t prne_arch_fstr (const char *str);
+bool prne_arch_inrange (const prne_arch_t x);
 
 void prne_net_ep_tosin4 (const prne_net_endpoint_t *ep, struct sockaddr_in *out);
 void prne_net_ep_tosin6 (const prne_net_endpoint_t *ep, struct sockaddr_in6 *out);
@@ -306,7 +308,7 @@ prne_htbt_ser_rc_t prne_enc_host_cred (uint8_t *data, const size_t len, size_t *
 prne_htbt_ser_rc_t prne_dec_host_cred (const uint8_t *data, const size_t len, prne_host_cred_t *out);
 
 void prne_htbt_init_host_info (prne_htbt_host_info_t *hi);
-bool prne_htbt_alloc_host_info (prne_htbt_host_info_t *hi, const size_t cred_strlen);
+bool prne_htbt_alloc_host_info (prne_htbt_host_info_t *hi, const size_t cred_len);
 void prne_htbt_free_host_info (prne_htbt_host_info_t *hi);
 bool prne_htbt_eq_host_info (const prne_htbt_host_info_t *a, const prne_htbt_host_info_t *b);
 

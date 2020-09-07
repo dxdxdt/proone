@@ -32,10 +32,8 @@ static void test_ser (void) {
 	static prne_htbt_status_t s_a, s_b;
 	static prne_host_cred_t hc_a, hc_b;
 	static prne_htbt_hover_t hv_a, hv_b;
-	static uint8_t *cred_data = NULL;
+	static uint8_t cred_data[255];
 	static size_t cred_data_len = 0;
-	static char *encoded_cred_str = NULL;
-	static size_t encoded_cred_str_len = 0;
 	static prne_htbt_host_info_t hi_a, hi_b;
 	static prne_htbt_cmd_t cmd_a, cmd_b;
 	static char *test_args[] = {
@@ -70,7 +68,8 @@ static void test_ser (void) {
 	};
 	static prne_htbt_bin_meta_t bm_a, bm_b;
 	static const uint8_t prog_ver[] = PRNE_PROG_VER;
-	static const char CRED_STR_NORM[] = "qwertyuiop[]asdfghjkl;'zxcvbnm,./`1234567890-=~!@#$%^&*()_+|\\";
+#define CRED_STR "qwertyuiop[]asdfghjkl;'zxcvbnm,./`1234567890-=~!@#$%^&*()_+|\\"
+	static const char CRED_STR_NORM[] = CRED_STR;
 	static const char CRED_STR_LONG[] = "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
 
 	// free functions should accept NULL
@@ -181,23 +180,15 @@ static void test_ser (void) {
 	assert(prne_alloc_host_cred(&hc_a, strlen(CRED_STR_NORM), strlen(CRED_STR_NORM)));
 	strcpy(hc_a.id, CRED_STR_NORM);
 	strcpy(hc_a.pw, CRED_STR_NORM);
-	assert(prne_enc_host_cred(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, &hc_a) == PRNE_HTBT_SER_RC_OK);
-	cred_data_len = proto_buf_cnt_len;
-	cred_data = (uint8_t*)prne_malloc(1, proto_buf_cnt_len);
-	memcpy(cred_data, proto_buf, proto_buf_cnt_len);
-	assert(prne_dec_host_cred(proto_buf, proto_buf_cnt_len, &hc_b) == PRNE_HTBT_SER_RC_OK);
+	assert(prne_enc_host_cred(cred_data, sizeof(cred_data), &cred_data_len, &hc_a) == PRNE_HTBT_SER_RC_OK);
+	assert(cred_data_len == sizeof(CRED_STR_NORM) * 2);
+	assert(prne_dec_host_cred(cred_data, cred_data_len, &hc_b) == PRNE_HTBT_SER_RC_OK);
 	assert(
 		strcmp(hc_b.id, CRED_STR_NORM) == 0 &&
 		strcmp(hc_b.pw, CRED_STR_NORM) == 0);
 	assert(prne_eq_host_cred(&hc_a, &hc_b));
 	prne_free_host_cred(&hc_a);
 	prne_free_host_cred(&hc_b);
-
-	// Base64 encode the cred data
-	encoded_cred_str = prne_enc_base64_mem(cred_data, cred_data_len);
-	assert(encoded_cred_str != NULL);
-	encoded_cred_str_len = strlen(encoded_cred_str);
-	assert(encoded_cred_str_len < 256);
 
 	// host info
 	prne_htbt_init_host_info(&hi_a);
@@ -210,14 +201,15 @@ static void test_ser (void) {
 	hi_a.infect_cnt = 0xABBAABBAABBAABBA;
 	hi_a.parent_pid = 0xDEADBEEF;
 	hi_a.child_pid = 0xBABEBABE;
-	hi_a.host_cred = encoded_cred_str;
+	hi_a.host_cred = cred_data;
+	hi_a.host_cred_len = cred_data_len;
 	memcpy(hi_a.prog_ver, prog_ver, sizeof(prog_ver));
 	memcpy(hi_a.boot_id, "\x30\x1d\x25\x39\x90\x85\x42\xfd\x90\xb6\x20\x0b\x4a\x3b\x08\x55", 16);
 	memcpy(hi_a.instance_id, "\x25\xdc\x7e\xa2\x4a\xc6\x4a\x29\x9f\xac\xbe\x18\x42\x33\xc4\x85", 16);
 	hi_a.arch = prne_host_arch;
 	assert(prne_htbt_ser_host_info(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, &hi_a) == PRNE_HTBT_SER_RC_OK);
 	assert(
-		proto_buf_cnt_len == 94 + encoded_cred_str_len &&
+		proto_buf_cnt_len == 94 + cred_data_len &&
 		memcmp(proto_buf, prog_ver, 16) == 0 &&
 		memcmp(
 			proto_buf + 16,
@@ -231,12 +223,13 @@ static void test_ser (void) {
 			"\xDE\xAD\xBE\xEF" // parent_pid
 			"\xBA\xBE\xBA\xBE", // child_pid
 			76) == 0 &&
-		(size_t)proto_buf[16 + 76] == encoded_cred_str_len &&
+		(size_t)proto_buf[16 + 76] == cred_data_len &&
 		proto_buf[16 + 76 + 1] == (uint8_t)prne_host_arch &&
-		memcmp(proto_buf + 16 + 76 + 1 + 1, encoded_cred_str, encoded_cred_str_len) == 0);
+		memcmp(proto_buf + 16 + 76 + 1 + 1, cred_data, cred_data_len) == 0);
 	assert(prne_htbt_dser_host_info(proto_buf, proto_buf_cnt_len, &actual, &hi_b) == PRNE_HTBT_SER_RC_OK);
 	assert(prne_htbt_eq_host_info(&hi_a, &hi_b));
 	hi_a.host_cred = NULL;
+	hi_a.host_cred_len = 0;
 	// with ownership of host_cred
 	prne_htbt_alloc_host_info(&hi_a, cred_data_len);
 	assert(prne_htbt_ser_host_info(proto_buf, PRNE_HTBT_PROTO_MIN_BUF, &proto_buf_cnt_len, &hi_a) == PRNE_HTBT_SER_RC_OK);
@@ -307,11 +300,4 @@ static void test_ser (void) {
 	assert(prne_htbt_eq_hover(&hv_a, &hv_b));
 	prne_htbt_free_hover(&hv_a);
 	prne_htbt_free_hover(&hv_b);
-
-	prne_free(encoded_cred_str);
-	prne_free(cred_data);
-	encoded_cred_str = NULL;
-	encoded_cred_str_len = 0;
-	cred_data = NULL;
-	cred_data_len = 0;
 }

@@ -1,357 +1,496 @@
 #include "pack.h"
-#include "util_rt.h"
 #include "util_ct.h"
+#include "util_rt.h"
+#include "endian.h"
+#include "config.h"
 
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
-
 #include <errno.h>
 
-#include <zlib.h>
-#include <mbedtls/error.h>
 
+typedef struct {
+	const uint8_t *data;
+	size_t rem;
+} pack_rcb_pt_octx_t;
 
-struct prne_unpack_ctx {
-	size_t end;
-	z_stream zs;
-};
-
-static int bin_tpl_comp_func (const void *a, const void *b) {
-	return ((const prne_bin_tuple_t*)a)->arch < ((const prne_bin_tuple_t*)b)->arch ? -1 : ((const prne_bin_tuple_t*)a)->arch > ((const prne_bin_tuple_t*)b)->arch ? 1 : 0;
-}
-
+typedef struct {
+	uint8_t buf[4096];
+	const uint8_t *m_dv;
+	size_t dv_len;
+	size_t ofs;
+	const prne_bin_tuple_t *t;
+	const prne_bin_archive_t *ba;
+	size_t buf_len; // 0: used as z_stream buffer, > 0: used as something else
+	size_t seek, skip; // Offset to binary to exclude and its length
+	z_stream z_old, z_ny;
+	prne_arch_t a_self;
+} pack_rcb_rb_octx_t;
 
 void prne_init_bin_archive (prne_bin_archive_t *a) {
-	a->data_size = 0;
-	a->data = NULL;
-	a->nb_bin = 0;
-	a->bin = NULL;
+	prne_memzero(a, sizeof(prne_bin_archive_t));
 }
 
 void prne_free_bin_archive (prne_bin_archive_t *a) {
-	prne_free(a->data);
 	prne_free(a->bin);
-	a->data_size = 0;
-	a->data = NULL;
-	a->nb_bin = 0;
 	a->bin = NULL;
+	a->nb_bin = 0;
 }
 
-prne_pack_ret_t prne_index_bin_archive (void *rf_ctx, prne_bin_archive_read_ft rf, prne_bin_archive_t *out) {
-	prne_pack_ret_t ret;
-	uint8_t *data = NULL;
+prne_pack_rc_t prne_index_bin_archive (
+	const uint8_t *data,
+	size_t len,
+	prne_bin_archive_t *out)
+{
+	prne_pack_rc_t ret = PRNE_PACK_RC_OK;
 	prne_bin_tuple_t *bin = NULL;
-	size_t i, r_len, pos = 0, data_size = 0, nb_bin = 0;
-	uint8_t head[4];
-	void *ny_mem;
-	const size_t pagesize = prne_getpagesize();
+	size_t nb_bin, i, sum = 0;
 
-	r_len = 0;
-	ret = rf(rf_ctx, 1, head, &r_len);
-	if (ret.rc != PRNE_PACK_RC_OK) {
-		goto ERR;
+	if (len < 4) {
+		ret = PRNE_PACK_RC_FMT_ERR;
+		goto END;
 	}
-	if (r_len != 1) {
-		ret.rc = PRNE_PACK_RC_FMT_ERR;
-		goto ERR;
+	nb_bin = data[0];
+	len -= 4;
+	data += 4;
+	if (nb_bin * 4 > len) {
+		ret = PRNE_PACK_RC_FMT_ERR;
+		goto END;
 	}
 
-	nb_bin = head[0];
 	bin = (prne_bin_tuple_t*)prne_malloc(sizeof(prne_bin_tuple_t), nb_bin);
 	if (bin == NULL) {
-		ret.rc = PRNE_PACK_RC_ERRNO;
-		ret.err = errno;
-		goto ERR;
+		ret = PRNE_PACK_RC_ERRNO;
+		goto END;
 	}
+
 	for (i = 0; i < nb_bin; i += 1) {
-		r_len = 0;
-		ret = rf(rf_ctx, 4, head, &r_len);
-		if (ret.rc != PRNE_PACK_RC_OK) {
-			goto ERR;
-		}
-		if (r_len != 4) {
-			ret.rc = PRNE_PACK_RC_FMT_ERR;
-			goto ERR;
-		}
-
-		bin[i].arch = (prne_arch_t)head[0];
-		bin[i].offset = pos;
-		pos += bin[i].size = ((size_t)head[1] << 16) | ((size_t)head[2] << 8) | ((size_t)head[3]);
+		bin[i].arch = (prne_arch_t)data[0];
+		bin[i].size = prne_recmb_msb32(0, data[1], data[2], data[3]);
+		sum += bin[i].size;
+		data += 4;
+		len -= 4;
 	}
 
-	pos = 0;
-	do {
-		ny_mem = prne_realloc(data, 1, pos + pagesize);
-		if (ny_mem == NULL) {
-			ret.rc = PRNE_PACK_RC_ERRNO;
-			ret.err = errno;
-			goto ERR;
-		}
-		data = (uint8_t*)ny_mem;
-
-		ret = rf(rf_ctx, pagesize, data + pos, &r_len);
-		if (ret.rc != PRNE_PACK_RC_OK) {
-			goto ERR;
-		}
-		data_size += r_len;
-		pos += pagesize;
-	} while (r_len == pagesize);
-	ny_mem = prne_realloc(data, 1, data_size);
-	if (ny_mem == NULL) {
-		ret.rc = PRNE_PACK_RC_ERRNO;
-		ret.err = errno;
-		goto ERR;
-	}
-	data = (uint8_t*)ny_mem;
-
-	qsort(bin, nb_bin, sizeof(prne_bin_tuple_t), bin_tpl_comp_func);
 	out->data = data;
-	out->data_size = data_size;
+	out->data_size = len;
 	out->nb_bin = nb_bin;
 	out->bin = bin;
+	bin = NULL;
 
-	return ret;
-ERR:
+END:
 	prne_free(bin);
-	prne_free(data);
-
 	return ret;
 }
 
-prne_unpack_ctx_pt prne_alloc_unpack_ctx (const prne_bin_archive_t *archive, const prne_arch_t arch, prne_pack_ret_t *pr_out) {
-	prne_bin_tuple_t main_tpl;
-	prne_bin_tuple_t *tpl;
-	prne_unpack_ctx_pt ret = NULL;
-	uint8_t buf[4096];
-	size_t i, cnt;
-	prne_pack_ret_t pr;
+void prne_init_bin_rcb_ctx (prne_bin_rcb_ctx_t *ctx) {
+	prne_memzero(ctx, sizeof(prne_bin_rcb_ctx_t));
+}
 
-	pr.rc = PRNE_PACK_RC_OK;
-	pr.err = 0;
-
-	main_tpl.arch = arch;
-	tpl = (prne_bin_tuple_t*)bsearch(&main_tpl, archive->bin, archive->nb_bin, sizeof(prne_bin_tuple_t), bin_tpl_comp_func);
-	if (tpl == NULL) {
-		pr.rc = PRNE_PACK_RC_NO_BIN;
-		goto ERR;
+void prne_free_bin_rcb_ctx (prne_bin_rcb_ctx_t *ctx) {
+	ctx->read_f = NULL;
+	if (ctx->o_ctx != NULL) {
+		ctx->ctx_free_f(ctx->o_ctx);
+		ctx->o_ctx = NULL;
+		ctx->ctx_free_f = NULL;
 	}
-	main_tpl = *tpl;
+}
 
-	ret = (prne_unpack_ctx_pt)prne_malloc(sizeof(struct prne_unpack_ctx), 1);
-	if (ret == NULL) {
-		pr.rc = PRNE_PACK_RC_ERRNO;
-		pr.err = errno;
-		goto ERR;
+void pack_rcb_free_pt_octx (void *p) {
+	prne_free(p);
+}
+
+void pack_rcb_free_rb_octx (void *p) {
+	pack_rcb_rb_octx_t *ctx = (pack_rcb_rb_octx_t*)p;
+
+	inflateEnd(&ctx->z_old);
+	deflateEnd(&ctx->z_ny);
+	prne_free(ctx);
+}
+
+static ssize_t pack_rcb_nullread_f (
+	prne_bin_rcb_ctx_t *ctx,
+	uint8_t *buf,
+	size_t len,
+	prne_pack_rc_t *prc,
+	int *err)
+{
+	prne_chk_assign(prc, PRNE_PACK_RC_EOF);
+	prne_chk_assign(err, 0);
+	return 0;
+}
+
+static ssize_t pack_rcb_ptread_f (
+	prne_bin_rcb_ctx_t *ctx_p,
+	uint8_t *buf,
+	size_t len,
+	prne_pack_rc_t *prc,
+	int *err)
+{
+	pack_rcb_pt_octx_t *ctx = (pack_rcb_pt_octx_t*)ctx_p->o_ctx;
+	const size_t consume = prne_op_min(len, ctx->rem);
+
+	memcpy(buf, ctx->data, consume);
+	ctx->data += consume;
+	ctx->rem -= consume;
+
+	if (ctx->rem == 0) {
+		ctx_p->read_f = pack_rcb_nullread_f;
+		ctx_p->ctx_free_f(ctx);
+		ctx_p->o_ctx = NULL;
+		ctx_p->ctx_free_f = NULL;
 	}
-	prne_memzero(&ret->zs, sizeof(ret->zs));
-	if (Z_OK != (pr.err = inflateInit(&ret->zs))) {
-		prne_free(ret);
-		ret = NULL;
 
-		pr.rc = PRNE_PACK_RC_Z_ERR;
-		goto ERR;
+	prne_chk_assign(prc, PRNE_PACK_RC_OK);
+	prne_chk_assign(err, 0);
+	return consume;
+}
+
+static ssize_t pack_rcb_rpread_f (
+	prne_bin_rcb_ctx_t *ctx_p,
+	uint8_t *buf,
+	size_t len,
+	prne_pack_rc_t *out_prc,
+	int *out_err)
+{
+	prne_pack_rc_t prc = PRNE_PACK_RC_OK;
+	int err = 0;
+	pack_rcb_rb_octx_t *ctx = (pack_rcb_rb_octx_t*)ctx_p->o_ctx;
+	size_t consume;
+
+	if (ctx->buf_len > 0) {
+		// alignment and index
+		consume = prne_op_min(ctx->buf_len, len);
+		memcpy(buf, ctx->buf, consume);
+		memmove(ctx->buf, ctx->buf + consume, ctx->buf_len - consume);
+		ctx->buf_len -= consume;
 	}
-	ret->zs.avail_in = archive->data_size;
-	ret->zs.next_in = archive->data;
+	else {
+		int d_flush = Z_NO_FLUSH;
 
-	cnt = main_tpl.offset / sizeof(buf);
-	for (i = 0; i < cnt; i += 1) {
-		ret->zs.avail_out = sizeof(buf);
-		ret->zs.next_out = buf;
-		switch (inflate(&ret->zs, Z_SYNC_FLUSH)) {
-		case Z_OK:
+		if (ctx->z_ny.avail_in == 0) {
+			if (ctx->seek > 0) {
+				consume = prne_op_min(sizeof(ctx->buf), ctx->seek);
+			}
+			else if (ctx->skip > 0) {
+				consume = prne_op_min(sizeof(ctx->buf), ctx->skip);
+			}
+			else {
+				consume = sizeof(ctx->buf);
+			}
+			ctx->z_old.avail_out = consume;
+			ctx->z_old.next_out = ctx->buf;
+			err = inflate(&ctx->z_old, Z_FINISH);
+			switch (err) {
+			case Z_STREAM_END:
+				d_flush = Z_FINISH;
+				/* fall-through */
+			case Z_BUF_ERROR:
+			case Z_OK:
+				err = 0;
+				break;
+			default:
+				consume = -1;
+				prc = PRNE_PACK_RC_Z_ERR;
+				goto END;
+			}
+
+			consume -= ctx->z_old.avail_out;
+			if (ctx->seek > 0) {
+				ctx->seek -= consume;
+			}
+			else if (ctx->skip > 0) {
+				ctx->skip -= consume;
+				consume = 0;
+				goto END;
+			}
+			ctx->z_ny.next_in = ctx->buf;
+			ctx->z_ny.avail_in = consume;
+		}
+
+		ctx->z_ny.avail_out = len;
+		ctx->z_ny.next_out = buf;
+		err = deflate(&ctx->z_ny, d_flush);
+		switch (err) {
+		case Z_STREAM_END:
+			ctx_p->read_f = pack_rcb_nullread_f;
+			prc = PRNE_PACK_RC_EOF;
+			/* fall-through */
 		case Z_BUF_ERROR:
+		case Z_OK:
+			err = 0;
 			break;
 		default:
-			pr.rc = PRNE_PACK_RC_FMT_ERR;
-			goto ERR;
+			consume = -1;
+			prc = PRNE_PACK_RC_Z_ERR;
+			goto END;
 		}
-		if (ret->zs.avail_out != 0) {
-			pr.rc = PRNE_PACK_RC_FMT_ERR;
-			goto ERR;
-		}
+		consume = len - ctx->z_ny.avail_out;
 	}
-
-	ret->zs.avail_out = main_tpl.offset - cnt * sizeof(buf);
-	ret->zs.next_out = buf;
-	switch (inflate(&ret->zs, Z_SYNC_FLUSH)) {
-	case Z_OK:
-	case Z_BUF_ERROR:
-		break;
-	default:
-		pr.rc = PRNE_PACK_RC_FMT_ERR;
-		goto ERR;
-	}
-	if (ret->zs.total_out != main_tpl.offset) {
-		pr.rc = PRNE_PACK_RC_FMT_ERR;
-		goto ERR;
-	}
-
-	ret->end = main_tpl.offset + main_tpl.size;
-	if (pr_out != NULL) {
-		*pr_out = pr;
-	}
-	return ret;
-ERR:
-	if (ret != NULL) {
-		inflateEnd(&ret->zs);
-		prne_free(ret);
-	}
-	if (pr_out != NULL) {
-		*pr_out = pr;
-	}
-
-	return NULL;
+END:
+	prne_chk_assign(out_prc, prc);
+	prne_chk_assign(out_err, err);
+	return consume;
 }
 
-void prne_free_unpack_ctx (prne_unpack_ctx_pt ctx) {
-	if (ctx != NULL) {
-		inflateEnd(&ctx->zs);
-		prne_free(ctx);
+static ssize_t pack_rcb_dvread_f (
+	prne_bin_rcb_ctx_t *ctx_p,
+	uint8_t *buf,
+	size_t len,
+	prne_pack_rc_t *out_prc,
+	int *out_err)
+{
+	pack_rcb_rb_octx_t *ctx = (pack_rcb_rb_octx_t*)ctx_p->o_ctx;
+	size_t consume;
+
+	if (ctx->buf_len > 0) {
+		// alignment and appendix
+		consume = prne_op_min(ctx->buf_len, len);
+		memcpy(buf, ctx->buf, consume);
+		memmove(ctx->buf, ctx->buf + consume, ctx->buf_len - consume);
+		ctx->buf_len -= consume;
 	}
+	else {
+		// dv
+		consume = prne_op_min(ctx->skip, len);
+		memcpy(buf, ctx->m_dv, consume);
+		ctx->skip -= consume;
+		ctx->m_dv += consume;
+
+		if (ctx->skip == 0) {
+			prne_bin_tuple_t *t;
+			uint8_t *nb_bin_loc;
+
+			// alignment and bin archive index
+			prne_static_assert(
+				sizeof(ctx->buf) >= PRNE_BIN_ALIGNMENT + NB_PRNE_ARCH * 4,
+				"FIXME");
+			ctx->buf_len =
+				prne_salign_next(ctx->dv_len, PRNE_BIN_ALIGNMENT)
+				- ctx->dv_len;
+			prne_memzero(ctx->buf, ctx->buf_len);
+
+			nb_bin_loc = &ctx->buf[ctx->buf_len + 0];
+			*nb_bin_loc = 0;
+			ctx->buf[ctx->buf_len + 1] = 0;
+			ctx->buf[ctx->buf_len + 2] = 0;
+			ctx->buf[ctx->buf_len + 3] = 0;
+			ctx->buf_len += 4;
+
+			if (ctx->a_self != PRNE_ARCH_NONE) {
+				ctx->buf[ctx->buf_len + 0] = (uint8_t)ctx->a_self;
+				ctx->buf[ctx->buf_len + 1] =
+					prne_getmsb32(ctx->z_ny.avail_in, 1);
+				ctx->buf[ctx->buf_len + 2] =
+					prne_getmsb32(ctx->z_ny.avail_in, 2);
+				ctx->buf[ctx->buf_len + 3] =
+					prne_getmsb32(ctx->z_ny.avail_in, 3);
+				ctx->buf_len += 4;
+				*nb_bin_loc += 1;
+			}
+
+			for (size_t i = 0; i < ctx->ba->nb_bin; i += 1) {
+				t = ctx->ba->bin + i;
+
+				if (t->arch == ctx->t->arch) {
+					continue;
+				}
+				ctx->buf[ctx->buf_len + 0] = (uint8_t)t->arch;
+				ctx->buf[ctx->buf_len + 1] = prne_getmsb32(t->size, 1);
+				ctx->buf[ctx->buf_len + 2] = prne_getmsb32(t->size, 2);
+				ctx->buf[ctx->buf_len + 3] = prne_getmsb32(t->size, 3);
+				ctx->buf_len += 4;
+				*nb_bin_loc += 1;
+			}
+
+			ctx->seek = ctx->ofs;
+			ctx->skip = ctx->t->size;
+			ctx_p->read_f = pack_rcb_rpread_f;
+		}
+	}
+
+	prne_chk_assign(out_prc, PRNE_PACK_RC_OK);
+	prne_chk_assign(out_err, 0);
+	return consume;
 }
 
-ssize_t prne_do_unpack (prne_unpack_ctx_pt ctx, uint8_t *out, const size_t out_len, prne_pack_ret_t *pr_out) {
-	const size_t rem = ctx->end - ctx->zs.total_out;
-	const size_t req = prne_op_min(rem, out_len);
-	prne_pack_ret_t pr;
+static ssize_t pack_rcb_eeread_f (
+	prne_bin_rcb_ctx_t *ctx_p,
+	uint8_t *buf,
+	size_t len,
+	prne_pack_rc_t *out_prc,
+	int *out_err)
+{
+	prne_pack_rc_t prc = PRNE_PACK_RC_OK;
+	int err = 0;
+	pack_rcb_rb_octx_t *ctx = (pack_rcb_rb_octx_t*)ctx_p->o_ctx;
+	size_t consume;
 
-	pr.rc = PRNE_PACK_RC_OK;
-	pr.err = 0;
-
-	if (req == 0) {
-		return 0;
+	if (ctx->seek > 0) {
+		ctx->z_old.avail_out = prne_op_min(sizeof(ctx->buf), ctx->seek);
+		ctx->z_old.next_out = ctx->buf;
 	}
-
-	ctx->zs.next_out = out;
-	ctx->zs.avail_out = req;
-	switch ((pr.err = inflate(&ctx->zs, Z_SYNC_FLUSH))) {
-	case Z_OK:
+	else {
+		ctx->z_old.avail_out = prne_op_min(len, ctx->skip);
+		ctx->z_old.next_out = buf;
+	}
+	consume = ctx->z_old.avail_out;
+	err = inflate(&ctx->z_old, Z_FINISH);
+	switch (err) {
 	case Z_STREAM_END:
 	case Z_BUF_ERROR:
-		pr.err = 0;
+	case Z_OK:
+		err = 0;
 		break;
 	default:
-		pr.rc = PRNE_PACK_RC_Z_ERR;
+		consume = -1;
+		prc = PRNE_PACK_RC_Z_ERR;
 		goto END;
 	}
-	if (ctx->zs.avail_out != 0) {
-		pr.rc = PRNE_PACK_RC_FMT_ERR;
-		goto END;
+
+	consume -= ctx->z_old.avail_out;
+	if (ctx->seek > 0) {
+		ctx->seek -= consume;
+		consume = 0;
+	}
+	else {
+		ctx->skip -= consume;
+
+		if (ctx->skip == 0) {
+			// alignment and appendix
+			const size_t aligned = prne_salign_next(
+				ctx->t->size,
+				PRNE_BIN_ALIGNMENT);
+
+			if ((err = inflateEnd(&ctx->z_old)) != Z_OK ||
+				(err = inflateInit(&ctx->z_old)) != Z_OK)
+			{
+				prc = PRNE_PACK_RC_Z_ERR;
+				goto END;
+			}
+			err = 0;
+			ctx->z_old.avail_in = ctx->ba->data_size;
+			ctx->z_old.next_in = (uint8_t*)ctx->ba->data;
+
+			prne_static_assert(
+				sizeof(ctx->buf) >= PRNE_BIN_ALIGNMENT + 8,
+				"FIXME");
+
+			ctx->buf_len = aligned - ctx->t->size;
+			prne_memzero(ctx->buf, ctx->buf_len);
+			ctx->buf[ctx->buf_len + 0] = prne_getmsb16(ctx->dv_len, 0);
+			ctx->buf[ctx->buf_len + 1] = prne_getmsb16(ctx->dv_len, 1);
+			ctx->buf[ctx->buf_len + 2] = 0;
+			ctx->buf[ctx->buf_len + 3] = 0;
+			ctx->buf[ctx->buf_len + 4] = 0;
+			ctx->buf[ctx->buf_len + 5] = 0;
+			ctx->buf[ctx->buf_len + 6] = 0;
+			ctx->buf[ctx->buf_len + 7] = 0;
+			ctx->buf_len += 8;
+			ctx->skip = ctx->dv_len;
+
+			ctx_p->read_f = pack_rcb_dvread_f;
+		}
 	}
 
 END:
-	if (pr_out != NULL) {
-		*pr_out = pr;
-	}
-	if (pr.rc != PRNE_PACK_RC_OK) {
-		return -1;
-	}
-
-	return req;
+	prne_chk_assign(out_prc, prc);
+	prne_chk_assign(out_err, err);
+	return consume;
 }
 
-char *prne_pack_ret_tostr (const prne_pack_ret_t pr) {
-	const char *rc_str;
-	const char *err_str;
-	char *buf = NULL, err_buf[31];
-	size_t buf_size;
-
-	switch (pr.rc) {
-	case PRNE_PACK_RC_OK: rc_str = "ok"; break;
-	case PRNE_PACK_RC_FMT_ERR: rc_str = "fmt err"; break;
-	case PRNE_PACK_RC_NO_BIN: rc_str = "no bin"; break;
-	default: rc_str = NULL;
-	}
-	if (rc_str != NULL) {
-		buf_size = strlen(rc_str) + 1;
-		buf = (char*)prne_malloc(1, buf_size);
-		if (buf != NULL) {
-			memcpy(buf, rc_str, buf_size);
-		}
-		return buf;
+prne_pack_rc_t prne_start_bin_rcb (
+	prne_bin_rcb_ctx_t *ctx,
+	const prne_arch_t target,
+	const prne_arch_t self,
+	const uint8_t *m_self,
+	const size_t self_len,
+	const size_t exec_len,
+	const uint8_t *m_dvault,
+	const size_t dvault_len,
+	const prne_bin_archive_t *ba)
+{
+	if (!prne_arch_inrange(target) ||
+		(!prne_arch_inrange(self) && self != PRNE_ARCH_NONE))
+	{
+		return PRNE_PACK_RC_INVAL;
 	}
 
-	switch (pr.rc) {
-	case PRNE_PACK_RC_ERRNO:
-		rc_str = "errno";
-		err_str = strerror(pr.err);
-		break;
-	case PRNE_PACK_RC_Z_ERR:
-		rc_str = "zlib err";
-		err_str = zError(pr.err);
-		break;
-	case PRNE_PACK_RC_MBEDTLS_ERR:
-		rc_str = "mbedtls err";
-		mbedtls_strerror(pr.err, err_buf, sizeof(err_buf));
-		err_str = err_buf;
-		break;
-	default:
-		errno = EINVAL;
-		return NULL;
-	}
+	if (self == target) {
+		pack_rcb_pt_octx_t *ny_ctx =
+			(pack_rcb_pt_octx_t*)prne_malloc(sizeof(pack_rcb_pt_octx_t), 1);
 
-	buf_size = strlen(rc_str) + 4 + 11 + 1 + strlen(err_str) + 1;
-	buf = (char*)prne_malloc(1, buf_size);
-	if (buf != NULL) {
-		if (sprintf(buf, "%s - (%d)%s", rc_str, pr.err, err_str) < 0) {
-			prne_free(buf);
-			return NULL;
-		}
-	}
-	return buf;
-}
-
-void prne_init_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx) {
-	ctx->line_len = 0;
-	ctx->out_len = 0;
-}
-
-void prne_free_stdin_base64_rf_ctx (prne_stdin_base64_rf_ctx_t *ctx) {
-	ctx->line_len = 0;
-	ctx->out_len = 0;
-}
-
-prne_pack_ret_t prne_stdin_base64_rf (void *in_ctx, const size_t req, uint8_t *out, size_t *out_len) {
-	prne_stdin_base64_rf_ctx_t *ctx = (prne_stdin_base64_rf_ctx_t*)in_ctx;
-	size_t rem = req, have;
-	prne_pack_ret_t ret;
-
-	ret.rc = PRNE_PACK_RC_OK;
-	ret.err = 0;
-	*out_len = 0;
-
-	while (true) {
-		have = prne_op_min(rem, ctx->out_len);
-		memcpy(out, ctx->out_buf, have);
-		memmove(ctx->out_buf, ctx->out_buf + have, ctx->out_len - have);
-		rem -= have;
-		ctx->out_len -= have;
-		out += have;
-		*out_len += have;
-
-		if (rem == 0) {
-			break;
+		if (ny_ctx == NULL) {
+			return PRNE_PACK_RC_ERRNO;
 		}
 
-		if (fgets(ctx->line_buf, sizeof(ctx->line_buf), stdin) == NULL) {
-			if (feof(stdin)) {
+		ny_ctx->data = m_self;
+		ny_ctx->rem = self_len;
+
+		prne_free_bin_rcb_ctx(ctx);
+		ctx->ctx_free_f = pack_rcb_free_pt_octx;
+		ctx->o_ctx = ny_ctx;
+		ctx->read_f = pack_rcb_ptread_f;
+	}
+	else {
+		pack_rcb_rb_octx_t *ny_ctx = NULL;
+		prne_bin_tuple_t *t = NULL;
+		size_t seek = 0;
+
+		for (size_t i = 0; i < ba->nb_bin; i += 1) {
+			if (ba->bin[i].arch == target) {
+				t = &ba->bin[i];
 				break;
 			}
-			ret.rc = PRNE_PACK_RC_ERRNO;
-			ret.err = errno;
-			break;
+			seek += ba->bin[i].size;
 		}
-		ctx->line_len = prne_str_shift_spaces(ctx->line_buf, strlen(ctx->line_buf));
+		if (t == NULL) {
+			return PRNE_PACK_RC_NO_ARCH;
+		}
 
-		if ((ret.err = mbedtls_base64_decode(ctx->out_buf, sizeof(ctx->out_buf), &ctx->out_len, (unsigned char*)ctx->line_buf, ctx->line_len)) != 0) {
-			ret.rc = PRNE_PACK_RC_MBEDTLS_ERR;
-			break;
+		ny_ctx =
+			(pack_rcb_rb_octx_t*)prne_malloc(sizeof(pack_rcb_rb_octx_t), 1);
+		if (ny_ctx == NULL) {
+			return PRNE_PACK_RC_ERRNO;
 		}
+		prne_memzero(ny_ctx, sizeof(pack_rcb_rb_octx_t));
+
+		if (inflateInit(&ny_ctx->z_old) != Z_OK ||
+			deflateInit(&ny_ctx->z_ny, PRNE_PACK_Z_LEVEL) != Z_OK)
+		{
+			inflateEnd(&ny_ctx->z_old);
+			deflateEnd(&ny_ctx->z_ny);
+			prne_free(ny_ctx);
+			return PRNE_PACK_RC_Z_ERR;
+		}
+		ny_ctx->m_dv = m_dvault;
+		ny_ctx->dv_len = dvault_len;
+		ny_ctx->ofs = seek;
+		ny_ctx->t = t;
+		ny_ctx->ba = ba;
+		ny_ctx->seek = seek;
+		ny_ctx->skip = t->size;
+
+		ny_ctx->z_old.avail_in = ba->data_size;
+		ny_ctx->z_old.next_in = (uint8_t*)ba->data;
+		ny_ctx->z_ny.avail_in = exec_len;
+		ny_ctx->z_ny.next_in = (uint8_t*)m_self;
+		ny_ctx->a_self = self;
+
+		prne_free_bin_rcb_ctx(ctx);
+		ctx->ctx_free_f = pack_rcb_free_rb_octx;
+		ctx->o_ctx = ny_ctx;
+		ctx->read_f = pack_rcb_eeread_f;
 	}
 
-	return ret;
+	return PRNE_PACK_RC_OK;
+}
+
+ssize_t prne_bin_rcb_read (
+	prne_bin_rcb_ctx_t *ctx,
+	uint8_t *buf,
+	size_t len,
+	prne_pack_rc_t *prc,
+	int *err)
+{
+	return ctx->read_f(ctx, buf, len, prc, err);
 }

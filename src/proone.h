@@ -68,7 +68,8 @@ struct prne_shared_global {
 	// null-terminated name of new binary
 	char ny_bin_path[256];
 	char ny_bin_args[1024];
-	char host_cred_data[256];
+	size_t host_cred_len;
+	uint8_t host_cred_data[255];
 };
 
 

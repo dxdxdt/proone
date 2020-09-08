@@ -340,9 +340,6 @@ int main (const int argc, const char **args) {
 			mbedtls_pk_context key;
 			mbedtls_ssl_config conf;
 		} c;
-		struct {
-			mbedtls_ssl_config conf;
-		} cncp;
 	} ssl;
 
 	sigemptyset(&ss_all);
@@ -420,7 +417,6 @@ int main (const int argc, const char **args) {
 	mbedtls_dhm_init(&ssl.s.dhm);
 	mbedtls_ssl_config_init(&ssl.s.conf);
 	mbedtls_ssl_config_init(&ssl.c.conf);
-	mbedtls_ssl_config_init(&ssl.cncp.conf);
 	load_ssl_conf(
 		&ssl.ca,
 		&ssl.s.conf,
@@ -431,12 +427,6 @@ int main (const int argc, const char **args) {
 		&ssl.c.crt,
 		&ssl.c.key,
 		&rnd);
-	prne_assert(mbedtls_ssl_config_defaults(
-		&ssl.cncp.conf,
-		MBEDTLS_SSL_IS_CLIENT,
-		MBEDTLS_SSL_TRANSPORT_STREAM,
-		MBEDTLS_SSL_PRESET_DEFAULT) == 0);
-	mbedtls_ssl_conf_rng(&ssl.cncp.conf, mbedtls_ctr_drbg_random, &rnd);
 	mbedtls_ssl_conf_dbg(&ssl.s.conf, mbedtls_dbg_f, NULL);
 	mbedtls_ssl_conf_dbg(&ssl.c.conf, mbedtls_dbg_f, NULL);
 
@@ -469,7 +459,6 @@ int main (const int argc, const char **args) {
 		prne_htbt_init_param(&param);
 		param.lbd_ssl_conf = &ssl.s.conf;
 		param.main_ssl_conf = &ssl.c.conf;
-		param.cncp_ssl_conf = &ssl.cncp.conf;
 		param.ctr_drbg = &rnd;
 		param.resolv = resolv;
 		param.cb_f.cnc_txtrec = cb_txtrec;
@@ -514,7 +503,6 @@ int main (const int argc, const char **args) {
 	mbedtls_dhm_free(&ssl.s.dhm);
 	mbedtls_ssl_config_free(&ssl.s.conf);
 	mbedtls_ssl_config_free(&ssl.c.conf);
-	mbedtls_ssl_config_free(&ssl.cncp.conf);
 	mbedtls_ctr_drbg_free(&rnd);
 	mbedtls_entropy_free(&entropy);
 	free_htbthost_param(&htbthost_param);

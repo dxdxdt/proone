@@ -123,13 +123,13 @@ static void do_test (
 	size_t out_size = 0, out_len;
 	uint8_t *m_out = NULL;
 
-	if (depth > TEST_DEPTH) {
-		return;
-	}
-
 	prne_assert(ofs_ba < len);
 	prne_assert(memcmp(m, t->m_exec, t->st.st_size) == 0);
 	prne_assert(memcmp(m + ofs_dv, m_dv, dv_len) == 0);
+
+	if (depth > TEST_DEPTH) {
+		return;
+	}
 
 	prne_init_bin_archive(&ba);
 	prne_init_bin_rcb_ctx(&ctx);
@@ -170,6 +170,46 @@ static void do_test (
 	prne_free(m_out);
 }
 
+static bool do_nybin (const char *path, int *fd) {
+	uint8_t head[8];
+	const size_t align =
+		sizeof(head) +
+		prne_salign_next(dv_len, PRNE_BIN_ALIGNMENT);
+
+	prne_memzero(head, sizeof(head));
+	head[0] = prne_getmsb16(dv_len, 0);
+	head[1] = prne_getmsb16(dv_len, 1);
+	head[2] = 'n';
+	head[3] = 'y';
+	head[4] = 'b';
+	head[5] = 'i';
+	head[6] = 'n';
+	head[7] = 0;
+
+	*fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+	if (*fd < 0) {
+		return false;
+	}
+
+	if (ftruncate(*fd, align) != 0) {
+		return false;
+	}
+	if (write(*fd, head, sizeof(head)) != (ssize_t)sizeof(head)) {
+		return false;
+	}
+	if (write(*fd, m_dv, dv_len) != (ssize_t)dv_len) {
+		return false;
+	}
+	if (lseek(*fd, align, SEEK_SET) < 0) {
+		return false;
+	}
+	if (write(*fd, m_ba, ba_len) != (ssize_t)ba_len) {
+		return false;
+	}
+
+	return true;
+}
+
 static bool do_rcb (const char *prefix) {
 	prne_pack_rc_t prc;
 	bool ret = true;
@@ -193,9 +233,7 @@ static bool do_rcb (const char *prefix) {
 	prc = prne_index_bin_archive(m_ba, ba_len, &ba);
 	prne_assert(prc == PRNE_PACK_RC_OK);
 
-	// TODO: dvault + nybin
-	fd = open(out_path, O_WRONLY | O_CREAT | O_TRUNC, 0755);
-	if (fd < 0 || write(fd, m_ba, ba_len) != (ssize_t)ba_len) {
+	if (!do_nybin(out_path, &fd)) {
 		perror(out_path);
 		ret = false;
 		goto END;
@@ -262,7 +300,7 @@ int main (const int argc, const char **args) {
 	z_stream zs;
 	size_t out_len;
 
-	PAGESIZE = prne_getpagesize(); // TODO: test
+	PAGESIZE = prne_getpagesize();
 
 	prne_memzero(&zs, sizeof(z_stream));
 	if ((z_ret = deflateInit(&zs, PRNE_PACK_Z_LEVEL)) != Z_OK) {

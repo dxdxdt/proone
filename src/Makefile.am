@@ -17,7 +17,6 @@ bin_PROGRAMS =\
 	proone.bin\
 	proone-mkdvault\
 	proone-pack\
-	proone-unpack\
 	proone-list-arch\
 	proone-resolv\
 	proone-stress\
@@ -66,10 +65,6 @@ proone_mkdvault_SOURCES = proone-mkdvault.c
 
 proone_pack_LDADD = libproone.a
 proone_pack_SOURCES = proone-pack.c
-
-proone_unpack_LDADD = libproone.a
-proone_unpack_LDFLAGS =
-proone_unpack_SOURCES = proone-unpack.c
 
 proone_list_arch_LDADD = libproone.a
 proone_list_arch_SOURCES = proone-list-arch.c

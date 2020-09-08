@@ -205,6 +205,14 @@ static ssize_t pack_rcb_rpread_f (
 			}
 			ctx->z_ny.next_in = ctx->buf;
 			ctx->z_ny.avail_in = consume;
+
+			if (consume == 0 && d_flush != Z_FINISH) {
+				// short compressed data
+				// this means that bin arch is incomplete
+				consume = -1;
+				prc = PRNE_PACK_RC_FMT_ERR;
+				goto END;
+			}
 		}
 
 		ctx->z_ny.avail_out = len;
@@ -213,7 +221,6 @@ static ssize_t pack_rcb_rpread_f (
 		switch (err) {
 		case Z_STREAM_END:
 			ctx_p->read_f = pack_rcb_nullread_f;
-			prc = PRNE_PACK_RC_EOF;
 			/* fall-through */
 		case Z_BUF_ERROR:
 		case Z_OK:
@@ -472,8 +479,10 @@ prne_pack_rc_t prne_start_bin_rcb (
 
 		ny_ctx->z_old.avail_in = ba->data_size;
 		ny_ctx->z_old.next_in = (uint8_t*)ba->data;
-		ny_ctx->z_ny.avail_in = exec_len;
-		ny_ctx->z_ny.next_in = (uint8_t*)m_self;
+		if (self != PRNE_ARCH_NONE) {
+			ny_ctx->z_ny.avail_in = exec_len;
+			ny_ctx->z_ny.next_in = (uint8_t*)m_self;
+		}
 		ny_ctx->a_self = self;
 
 		prne_free_bin_rcb_ctx(ctx);

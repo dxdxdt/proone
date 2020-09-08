@@ -1,6 +1,7 @@
 #include "mbedtls.h"
 #include "util_ct.h"
 #include "util_rt.h"
+#include "pth.h"
 
 #include <errno.h>
 #include <string.h>
@@ -139,7 +140,7 @@ bool prne_mbedtls_pth_handle (
 		}
 
 		do {
-			pollret = pth_poll_ev(&pfd, 1, -1, ev);
+			pollret = prne_pth_poll(&pfd, 1, -1, ev);
 			if (pollret < 0) {
 				if (errno == EINTR) {
 					continue;

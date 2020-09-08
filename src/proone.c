@@ -47,7 +47,7 @@ static void alloc_resolv (void) {
 
 	bin = prne_dvault_get_bin(PRNE_DATA_KEY_RESOLV_NS_IPV4, &len);
 	prne_dbgast(len != 0 && len % 16 == 0);
-	cnt = len * 16;
+	cnt = len / 16;
 
 	if (!prne_resolv_alloc_ns_pool(&pool4, cnt)) {
 		goto END;
@@ -60,7 +60,7 @@ static void alloc_resolv (void) {
 
 	bin = prne_dvault_get_bin(PRNE_DATA_KEY_RESOLV_NS_IPV6, &len);
 	prne_dbgast(len != 0 && len % 16 == 0);
-	cnt = len * 16;
+	cnt = len / 16;
 
 	if (!prne_resolv_alloc_ns_pool(&pool6, cnt)) {
 		goto END;

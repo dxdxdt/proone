@@ -1,6 +1,6 @@
 BIN_ALIGNMENT = 8
 
-AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -D_POSIX_C_SOURCE=199506L -Wno-unused-parameter -DPRNE_BIN_ALIGNMENT=$(BIN_ALIGNMENT) -fdata-sections -ffunction-sections -Wl,--gc-sections
+AM_CFLAGS = -std=c11 -pedantic -Wall -Wextra -Wno-switch -D_POSIX_C_SOURCE=200112L -Wno-unused-parameter -DPRNE_BIN_ALIGNMENT=$(BIN_ALIGNMENT) -fdata-sections -ffunction-sections -Wl,--gc-sections
 if DEBUG
 AM_CFLAGS += -g -O0 -DPRNE_DEBUG
 else

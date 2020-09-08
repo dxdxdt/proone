@@ -26,6 +26,49 @@ void prne_fin_worker (prne_worker_t *w) {
 	}
 }
 
+int prne_pth_poll (
+	struct pollfd *pfd,
+	const nfds_t nfs,
+	const int timeout,
+	pth_event_t ev)
+{
+	struct pollfd my_pfd[nfs];
+	nfds_t p;
+	int ret;
+
+	p = 0;
+	for (nfds_t i = 0; i < nfs; i += 1) {
+		if (pfd[i].fd >= FD_SETSIZE) {
+			errno = EINVAL;
+			return -1;
+		}
+		if (0 <= pfd[i].fd) {
+			my_pfd[p].fd = pfd[i].fd;
+			my_pfd[p].events = pfd[i].events;
+			p += 1;
+		}
+	}
+	if (p == 0) {
+		return 0;
+	}
+
+	ret = pth_poll_ev(my_pfd, p, timeout, ev);
+	if (ret >= 0) {
+		p = 0;
+		for (nfds_t i = 0; i < nfs; i += 1) {
+			if (0 <= pfd[i].fd) {
+				pfd[i].revents = my_pfd[p].revents;
+				p += 1;
+			}
+			else {
+				pfd[i].revents = 0;
+			}
+		}
+	}
+
+	return ret;
+}
+
 void prne_pth_cv_notify (pth_mutex_t *lock, pth_cond_t *cond, bool broadcast) {
 	prne_dbgtrap(pth_mutex_acquire(lock, FALSE, NULL));
 	prne_dbgtrap(pth_cond_notify(cond, broadcast));

@@ -352,7 +352,7 @@ static prne_htbt_status_code_t htbt_relay_child (
 		* Await cv if you want to terminate the connection right away
 		* when the program is terminating.
 		*/
-		f_ret = pth_poll_ev(pfd, 5, -1, ev);
+		f_ret = prne_pth_poll(pfd, 5, -1, ev);
 		if (f_ret < 0 && errno != EINTR) {
 			ret = PRNE_HTBT_STATUS_ERRNO;
 			break;
@@ -392,6 +392,13 @@ static prne_htbt_status_code_t htbt_relay_child (
 				consume += actual;
 				prne_iobuf_shift(ctx->iobuf + 0, -consume);
 			} while (false);
+
+			if (sh[0].len == 0 && pfd[0].fd < 0) {
+				// There's still pending stdin data and EOF.
+				// This is proto err.
+				ret = PRNE_HTBT_STATUS_PROTO_ERR;
+				break;
+			}
 		}
 
 		if (pfd[0].revents) {
@@ -401,12 +408,6 @@ static prne_htbt_status_code_t htbt_relay_child (
 				ctx->iobuf[0].avail);
 			if (f_ret == 0) {
 				pfd[0].fd = -1;
-				if (sh[0].len > 0) {
-					// There's still pending stdin data and EOF.
-					// This is proto err.
-					ret = PRNE_HTBT_STATUS_PROTO_ERR;
-					break;
-				}
 			}
 			else if (f_ret < 0) {
 				ctx->valid = false;
@@ -765,7 +766,7 @@ static void htbt_slv_consume_outbuf (
 	pfd.events = POLLOUT;
 
 	while (ctx->valid && ctx->iobuf[1].len > 0) {
-		fret = pth_poll_ev(&pfd, 1, -1, root_ev);
+		fret = prne_pth_poll(&pfd, 1, -1, root_ev);
 		if (root_ev != NULL &&
 			pth_event_status(root_ev) != PTH_STATUS_PENDING)
 		{
@@ -1098,7 +1099,7 @@ static bool htbt_slv_srv_bin (
 		prne_assert(ev != NULL);
 
 		if (ctx->iobuf[0].len == 0) {
-			f_ret = pth_poll_ev(&pfd, 1, -1, ev);
+			f_ret = prne_pth_poll(&pfd, 1, -1, ev);
 			if (pth_event_status(ev) == PTH_STATUS_OCCURRED ||
 				f_ret == 0)
 			{

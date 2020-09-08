@@ -86,8 +86,8 @@
 			"MIMode": "gdb",
 			"setupCommands": [
 				{
-					"description": "Follow parent fork",
-					"text": "set follow-fork-mode parent",
+					"description": "Follow child fork",
+					"text": "set follow-fork-mode child",
 					"ignoreFailures": false
 				},
 				{

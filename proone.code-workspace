@@ -10,7 +10,7 @@
 		"files.trimTrailingWhitespace": true,
 		"C_Cpp.default.cStandard": "c11",
 		"C_Cpp.default.defines": [
-			"_POSIX_C_SOURCE=199506L",
+			"_POSIX_C_SOURCE=200112L",
 			"PRNE_DEBUG",
 			"PRNE_BUILD_ENTROPY={ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }",
 			"PRNE_BIN_ALIGNMENT=8"],

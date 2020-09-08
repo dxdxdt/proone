@@ -426,7 +426,7 @@ static bool resolv_ensure_act_dns_fd (prne_resolv_t *ctx) {
 	while (pfs[0].fd >= 0 || pfs[1].fd >= 0) {
 		pth_status_t st;
 
-		pollret = pth_poll_ev(pfs, 2, -1, ev);
+		pollret = prne_pth_poll(pfs, 2, -1, ev);
 		st = pth_event_status(ev);
 
 		if (st == PTH_STATUS_OCCURRED) {
@@ -1077,7 +1077,7 @@ LOOP:
 
 		ctx->act_sck_pfd.events = pfd_events;
 		prne_assert(ev != NULL); // fatal without timeout
-		pollret = pth_poll_ev(&ctx->act_sck_pfd, 1, -1, ev);
+		pollret = prne_pth_poll(&ctx->act_sck_pfd, 1, -1, ev);
 
 		if (pth_event_status(ev) != PTH_STATUS_PENDING) {
 			resolv_close_sck(ctx, NULL, true);

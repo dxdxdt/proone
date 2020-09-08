@@ -28,6 +28,12 @@ AC_CHECK_LIB([mbedtls], [mbedtls_ssl_init], [], [AC_MSG_ERROR([mbedtls not found
 AC_CHECK_LIB([mbedx509], [mbedtls_x509_crt_parse], [], [AC_MSG_ERROR([mbedtls not found])])
 AC_CHECK_LIB([pthsem], [pth_init], [], [AC_MSG_ERROR([pthsem not found])])
 
+AC_CHECK_PROG(TOOL_XXD, [xxd], [yes])
+AS_IF([test x"$TOOL_XXD" != x"yes"], [AC_MSG_ERROR([xxd not found])])
+AC_CHECK_PROG(TOOL_SED, [sed], [yes])
+AS_IF([test x"$TOOL_SED" != x"yes"], [AC_MSG_ERROR([sed not found])])
+
+
 AC_DEFINE_UNQUOTED(
 	[PRNE_BUILD_ENTROPY],
 	[{ $(xxd -l16 -ps /dev/urandom | sed -E s/\(\\S{2}\)/0x\&,\ /g | sed -E s/,\ \$//) }])

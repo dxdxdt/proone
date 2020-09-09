@@ -1590,6 +1590,7 @@ static void htbt_main_slv_cleanup_f (void *ioctx, pth_event_t ev) {
 		mbedtls_ssl_close_notify,
 		ctx->fd,
 		ev);
+	shutdown(ctx->fd, SHUT_RDWR);
 }
 
 static ssize_t htbt_main_slv_read_f (

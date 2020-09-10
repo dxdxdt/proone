@@ -72,6 +72,21 @@
 			"preLaunchTask": "Build pack",
 			"miDebuggerPath": "/usr/bin/gdb"
 		},
+		{
+			"name": "rnd",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-rnd",
+			"args": [ "256", "256" ],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [],
+			"preLaunchTask": "Build rnd",
+			"miDebuggerPath": "/usr/bin/gdb"
+		},
 
 		{
 			"name": "proone",

@@ -21,7 +21,8 @@ bin_PROGRAMS =\
 	proone-resolv\
 	proone-stress\
 	proone-ipaddr-arr\
-	proone-htbthost
+	proone-htbthost\
+	proone-rnd
 
 proone_tests =\
 	proone-test_proto\
@@ -41,7 +42,9 @@ libproone_a_SOURCES =\
 	pth.c\
 	resolv.c\
 	htbt.c\
-	iobuf.c
+	iobuf.c\
+	rnd.c\
+	rnd_well512.c
 
 proone: proone.bin dvault.bin
 	cp -fa proone.bin proone
@@ -80,6 +83,9 @@ proone_ipaddr_arr_SOURCES = proone-ipaddr-arr.c
 proone_stress_LDADD = libproone.a
 proone_stress_LDFLAGS = -static
 proone_stress_SOURCES = proone-stress.c
+
+proone_rnd_LDADD = libproone.a
+proone_rnd_SOURCES = proone-rnd.c
 
 proone_test_proto_LDADD = libproone.a
 proone_test_proto_LDFLAGS =

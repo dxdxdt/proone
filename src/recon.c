@@ -61,6 +61,8 @@ struct prne_recon {
 	prne_llist_entry_t *ii_ptr;
 	size_t t_ptr;
 	int fd[RCN_NB_FD][2];
+	uint8_t v6_saddr[16];
+	uint8_t v4_saddr[4];
 	uint32_t seq_mask;
 	uint16_t s_port;
 	bool loop;
@@ -235,6 +237,54 @@ static prne_ipv_t rcn_main_genaddr_ii (
 	return ret;
 }
 
+static void rcn_main_update_saddr (prne_recon_t *ctx) {
+	int fd;
+	socklen_t sl;
+
+	fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (fd >= 0) {
+		static const uint8_t TEST_ADDR[4] = { 192, 0, 2, 1 };
+		struct sockaddr_in sa;
+
+		prne_memzero(&sa, sizeof(sa));
+		sa.sin_family = AF_INET;
+		sa.sin_port = 1024;
+		memcpy(&sa.sin_addr, TEST_ADDR, 4);
+
+		sl = sizeof(sa);
+		if (connect(fd, (struct sockaddr*)&sa, sl) == 0 &&
+			getsockname(fd, (struct sockaddr*)&sa, &sl) == 0 &&
+			sl >= sizeof(sa))
+		{
+			memcpy(ctx->v4_saddr, &sa.sin_addr, 4);
+		}
+		prne_close(fd);
+	}
+
+	fd = socket(AF_INET6, SOCK_DGRAM, 0);
+	if (fd >= 0) {
+		static const uint8_t TEST_ADDR[16] = {
+			0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+		};
+		struct sockaddr_in6 sa;
+
+		prne_memzero(&sa, sizeof(sa));
+		sa.sin6_family = AF_INET6;
+		sa.sin6_port = 1024;
+		memcpy(&sa.sin6_addr, TEST_ADDR, 16);
+
+		sl = sizeof(sa);
+		if (connect(fd, (struct sockaddr*)&sa, sl) == 0 &&
+			getsockname(fd, (struct sockaddr*)&sa, &sl) == 0 &&
+			sl >= sizeof(sa))
+		{
+			memcpy(ctx->v6_saddr, &sa.sin6_addr, 16);
+		}
+		prne_close(fd);
+	}
+}
+
 static prne_ipv_t rcn_main_genaddr_param (
 	prne_recon_t *ctx,
 	uint8_t *src,
@@ -255,7 +305,7 @@ static prne_ipv_t rcn_main_genaddr_param (
 			prne_bitop_inv(net->mask, src, 4); // use src as host mask
 			prne_bitop_and(src, dst, dst, 4); // extract host
 			prne_bitop_or(net->addr.addr, dst, dst, 4); // combine with network
-			prne_memzero(src, 4); // let kernel fill this in
+			memcpy(src, ctx->v4_saddr, 4);
 			return PRNE_IPV_4;
 		case PRNE_IPV_6:
 			if (ctx->fd[RCN_IDX_IPV6][1] < 0) {
@@ -265,7 +315,7 @@ static prne_ipv_t rcn_main_genaddr_param (
 			prne_bitop_inv(net->mask, src, 16); // use src as host mask
 			prne_bitop_and(src, dst, dst, 16); // extract host
 			prne_bitop_or(net->addr.addr, dst, dst, 16); // combine with network
-			prne_memzero(src, 16); // let kernel fill this in
+			memcpy(src, ctx->v6_saddr, 16);
 			return PRNE_IPV_6;
 		}
 	}
@@ -643,6 +693,8 @@ static void *rcn_main_entry (void *ctx_p) {
 		// periodic op
 		if (prne_cmp_timespec(ctx->ts.ii_up, ts_now) <= 0) {
 			unsigned int n;
+
+			rcn_main_update_saddr(ctx);
 
 			if (rcn_main_do_ifaddrs(ctx)) {
 				prne_rnd(&ctx->rnd, (uint8_t*)&n, sizeof(n));

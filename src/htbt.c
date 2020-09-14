@@ -576,7 +576,7 @@ static void htbt_do_cmd (
 				setsid();
 				close(STDIN_FILENO);
 				// Inherit these if DEBUG
-#if !defined(PRNE_DEBUG)
+#if !PRNE_DEBUG
 				close(STDOUT_FILENO);
 				close(STDERR_FILENO);
 #endif

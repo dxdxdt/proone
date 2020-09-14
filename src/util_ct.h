@@ -2,10 +2,16 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
-#ifdef PRNE_DEBUG
+#if PRNE_DEBUG
 #include <stdio.h>
 #include <errno.h>
 #endif
+
+#define PRNE_VL_FATAL	0
+#define PRNE_VL_ERR		1
+#define PRNE_VL_INFO	1
+#define PRNE_VL_WARN	2
+#define PRNE_VL_DBG0	3
 
 #define PRNE_LIMIT_ENUM(t,x,l) _Static_assert((x) <= (l),"enum overflow: "#t)
 #define prne_static_assert(expr, msg) _Static_assert((expr), msg)
@@ -17,7 +23,7 @@
 #define prne_salign_next(x, align) (((x) % (align) == 0) ? (x) : ((x) / (align) + 1) * (align))
 #define prne_salign_at(x, align) (((x) % (align) == 0) ? (x) : ((x) / (align)) * (align))
 
-#ifdef PRNE_DEBUG
+#if PRNE_DEBUG
 #define prne_dbgpf(...) fprintf(stderr, __VA_ARGS__)
 #define prne_dbgperr(str) perror(str)
 #define prne_assert(expr) assert(expr)

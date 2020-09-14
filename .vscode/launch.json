@@ -87,6 +87,28 @@
 			"preLaunchTask": "Build rnd",
 			"miDebuggerPath": "/usr/bin/gdb"
 		},
+		{
+			"name": "recon",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-recon",
+			"args": [ "./src/data/recon.conf", "22", "23" ],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [
+				{
+					"description":
+						"Disable startup-with-shell to pass file cap",
+					"text": "set startup-with-shell off",
+					"ignoreFailures": false
+				}
+			],
+			"preLaunchTask": "Build recon",
+			"miDebuggerPath": "/usr/bin/gdb"
+		},
 
 		{
 			"name": "proone",

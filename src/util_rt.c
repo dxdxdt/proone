@@ -123,6 +123,32 @@ size_t prne_getpagesize (void) {
 	return (size_t)ret;
 }
 
+bool prne_own_realloc (
+	void **p,
+	bool *ownership,
+	const size_t se,
+	size_t *old,
+	const size_t req)
+{
+	void *ny = prne_realloc(
+		*ownership ? *p : NULL,
+		se,
+		req);
+
+	if (req > 0 && ny == NULL) {
+		return false;
+	}
+
+	if (!*ownership) {
+		memcpy(ny, *p, prne_op_min(*old, req) * se);
+	}
+	*p = ny;
+	*old = req;
+	*ownership = true;
+
+	return true;
+}
+
 bool prne_nstreq (const char *a, const char *b) {
 	return strcmp(a == NULL ? "" : a, b == NULL ? "" : b) == 0;
 }
@@ -293,6 +319,19 @@ void prne_uuid_tostr (const uint8_t *in, char *out) {
 	out[ptr] = 0;
 }
 
+struct timespec prne_add_timespec (
+	const struct timespec a,
+	const struct timespec b)
+{
+	struct timespec ret;
+
+	ret.tv_nsec = a.tv_nsec + b.tv_nsec;
+	ret.tv_sec = a.tv_sec + b.tv_sec + (ret.tv_nsec / 1000000000);
+	ret.tv_nsec %= 1000000000;
+
+	return ret;
+}
+
 struct timespec prne_sub_timespec (const struct timespec a, const struct timespec b) {
 	struct timespec ret;
 
@@ -421,4 +460,36 @@ ssize_t prne_geturandom (void *buf, const size_t len) {
 	errno = save_errno;
 
 	return ret;
+}
+
+void prne_bitop_and (
+	const uint8_t *a,
+	const uint8_t *b,
+	uint8_t *c,
+	const size_t len)
+{
+	for (size_t i = 0; i < len; i += 1) {
+		c[i] = a[i] & b[i];
+	}
+}
+
+void prne_bitop_or (
+	const uint8_t *a,
+	const uint8_t *b,
+	uint8_t *c,
+	const size_t len)
+{
+	for (size_t i = 0; i < len; i += 1) {
+		c[i] = a[i] | b[i];
+	}
+}
+
+void prne_bitop_inv (
+	const uint8_t *x,
+	uint8_t *y,
+	const size_t len)
+{
+	for (size_t i = 0; i < len; i += 1) {
+		y[i] = ~x[i];
+	}
 }

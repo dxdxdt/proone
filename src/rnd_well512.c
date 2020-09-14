@@ -50,15 +50,9 @@ static void rnd_free_well512 (void *p) {
 
 bool prne_rnd_alloc_well512 (
 	prne_rnd_t *p,
-	const uint8_t *is,
-	const size_t is_len)
+	const uint8_t *is)
 {
 	rnd_well512_ctx_t *ctx;
-
-	if (is_len < sizeof(ctx->state)) {
-		errno = EINVAL;
-		return false;
-	}
 
 	ctx = (rnd_well512_ctx_t*)prne_calloc(sizeof(rnd_well512_ctx_t), 1);
 	if (ctx == NULL) {

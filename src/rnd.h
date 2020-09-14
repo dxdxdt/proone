@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#define PRNE_RND_WELL512_SEEDLEN 64
 
 struct prne_rnd {
 	void *ctx;
@@ -22,5 +23,4 @@ bool prne_rnd (prne_rnd_t *p, uint8_t *buf, const size_t len);
 */
 bool prne_rnd_alloc_well512 (
 	prne_rnd_t *p,
-	const uint8_t *is,
-	const size_t is_len);
+	const uint8_t *is);

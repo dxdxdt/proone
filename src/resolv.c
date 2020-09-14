@@ -1392,24 +1392,12 @@ void prne_resolv_free_ns_pool (prne_resolv_ns_pool_t *pool) {
 }
 
 bool prne_resolv_alloc_ns_pool (prne_resolv_ns_pool_t *pool, const size_t cnt) {
-	void *ny;
-
-	ny = prne_realloc(pool->ownership ? pool->arr : NULL, sizeof(prne_net_endpoint_t), cnt);
-	if (ny != NULL) {
-		if (!pool->ownership) {
-			memcpy(
-				ny,
-				pool->arr,
-				prne_op_min(pool->cnt, cnt) * sizeof(prne_net_endpoint_t));
-		}
-		pool->arr = (prne_net_endpoint_t*)ny;
-		pool->cnt = cnt;
-		pool->ownership = true;
-
-		return true;
-	}
-
-	return false;
+	return prne_own_realloc(
+		(void**)&pool->arr,
+		&pool->ownership,
+		sizeof(prne_net_endpoint_t),
+		&pool->cnt,
+		cnt);
 }
 
 prne_resolv_ns_pool_t prne_resolv_own_ns_pool(const prne_resolv_ns_pool_t *pool, const bool ownership) {

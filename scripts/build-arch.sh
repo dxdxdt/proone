@@ -17,7 +17,7 @@ separate_debug() {
 
 BIN_PATH="$PROONE_EXEC_PREFIX.$PROONE_BIN_ARCH"
 
-./configure --host="$PROONE_HOST" $PROONE_AM_CONF
+./configure --host="$PROONE_HOST" --enable-static $PROONE_AM_CONF
 cd src
 make -j$(nproc) proone.bin $MISC_BIN
 cd ..

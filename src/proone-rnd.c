@@ -45,10 +45,10 @@ int main (const int argc, const char **args) {
 		NULL,
 		0) == 0);
 	{
-		uint8_t is[64];
+		uint8_t is[PRNE_RND_WELL512_SEEDLEN];
 
 		prne_assert(mbedtls_ctr_drbg_random(&ctr_drbg, is, sizeof(is)) == 0);
-		prne_assert(prne_rnd_alloc_well512(&rnd, is, sizeof(is)));
+		prne_assert(prne_rnd_alloc_well512(&rnd, is));
 	}
 
 	arr = prne_calloc(sizeof(uint32_t), max);

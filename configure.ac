@@ -2,6 +2,7 @@ AC_INIT([proone], [0.0.0], [])
 
 : ${CFLAGS=""}
 : ${CXXFLAGS=""}
+: ${PRNE_VERBOSE=2}
 
 AM_INIT_AUTOMAKE([1.0 subdir-objects])
 AC_CANONICAL_HOST
@@ -11,7 +12,7 @@ AC_PROG_RANLIB
 
 AC_ARG_ENABLE(debug,
 AS_HELP_STRING([--enable-debug],
-			   [build with debug flags, default: no]),
+			   [build with debug flags. Default: no]),
 [case "${enableval}" in
 			 yes) debug=true ;;
 			 no)  debug=false ;;
@@ -20,13 +21,57 @@ esac],
 [debug=false])
 AM_CONDITIONAL(DEBUG, test x"$debug" = x"true")
 
-AC_CHECK_LIB([pthread], [pthread_create], [], [AC_MSG_ERROR([pthread not found])])
-AC_CHECK_LIB([rt], [shm_open], [], [AC_MSG_ERROR([rt not found])])
-AC_CHECK_LIB([z], [zlibVersion], [], [AC_MSG_ERROR([zlib not found])])
-AC_CHECK_LIB([mbedcrypto], [mbedtls_cipher_setup], [], [AC_MSG_ERROR([mbedtls not found])])
-AC_CHECK_LIB([mbedtls], [mbedtls_ssl_init], [], [AC_MSG_ERROR([mbedtls not found])])
-AC_CHECK_LIB([mbedx509], [mbedtls_x509_crt_parse], [], [AC_MSG_ERROR([mbedtls not found])])
-AC_CHECK_LIB([pthsem], [pth_init], [], [AC_MSG_ERROR([pthsem not found])])
+AC_ARG_ENABLE(static,
+AS_HELP_STRING([--enable-static],
+			   [build statically linked executables. Default: no]),
+[case "${enableval}" in
+			 yes) static=true ;;
+			 no)  static=false ;;
+			 *)	  AC_MSG_ERROR([bad value ${enableval} for --enable-static]) ;;
+esac],
+[static=false])
+AM_CONDITIONAL(STATIC_RT, test x"$static" = x"true")
+
+
+AC_ARG_VAR(
+	[PRNE_VERBOSE],
+	[Debug verbose level. Must be used with --enable-debug. Defaults to 2])
+
+AC_CHECK_LIB(
+	[pthread],
+	[pthread_create],
+	[],
+	[AC_MSG_ERROR([pthread not found])])
+AC_CHECK_LIB(
+	[rt],
+	[shm_open],
+	[],
+	[AC_MSG_ERROR([rt not found])])
+AC_CHECK_LIB(
+	[z],
+	[zlibVersion],
+	[],
+	[AC_MSG_ERROR([zlib not found])])
+AC_CHECK_LIB(
+	[mbedcrypto],
+	[mbedtls_cipher_setup],
+	[],
+	[AC_MSG_ERROR([mbedtls not found])])
+AC_CHECK_LIB(
+	[mbedx509],
+	[mbedtls_x509_crt_parse],
+	[],
+	[AC_MSG_ERROR([mbedtls not found])])
+AC_CHECK_LIB(
+	[mbedtls],
+	[mbedtls_ssl_init],
+	[],
+	[AC_MSG_ERROR([mbedtls not found])])
+AC_CHECK_LIB(
+	[pthsem],
+	[pth_init],
+	[],
+	[AC_MSG_ERROR([pthsem not found])])
 
 AC_CHECK_PROG(TOOL_XXD, [xxd], [yes])
 AS_IF([test x"$TOOL_XXD" != x"yes"], [AC_MSG_ERROR([xxd not found])])

@@ -74,7 +74,8 @@ static void alloc_resolv (void) {
 	prne_g.resolv = prne_alloc_resolv(
 		wkr_arr + wkr_cnt,
 		&prne_g.ssl.rnd,
-		pool4, pool6);
+		pool4,
+		pool6);
 	if (prne_g.resolv != NULL) {
 		wkr_cnt += 1;
 		pool4.ownership = false;
@@ -333,13 +334,13 @@ static void open_blackhole (void) {
 }
 
 static void delete_myself (const char *arg0) {
-#if !defined(PRNE_DEBUG)
+#if !PRNE_DEBUG
 	unlink(arg0);
 #endif
 }
 
 static void disasble_watchdog (void) {
-#ifndef PRNE_DEBUG
+#if !PRNE_DEBUG
 	static const char *watchdog_paths[] = {
 		"/dev/watchdog",
 		"/dev/misc/watchdog"
@@ -1009,7 +1010,7 @@ int main (const int argc, const char **args) {
 
 	// done with the terminal
 	close(STDIN_FILENO);
-#ifndef PRNE_DEBUG
+#if !PRNE_DEBUG
 	// Some stupid library can use these
 	close(STDOUT_FILENO);
 	close(STDERR_FILENO);

@@ -66,7 +66,8 @@ libproone_a_SOURCES =\
 	rnd.c\
 	rnd_well512.c\
 	recon.c\
-	inet.c
+	inet.c\
+	strmap.c
 
 proone: proone.bin dvault.bin
 	cp -fa proone.bin proone

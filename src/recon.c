@@ -780,6 +780,7 @@ static void rcn_free_f (void *ctx_p) {
 	prne_close(ctx->fd[RCN_IDX_IPV4][1]);
 	prne_close(ctx->fd[RCN_IDX_IPV6][0]);
 	prne_close(ctx->fd[RCN_IDX_IPV6][1]);
+	prne_free_recon_param(&ctx->param);
 
 	prne_free(ctx);
 }
@@ -816,7 +817,7 @@ static void rcn_create_rsck (
 prne_recon_t *prne_alloc_recon (
 	prne_worker_t *wkr,
 	mbedtls_ctr_drbg_context *ctr_drbg,
-	const prne_recon_param_t param)
+	const prne_recon_param_t *param)
 {
 	prne_recon_t *ctx = NULL;
 	int fd[RCN_NB_FD][2] = {
@@ -825,9 +826,9 @@ prne_recon_t *prne_alloc_recon (
 	};
 	uint8_t seed[PRNE_RND_WELL512_SEEDLEN];
 
-	if (param.target.cnt == 0 ||
-		param.ports.cnt == 0 ||
-		param.evt_cb == NULL)
+	if (param->target.cnt == 0 ||
+		param->ports.cnt == 0 ||
+		param->evt_cb == NULL)
 	{
 		errno = EINVAL;
 		return NULL;
@@ -844,7 +845,7 @@ prne_recon_t *prne_alloc_recon (
 		goto ERR;
 	}
 
-	ctx->param = param;
+	prne_init_recon_param(&ctx->param);
 	pth_mutex_init(&ctx->lock);
 	pth_cond_init(&ctx->cond);
 	prne_init_rnd(&ctx->rnd);
@@ -862,6 +863,7 @@ prne_recon_t *prne_alloc_recon (
 		goto ERR;
 	}
 
+	ctx->param = *param;
 	wkr->ctx = ctx;
 	wkr->entry = rcn_main_entry;
 	wkr->fin = rcn_fin_f;
@@ -925,33 +927,47 @@ bool prne_alloc_recon_param (
 				ports);
 	}
 	else {
-		prne_recon_param_t ny = *p;
+		void *arr_blist = prne_malloc(
+			sizeof(prne_recon_network_t),
+			blist);
+		void *arr_target = prne_malloc(
+			sizeof(prne_recon_network_t),
+			target);
+		void *arr_ports = prne_malloc(sizeof(uint16_t), ports);
 
 		ret =
-			prne_own_realloc(
-				(void**)&ny.blist.arr,
-				&ny.ownership,
-				sizeof(prne_recon_network_t),
-				&ny.blist.cnt,
-				blist) &&
-			prne_own_realloc(
-				(void**)&ny.target.arr,
-				&ny.ownership,
-				sizeof(prne_recon_network_t),
-				&ny.target.cnt,
-				target) &&
-			prne_own_realloc(
-				(void**)&ny.ports.arr,
-				&ny.ownership,
-				sizeof(uint16_t),
-				&ny.ports.cnt,
-				ports);
-
+			(blist > 0 && arr_blist == NULL) ||
+			(target > 0 && arr_target == NULL) ||
+			(ports > 0 && arr_ports == NULL);
+		ret = !ret;
 		if (ret) {
-			*p = ny;
+			memcpy(
+				arr_blist,
+				p->blist.arr,
+				sizeof(prne_recon_network_t) *
+					prne_op_min(p->blist.cnt, blist));
+			memcpy(
+				arr_target,
+				p->target.arr,
+				sizeof(prne_recon_network_t) *
+					prne_op_min(p->target.cnt, target));
+			memcpy(
+				arr_ports,
+				p->ports.arr,
+				sizeof(uint16_t) *
+					prne_op_min(p->ports.cnt, ports));
+			p->blist.arr = (prne_recon_network_t*)arr_blist;
+			p->blist.cnt = blist;
+			p->target.arr = (prne_recon_network_t*)arr_target;
+			p->target.cnt = target;
+			p->ports.arr = (uint16_t*)arr_ports;
+			p->ports.cnt = ports;
+			p->ownership = true;
 		}
 		else {
-			prne_free_recon_param(&ny);
+			prne_free(arr_blist);
+			prne_free(arr_target);
+			prne_free(arr_ports);
 		}
 	}
 

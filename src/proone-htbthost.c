@@ -468,7 +468,7 @@ int main (const int argc, const char **args) {
 		param.blackhole = open("/dev/null", O_WRONLY);
 
 		w = wkr_arr + 1;
-		htbt = prne_alloc_htbt(w, param);
+		htbt = prne_alloc_htbt(w, &param);
 		w->pth = pth_spawn(PTH_ATTR_DEFAULT, w->entry, w->ctx);
 		prne_assert(htbt != NULL && w->pth != NULL);
 

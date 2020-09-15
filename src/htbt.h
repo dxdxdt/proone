@@ -32,7 +32,7 @@ struct prne_htbt_param {
 };
 
 
-prne_htbt_t *prne_alloc_htbt (prne_worker_t *w, const prne_htbt_param_t param);
+prne_htbt_t *prne_alloc_htbt (prne_worker_t *w, const prne_htbt_param_t *param);
 
 void prne_htbt_init_param (prne_htbt_param_t *p);
 void prne_htbt_free_param (prne_htbt_param_t *p);

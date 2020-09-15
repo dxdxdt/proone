@@ -35,7 +35,7 @@ struct prne_recon_param {
 prne_recon_t *prne_alloc_recon (
 	prne_worker_t *wkr,
 	mbedtls_ctr_drbg_context *ctr_drbg,
-	const prne_recon_param_t param);
+	const prne_recon_param_t *param);
 void prne_init_recon_param (prne_recon_param_t *p);
 void prne_free_recon_param (prne_recon_param_t *p);
 bool prne_alloc_recon_param (

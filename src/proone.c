@@ -18,6 +18,7 @@
 
 #include <mbedtls/sha256.h>
 #include <mbedtls/base64.h>
+#include <libssh2.h>
 
 #include "config.h"
 #include "proone.h"
@@ -212,7 +213,7 @@ static void alloc_htbt (void) {
 
 	prne_g.htbt = prne_alloc_htbt(
 		wkr_arr + wkr_cnt,
-		param);
+		&param);
 	if (prne_g.htbt != NULL) {
 		wkr_cnt += 1;
 	}
@@ -273,6 +274,7 @@ static int proone_main (void) {
 	static int caught_sig;
 
 	prne_assert(pth_init());
+	prne_assert(libssh2_init(0) == 0);
 	prne_g.main_pth = pth_self();
 
 	seed_ssl_rnd(true);
@@ -302,6 +304,7 @@ static int proone_main (void) {
 	free_workers();
 
 	pth_kill();
+	libssh2_exit();
 
 	return 0;
 }

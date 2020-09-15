@@ -156,7 +156,7 @@ static void evt_cb (const prne_net_endpoint_t *ep) {
 int main (const int argc, const char **args) {
 	int ret = 0;
 	prne_recon_param_t param;
-	FILE *conf_f;
+	FILE *conf_f = NULL;
 	bool own_conf_f = false;
 	prne_worker_t wkr;
 	prne_recon_t *recon;
@@ -251,10 +251,12 @@ int main (const int argc, const char **args) {
 	}
 
 	// alloc recon
+	param.ownership = false;
 	recon = prne_alloc_recon(
 		&wkr,
 		&ctr_drbg,
-		prne_own_recon_param(&param, false));
+		&param);
+	param.ownership = true;
 	if (recon == NULL) {
 		perror("prne_alloc_recon()");
 		ret = 2;

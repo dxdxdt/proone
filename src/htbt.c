@@ -2435,22 +2435,23 @@ static void free_htbt_wkr_ctx (void *p) {
 	prne_close(ctx->lbd.fd);
 	htbt_lbd_empty_conn_list(ctx);
 	prne_free_llist(&ctx->lbd.conn_list);
+	prne_htbt_free_param(&ctx->param);
 
 	prne_free(p);
 }
 
 prne_htbt_t *prne_alloc_htbt (
 	prne_worker_t *w,
-	const prne_htbt_param_t param)
+	const prne_htbt_param_t *param)
 {
 	prne_htbt_t *ret = NULL;
 
 	if (w == NULL ||
-		param.cb_f.cnc_txtrec == NULL ||
-		param.lbd_ssl_conf == NULL ||
-		param.main_ssl_conf == NULL ||
-		param.ctr_drbg == NULL ||
-		param.blackhole < 0)
+		param->cb_f.cnc_txtrec == NULL ||
+		param->lbd_ssl_conf == NULL ||
+		param->main_ssl_conf == NULL ||
+		param->ctr_drbg == NULL ||
+		param->blackhole < 0)
 	{
 		errno = EINVAL;
 		goto ERR;
@@ -2461,7 +2462,7 @@ prne_htbt_t *prne_alloc_htbt (
 		goto ERR;
 	}
 
-	ret->param = param;
+	prne_htbt_init_param(&ret->param);
 	prne_init_llist(&ret->main.req_q);
 	prne_init_llist(&ret->main.hover_req);
 	ret->loop_flag = true;
@@ -2479,7 +2480,7 @@ prne_htbt_t *prne_alloc_htbt (
 	prne_init_llist(&ret->lbd.conn_list);
 	ret->lbd.fd = -1;
 
-	if (param.resolv != NULL) {
+	if (param->resolv != NULL) {
 		ret->cncp.pth = pth_spawn(
 			PTH_ATTR_DEFAULT,
 			htbt_cncp_entry,
@@ -2499,6 +2500,7 @@ prne_htbt_t *prne_alloc_htbt (
 		goto ERR;
 	}
 
+	ret->param = *param;
 	w->ctx = ret;
 	w->entry = htbt_main_entry;
 	w->fin = fin_htbt_wkr;

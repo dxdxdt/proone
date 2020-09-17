@@ -68,6 +68,11 @@ AC_CHECK_LIB(
 	[],
 	[AC_MSG_ERROR([mbedtls not found])])
 AC_CHECK_LIB(
+	[ssh2],
+	[libssh2_init],
+	[],
+	[AC_MSG_ERROR([ssh2 not found])])
+AC_CHECK_LIB(
 	[pthsem],
 	[pth_init],
 	[],

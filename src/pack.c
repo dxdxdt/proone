@@ -503,3 +503,25 @@ ssize_t prne_bin_rcb_read (
 {
 	return ctx->read_f(ctx, buf, len, prc, err);
 }
+
+bool prne_index_nybin (
+	const uint8_t *m_nybin,
+	const size_t nybin_len,
+	const uint8_t **m_dv,
+	size_t *dv_len,
+	const uint8_t **m_ba,
+	size_t *ba_len)
+{
+	if (nybin_len < 8) {
+		return false;
+	}
+	*dv_len = prne_recmb_msb16(m_nybin[0], m_nybin[1]);
+	if (8 + *dv_len > nybin_len) {
+		return false;
+	}
+	*m_dv = m_nybin + 8;
+	*m_ba = m_nybin + 8 + prne_salign_next(*dv_len, PRNE_BIN_ALIGNMENT);
+	*ba_len = nybin_len - (*m_ba - m_nybin);
+
+	return true;
+}

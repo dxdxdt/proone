@@ -852,16 +852,9 @@ static char *do_recombination (const uint8_t *m_nybin, const size_t nybin_len) {
 	prne_init_bin_archive(&ba);
 	prne_init_bin_rcb_ctx(&rcb);
 
-	if (nybin_len < 8) {
+	if (!prne_index_nybin(m_nybin, nybin_len, &m_dv, &dv_len, &m_ba, &ba_len)) {
 		goto END;
 	}
-	dv_len = prne_recmb_msb16(m_nybin[0], m_nybin[1]);
-	if (8 + dv_len > nybin_len) {
-		goto END;
-	}
-	m_dv = m_nybin + 8;
-	m_ba = m_nybin + 8 + prne_salign_next(dv_len, PRNE_BIN_ALIGNMENT);
-	ba_len = nybin_len - (m_ba - m_nybin);
 
 	prc = prne_index_bin_archive(m_ba, ba_len, &ba);
 	if (prc != PRNE_PACK_RC_OK) {

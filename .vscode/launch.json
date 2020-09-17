@@ -109,6 +109,40 @@
 			"preLaunchTask": "Build recon",
 			"miDebuggerPath": "/usr/bin/gdb"
 		},
+		{
+			"name": "mkcdict",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-mkcdict",
+			"args": [ "./src/data/cred_dict.txt", "./src/data/cred_dict.bin" ],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [],
+			"preLaunchTask": "Build mkcdict",
+			"miDebuggerPath": "/usr/bin/gdb"
+		},
+		{
+			"name": "bne",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-bne",
+			"args": [
+				"./src/data/cred_dict.bin",
+				"./builds/proone/proone.nybin",
+				"192.0.2.1" // CHANGE
+			],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [],
+			"preLaunchTask": "Build bne",
+			"miDebuggerPath": "/usr/bin/gdb"
+		},
 
 		{
 			"name": "proone",

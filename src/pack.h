@@ -70,3 +70,11 @@ ssize_t prne_bin_rcb_read (
 	size_t len,
 	prne_pack_rc_t *prc,
 	int *err);
+
+bool prne_index_nybin (
+	const uint8_t *m_nybin,
+	const size_t nybin_len,
+	const uint8_t **m_dv,
+	size_t *dv_len,
+	const uint8_t **m_ba,
+	size_t *ba_len);

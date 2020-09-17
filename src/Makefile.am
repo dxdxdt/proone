@@ -42,7 +42,9 @@ bin_PROGRAMS =\
 	proone-ipaddr-arr\
 	proone-htbthost\
 	proone-rnd\
-	proone-recon
+	proone-recon\
+	proone-mkcdict\
+	proone-bne
 
 proone_tests =\
 	proone-test_proto\
@@ -67,7 +69,10 @@ libproone_a_SOURCES =\
 	rnd_well512.c\
 	recon.c\
 	inet.c\
-	strmap.c
+	libssh2.c\
+	strmap.c\
+	cred_dict.c\
+	bne.c
 
 proone: proone.bin dvault.bin
 	cp -fa proone.bin proone
@@ -106,6 +111,12 @@ proone_stress_SOURCES = proone-stress.c
 
 proone_rnd_LDADD = libproone.a
 proone_rnd_SOURCES = proone-rnd.c
+
+proone_mkcdict_LDADD = libproone.a
+proone_mkcdict_SOURCES = proone-mkcdict.c
+
+proone_bne_LDADD = libproone.a
+proone_bne_SOURCES = proone-bne.c
 
 proone_recon_LDADD = libproone.a
 proone_recon_SOURCES = proone-recon.c

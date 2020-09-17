@@ -51,6 +51,16 @@
 			"command": "make -C ./src proone-recon"
 		},
 		{
+			"label": "Build mkcdict",
+			"type": "shell",
+			"command": "make -C ./src proone-mkcdict"
+		},
+		{
+			"label": "Build bne",
+			"type": "shell",
+			"command": "make -C ./src proone-mkcdict proone-bne && ./src/proone-mkcdict ./src/data/cred_dict.txt ./src/data/cred_dict.bin"
+		},
+		{
 			"label": "Build proone",
 			"type": "shell",
 			"command": "make -C ./src proone"

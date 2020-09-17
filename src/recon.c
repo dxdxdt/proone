@@ -70,7 +70,7 @@ static void rcn_main_empty_ii_list (prne_recon_t *ctx) {
 	prne_llist_entry_t *ent = ctx->ii_list.head;
 
 	while (ent != NULL) {
-		prne_free(ent->element);
+		prne_free((void*)ent->element);
 		ent = ent->next;
 	}
 	prne_llist_clear(&ctx->ii_list);
@@ -133,7 +133,7 @@ static bool rcn_main_do_ifaddrs (prne_recon_t *ctx) {
 			}
 			/* fall-through */
 		case AF_INET:
-			ent = prne_llist_append(&ctx->ii_list, NULL);
+			ent = prne_llist_append(&ctx->ii_list, 0);
 			if (ent == NULL) {
 				goto END;
 			}
@@ -141,7 +141,7 @@ static bool rcn_main_do_ifaddrs (prne_recon_t *ctx) {
 			if (info == NULL) {
 				goto END;
 			}
-			ent->element = info;
+			ent->element = (prne_llist_element_t)info;
 			break;
 		default: continue;
 		}

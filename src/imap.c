@@ -27,10 +27,10 @@ void prne_free_imap (prne_imap_t *im) {
 void prne_imap_clear (prne_imap_t *im) {
 	prne_free(im->tbl);
 	im->tbl = NULL;
-	im->size = 0;	
+	im->size = 0;
 }
 
-const prne_imap_tuple_t *prne_imap_insert (prne_imap_t *im, const prne_imap_key_type_t key, void *val) {
+const prne_imap_tuple_t *prne_imap_insert (prne_imap_t *im, const prne_imap_key_type_t key, const prne_imap_val_type_t val) {
 	prne_imap_tuple_t *ret;
 	prne_imap_tuple_t t;
 
@@ -64,7 +64,7 @@ void prne_imap_erase (prne_imap_t *im, const prne_imap_key_type_t key) {
 	prne_imap_tuple_t t;
 
 	t.key = key;
-	t.val = NULL;
+	t.val = 0;
 
 	ext = bsearch(&t, im->tbl, im->size, sizeof(prne_imap_tuple_t), imap_cmp_func);
 	if (ext != NULL) {
@@ -90,7 +90,7 @@ const prne_imap_tuple_t *prne_imap_lookup (prne_imap_t *im, const prne_imap_key_
 	prne_imap_tuple_t t;
 
 	t.key = key;
-	t.val = NULL;
-	
+	t.val = 0;
+
 	return (const prne_imap_tuple_t*)bsearch(&t, im->tbl, im->size, sizeof(prne_imap_tuple_t), imap_cmp_func);
 }

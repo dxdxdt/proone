@@ -90,7 +90,7 @@ static void gen_mask (uint8_t *out) {
 	prne_init_imap(&q);
 
 	for (prne_imap_key_type_t i = 0; i < 256; i += 1) {
-		prne_assert(prne_imap_insert(&q, i, NULL) != NULL);
+		prne_assert(prne_imap_insert(&q, i, 0) != NULL);
 	}
 
 	for (uintptr_t i = 0; i < 256; i += 1) {

@@ -89,7 +89,9 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 		}
 
 		if (has_prm) {
-			prne_assert(prne_llist_append(&prm_list, prm) != NULL);
+			prne_assert(prne_llist_append(
+				&prm_list,
+				(prne_llist_element_t)prm) != NULL);
 		}
 		else {
 			perror("* Queue failed");

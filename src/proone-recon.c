@@ -23,10 +23,10 @@ static regex_t re_entry, re_comment, re_empty;
 
 static void print_help (FILE *o, const char *prog) {
 	fprintf(
-		stderr,
+		o,
 		"Usage: %s <conf> <port 1> [port 2] ... [port n]\n"
 		"Options:\n"
-		"\t<conf>: Path to config file. Pass \"-\" to read stdin\n"
+		"\t<conf>: path to config file. \"-\" to read stdin\n"
 		"Config Format: <ENTRY SPEC> <NET SPEC>\n"
 		"\t<ENTRY SPEC>: \"T\" for target or \"BL\" for blacklist\n"
 		"\t<NET SPEC>: <IPv4 or IPv6 Address>/<CIDR>\n"
@@ -167,10 +167,10 @@ int main (const int argc, const char **args) {
 
 	prne_assert(regcomp(
 		&re_entry,
-		// ^(\s+)?(T|BL)(\s+)?([0-9a-f:.]+)\/([0-9]{1,3})(\s+)?(#.*)?$
+		// ^(\s+)?(T|BL)(\s+)([0-9a-f:.]+)\/([0-9]{1,3})(\s+)?(#.*)?$
 		// number of captures: 7
 		// significant groups: 2, 4, 5
-		"^(\\s+)?(T|BL)(\\s+)?([0-9a-f:.]+)\\/([0-9]{1,3})(\\s+)?(#.*)?$",
+		"^(\\s+)?(T|BL)(\\s+)([0-9a-f:.]+)\\/([0-9]{1,3})(\\s+)?(#.*)?$",
 		REG_EXTENDED | REG_ICASE) == 0);
 	prne_assert(regcomp(
 		&re_comment,

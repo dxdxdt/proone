@@ -159,7 +159,10 @@ static bool htbt_main_q_req_slip (prne_htbt_t *ctx, htbt_req_slip_t *in) {
 	htbt_init_req_slip(ny_slip);
 
 	prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
-	alloc = prne_llist_append(&ctx->main.req_q, ny_slip) != NULL;
+	alloc =
+		prne_llist_append(
+			&ctx->main.req_q,
+			(prne_llist_element_t)ny_slip) != NULL;
 	if (alloc) {
 		prne_dbgtrap(pth_cond_notify(&ctx->main.cond, FALSE));
 	}
@@ -217,7 +220,7 @@ static bool htbt_main_q_hover (
 	body->parent = ctx;
 	if (trace == NULL) {
 		prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
-		ny_trace = prne_llist_append(&ctx->main.hover_req, (void*)1);
+		ny_trace = prne_llist_append(&ctx->main.hover_req, 1);
 		pth_mutex_release(&ctx->main.lock);
 		if (ny_trace == NULL) {
 			goto END;
@@ -240,7 +243,7 @@ static bool htbt_main_q_hover (
 END:
 	if (ny_trace != NULL) {
 		prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
-		prne_llist_append(&ctx->main.hover_req, ny_trace);
+		prne_llist_erase(&ctx->main.hover_req, ny_trace);
 		pth_mutex_release(&ctx->main.lock);
 	}
 	htbt_free_req_slip(&slip);
@@ -1620,15 +1623,13 @@ static void htbt_main_slv_hover_f (
 	htbt_main_client_t *ctx = (htbt_main_client_t*)ioctx;
 
 	if (ctx->hv_trace != NULL) {
-		const uintptr_t cur = (uintptr_t)ctx->hv_trace->element;
-
-		if (cur >= HTBT_HOVER_MAX_REDIR) {
+		if (ctx->hv_trace->element >= HTBT_HOVER_MAX_REDIR) {
 			*status = PRNE_HTBT_STATUS_LIMIT;
 			*err = 0;
 			return;
 		}
 		else {
-			ctx->hv_trace->element = (void*)(cur + 1);
+			ctx->hv_trace->element += 1;
 			ctx->hv_used = true;
 		}
 	}
@@ -2375,7 +2376,9 @@ static void htbt_lbd_serve_loop (prne_htbt_t *ctx) {
 						goto CATCH;
 					}
 
-					ent = prne_llist_append(&ctx->lbd.conn_list, client);
+					ent = prne_llist_append(
+						&ctx->lbd.conn_list,
+						(prne_llist_element_t)client);
 					if (ent == NULL) {
 						goto CATCH;
 					}

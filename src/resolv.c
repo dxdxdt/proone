@@ -245,7 +245,9 @@ static bool resolv_qq (prne_resolv_t *ctx, const char *name, prne_pth_cv_t *cv, 
 	}
 
 	prne_dbgtrap(pth_mutex_acquire(&ctx->lock, FALSE, NULL));
-	q_ent->qlist_ent = prne_llist_append(&ctx->qlist, q_ent);
+	q_ent->qlist_ent = prne_llist_append(
+		&ctx->qlist,
+		(prne_llist_element_t)q_ent);
 	if (q_ent->qlist_ent == NULL) {
 		pth_mutex_release(&ctx->lock);
 		goto ERR;
@@ -318,7 +320,7 @@ static void resolv_close_sck (prne_resolv_t *ctx, const struct timespec *pause, 
 			continue;
 		}
 
-		lent = prne_llist_append(&ctx->qlist, qent);
+		lent = prne_llist_append(&ctx->qlist, (prne_llist_element_t)qent);
 		if (lent == NULL) {
 			qent->fut.qr = PRNE_RESOLV_QR_ERR;
 			qent->fut.err = errno;
@@ -555,7 +557,7 @@ static const uint8_t* resolv_index_labels (prne_imap_t *map, const uint8_t *star
 		else {
 			// index the label
 			ptr = (uint16_t)(p - start) | 0xC000;
-			if (prne_imap_insert(map, ptr, (void*)p) == NULL) {
+			if (prne_imap_insert(map, ptr, (prne_imap_val_type_t)p) == NULL) {
 				*qr = PRNE_RESOLV_QR_ERR;
 				*err = errno;
 				return NULL;
@@ -737,7 +739,7 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 			qr = PRNE_RESOLV_QR_ERR;
 			goto END;
 		}
-		if (prne_llist_append(&rr_list, tpl) == NULL) {
+		if (prne_llist_append(&rr_list, (prne_llist_element_t)tpl) == NULL) {
 			prne_free(tpl);
 			err = errno;
 			qr = PRNE_RESOLV_QR_ERR;
@@ -844,7 +846,7 @@ QNAME_START:
 			goto END;
 		}
 		if (cmp_ret && ttype == tpl->rtype) {
-			if (prne_llist_append(&ret_list, tpl) == NULL) {
+			if (prne_llist_append(&ret_list, (prne_llist_element_t)tpl) == NULL) {
 				qr = PRNE_RESOLV_QR_ERR;
 				err = errno;
 				goto END;
@@ -903,7 +905,7 @@ QNAME_START:
 END:
 	cur = rr_list.head;
 	while (cur != NULL) {
-		prne_free(cur->element);
+		prne_free((void*)cur->element);
 		cur = cur->next;
 	}
 	prne_free_llist(&rr_list);
@@ -992,7 +994,11 @@ static bool resolv_send_dns_msgs (prne_resolv_t *ctx) {
 				return ret;
 			}
 
-			if (prne_imap_insert(&ctx->qid_map, qid, qent) == NULL) {
+			if (prne_imap_insert(
+				&ctx->qid_map,
+				qid,
+				(prne_imap_val_type_t)qent) == NULL)
+			{
 				qent->fut.err = errno;
 				qent->fut.qr = PRNE_RESOLV_QR_ERR;
 				prne_llist_erase(&ctx->qlist, cur);
@@ -1119,7 +1125,7 @@ LOOP:
 								ctx->iobuf[0].m[pos + 3]);
 							const prne_imap_tuple_t *tpl = prne_imap_lookup(&ctx->qid_map, qid);
 
-							if (tpl->val != NULL) {
+							if (tpl->val != (prne_imap_val_type_t)NULL) {
 								query_entry_t *qent = (query_entry_t*)tpl->val;
 								qent->fut.qr = PRNE_RESOLV_QR_IMPL;
 								resolv_disown_qent(qent);

@@ -1,4 +1,5 @@
 #include "strmap.h"
+#include "util_ct.h"
 #include "util_rt.h"
 
 #include <string.h>
@@ -34,7 +35,7 @@ void prne_strmap_clear (prne_strmap_t *map) {
 const prne_strmap_tuple_t *prne_strmap_insert (
 	prne_strmap_t *map,
 	const char* key,
-	void *val)
+	const prne_strmap_val_t val)
 {
 	prne_strmap_tuple_t *ret;
 	prne_strmap_tuple_t t;
@@ -70,7 +71,7 @@ const prne_strmap_tuple_t *prne_strmap_insert (
 
 		qsort(map->tbl, map->size, sizeof(prne_strmap_tuple_t), strmap_cmp_f);
 		ret = (prne_strmap_tuple_t*)prne_strmap_lookup(map, key);
-		prne_dbgtrap(ret != NULL);
+		prne_dbgast(ret != NULL);
 	}
 	else {
 		ret->val = t.val;
@@ -83,7 +84,7 @@ void prne_strmap_erase (prne_strmap_t *map, const char* key) {
 	prne_strmap_tuple_t t, *e;
 
 	t.key = key;
-	t.val = NULL;
+	t.val = 0;
 	e = (prne_strmap_tuple_t*)bsearch(
 		&t,
 		map->tbl,
@@ -120,7 +121,7 @@ const prne_strmap_tuple_t *prne_strmap_lookup (
 	prne_strmap_tuple_t t;
 
 	t.key = key;
-	t.val = NULL;
+	t.val = 0;
 
 	return (const prne_strmap_tuple_t*)bsearch(
 		&t,

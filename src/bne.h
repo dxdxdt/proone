@@ -32,6 +32,7 @@ struct prne_bne_param {
 		size_t cnt;
 	} vector;
 	struct {
+		char *(*exec_name)(void);
 		bool (*enter_dd)(void);
 		void (*exit_dd)(void);
 	} cb;
@@ -56,6 +57,7 @@ struct prne_bne_result {
 	int err;
 	prne_bne_vector_t vec;
 	prne_pack_rc_t prc;
+	prne_arch_t arch;
 };
 
 void prne_init_bne_param (prne_bne_param_t *p);

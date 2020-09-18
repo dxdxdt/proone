@@ -221,6 +221,27 @@ void prne_transstr (char *str,  int(*trans_f)(int)) {
 	}
 }
 
+char *prne_strnstr (
+	const char *haystack,
+	size_t hs_len,
+	const char *const needle,
+	const size_t n_len)
+{
+	if (n_len == 0) {
+		return NULL;
+	}
+
+	while (hs_len >= n_len) {
+		if (*haystack == *needle && memcmp(haystack, needle, n_len) == 0) {
+			return (char*)haystack;
+		}
+		haystack += 1;
+		hs_len -= 1;
+	}
+
+	return NULL;
+}
+
 bool prne_hex_fromstr (const char *str, uint_fast8_t *out) {
 	static const uint_fast8_t shift[2] = { 4, 0 };
 	size_t i;

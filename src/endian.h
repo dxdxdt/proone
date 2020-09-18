@@ -59,8 +59,12 @@
 #if PRNE_HOST_ENDIAN == PRNE_ENDIAN_BIG
 #define prne_htobe16(x) (x)
 #define prne_be16toh(x) (x)
+#define prne_htole16(x) prne_einv16(x)
+#define prne_le16toh(x) prne_einv16(x)
 #elif PRNE_HOST_ENDIAN == PRNE_ENDIAN_LITTLE
 #define prne_htobe16(x) prne_einv16(x)
 #define prne_be16toh(x) prne_einv16(x)
+#define prne_htole16(x) (x)
+#define prne_le16toh(x) (x)
 #else
 #endif

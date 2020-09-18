@@ -106,6 +106,17 @@ static void report_result (const prne_bne_result_t *r) {
 	}
 }
 
+static char *cb_exec_name (void) {
+	static const char *EXEC_NAME = "proone";
+	const size_t len = strlen(EXEC_NAME);
+	char *ret = prne_alloc_str(len);
+
+	prne_assert(ret != NULL);
+	memcpy(ret, EXEC_NAME, len + 1);
+
+	return ret;
+}
+
 int main (const int argc, const char **args) {
 	static prne_bne_vector_t ARR_VEC[] = {
 		PRNE_BNE_V_BRUTE_TELNET,
@@ -227,6 +238,7 @@ int main (const int argc, const char **args) {
 	param.rcb.m_dv = m_dv;
 	param.rcb.dv_len = dv_len;
 	param.rcb.ba = &ba;
+	param.cb.exec_name = cb_exec_name;
 
 	for (size_t i = 0; i < cnt; i += 1) {
 		prne_worker_t *w = prne_malloc(sizeof(prne_worker_t), 1);

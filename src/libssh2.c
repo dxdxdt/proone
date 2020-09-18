@@ -87,12 +87,8 @@ static int lssh2_handle (
 		}
 
 		f_ret = prne_pth_poll(&pfd, 1, -1, ev);
-		if (f_ret < 0) {
-			break;
-		}
-		else if (f_ret == 0) {
+		if (f_ret <= 0) {
 			f_ret = -1;
-			errno = ETIMEDOUT;
 			break;
 		}
 	}
@@ -178,6 +174,38 @@ LIBSSH2_CHANNEL *prne_lssh2_open_ch (
 	f_ret = lssh2_handle(s, fd, ev, &ctx, lssh2_open_channel_f);
 	prne_chk_assign(err, f_ret);
 	return ctx.ret;
+}
+
+static int lssh2_close_ch_f (void *p) {
+	lssh2_cbctx_ch_f_t *ctx = (lssh2_cbctx_ch_f_t*)p;
+	return libssh2_channel_close(ctx->c);
+}
+
+int prne_lssh2_close_ch (
+	LIBSSH2_SESSION *s,
+	LIBSSH2_CHANNEL *c,
+	const int fd,
+	pth_event_t ev)
+{
+	lssh2_cbctx_ch_f_t ctx;
+	ctx.c = c;
+	return lssh2_handle(s, fd, ev, &ctx, lssh2_close_ch_f);
+}
+
+static int lssh2_ch_wait_closed_f (void *p) {
+	lssh2_cbctx_ch_f_t *ctx = (lssh2_cbctx_ch_f_t*)p;
+	return libssh2_channel_wait_closed(ctx->c);
+}
+
+int prne_lssh2_ch_wait_closed (
+	LIBSSH2_SESSION *s,
+	LIBSSH2_CHANNEL *c,
+	const int fd,
+	pth_event_t ev)
+{
+	lssh2_cbctx_ch_f_t ctx;
+	ctx.c = c;
+	return lssh2_handle(s, fd, ev, &ctx, lssh2_ch_wait_closed_f);
 }
 
 static int lssh2_ch_req_pty_f (void *p) {

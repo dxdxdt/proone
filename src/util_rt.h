@@ -43,6 +43,11 @@ void prne_rnd_anum_str (mbedtls_ctr_drbg_context *rnd, char *str, const size_t l
 char *prne_strnchr (const char *p, const char c, const size_t n);
 size_t prne_str_shift_spaces (char *str, const size_t len);
 void prne_transstr (char *str,  int(*trans_f)(int));
+char *prne_strnstr (
+	const char *haystack,
+	size_t hs_len,
+	const char *const needle,
+	const size_t n_len);
 
 bool prne_hex_fromstr (const char *str, uint_fast8_t *out);
 void prne_hex_tochar (const uint_fast8_t in, char *out, const bool upper);

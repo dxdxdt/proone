@@ -19,6 +19,16 @@ LIBSSH2_CHANNEL *prne_lssh2_open_ch (
 	const int fd,
 	pth_event_t ev,
 	int *err);
+int prne_lssh2_close_ch (
+	LIBSSH2_SESSION *s,
+	LIBSSH2_CHANNEL *c,
+	const int fd,
+	pth_event_t ev);
+int prne_lssh2_ch_wait_closed (
+	LIBSSH2_SESSION *s,
+	LIBSSH2_CHANNEL *c,
+	const int fd,
+	pth_event_t ev);
 int prne_lssh2_ch_req_pty (
 	LIBSSH2_SESSION *s,
 	LIBSSH2_CHANNEL *c,

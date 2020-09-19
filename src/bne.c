@@ -70,9 +70,16 @@ typedef struct {
 		const size_t len,
 		pth_event_t ev);
 	int (*pollin_f) (void *ctx);
+	/* Newline sequence to send
+	* "\r\n" for telnet. "\n" for anything else.
+	*
+	* We should send "\r\0", not "\r\n" as specified in the protocol, but it's
+	* tricky to implement. Most server implementations will understand any
+	* newline sequence anyways.
+	*/
+	const char *nl;
 	uint8_t buf[2048];
 	char *upload_dir;
-
 	pth_event_t ev;
 	prne_iobuf_t ib;
 	prne_llist_t up_loc; // series of null-terminated string
@@ -411,35 +418,13 @@ static bool bne_sh_send (
 }
 
 static char *bne_sh_mknexted_cmd (bne_sh_ctx_t *s_ctx, const char *cmd) {
-	const size_t cmd_len = prne_nstrlen(cmd);
-	const size_t entire_len =
-		sizeof("\necho -n \n") - 1 + sizeof(s_ctx->stx_str) - 1 +
-		cmd_len +
-		sizeof("\necho; echo -n \n") - 1 + sizeof(s_ctx->eot_str) - 1;
-	char *entire = prne_alloc_str(entire_len);
-	char *buf = entire;
+	const char *sb[] = {
+		s_ctx->nl, "echo -n ", s_ctx->stx_str, s_ctx->nl,
+		cmd, s_ctx->nl,
+		"echo -n ", s_ctx->eot_str, s_ctx->nl
+	};
 
-	if (entire == NULL) {
-		return NULL;
-	}
-
-	memcpy(buf, "\necho -n ", sizeof("\necho -n ") - 1);
-	buf += sizeof("\necho -n ") - 1;
-	memcpy(buf, s_ctx->stx_str, sizeof(s_ctx->stx_str) - 1);
-	buf += sizeof(s_ctx->stx_str) - 1;
-	*buf = '\n';
-	buf += 1;
-	memcpy(buf, cmd, cmd_len);
-	buf += cmd_len;
-	memcpy(buf, "\necho; echo -n ", sizeof("\necho; echo -n ") - 1);
-	buf += sizeof("\necho; echo -n ") - 1;
-	memcpy(buf, s_ctx->eot_str, sizeof(s_ctx->eot_str) - 1);
-	buf += sizeof(s_ctx->eot_str) - 1;
-	*buf = '\n';
-	buf += 1;
-	entire[entire_len] = 0;
-
-	return entire;
+	return prne_build_str(sb, sizeof(sb)/sizeof(const char*));
 }
 
 static bool bne_sh_sync_stx (bne_sh_ctx_t *s_ctx) {
@@ -488,7 +473,7 @@ static bool bne_sh_runcmd_line (
 {
 	bool ret = false;
 	char *nested = bne_sh_mknexted_cmd(s_ctx, cmd);
-	char *delim;
+	char *delim[2];
 	ssize_t f_ret;
 
 	if (nested == NULL || !bne_sh_send(s_ctx, nested)) {
@@ -501,24 +486,33 @@ static bool bne_sh_runcmd_line (
 
 	// do parse
 	while (true) {
-		delim = prne_strnchr((char*)s_ctx->ib.m, '\n', s_ctx->ib.len);
-		if (delim != NULL) {
-			*delim = 0;
+		delim[0] = prne_strnchr((char*)s_ctx->ib.m, '\r', s_ctx->ib.len);
+		delim[1] = prne_strnchr((char*)s_ctx->ib.m, '\n', s_ctx->ib.len);
+		if (delim[1] != NULL) {
+			if (delim[0] != NULL && delim[0] + 1 == delim[1]) {
+				// CrLf
+				*delim[0] = 0;
+			}
+			else {
+				*delim[1] = 0;
+			}
+
 			if (p_ctx->line_f != NULL) {
 				p_ctx->line_f(p_ctx->ctx, (char*)s_ctx->ib.m);
 			}
+
 			prne_iobuf_shift(
 				&s_ctx->ib,
-				-(delim - (char*)s_ctx->ib.m + 1));
+				-(delim[1] - (char*)s_ctx->ib.m + 1));
 			continue;
 		}
 		else {
-			delim = prne_strnstr(
+			delim[0] = prne_strnstr(
 				(char*)s_ctx->ib.m,
 				s_ctx->ib.len,
 				s_ctx->eot_str,
 				sizeof(s_ctx->eot_str) - 1);
-			if (delim != NULL) {
+			if (delim[0] != NULL) {
 				prne_iobuf_reset(&s_ctx->ib);
 				ret = true;
 				break;
@@ -631,23 +625,18 @@ static int bne_sh_get_uid (bne_sh_ctx_t *s_ctx) {
 }
 
 static bool bne_sh_sudo (prne_bne_t *ctx, bne_sh_ctx_t *s_ctx) {
-	static const size_t ENTIRE_LEN =
-		sizeof("sudo -S su; echo -n \n") - 1 + sizeof(s_ctx->eot_str) - 1;
+	const char *sb[] = {
+		"sudo -S su; echo -n ", s_ctx->eot_str, s_ctx->nl
+	};
 	bool ret = false;
 	ssize_t f_ret;
-	char entire[ENTIRE_LEN + 1], *cmd;
-	char *delim;
+	char *cmd = NULL, *delim;
 
-	cmd = entire;
-	memcpy(cmd, "sudo -S su; echo -n ", sizeof("sudo -S su; echo -n ") - 1);
-	cmd += sizeof("sudo -S su; echo -n ") - 1;
-	memcpy(cmd, s_ctx->eot_str, sizeof(s_ctx->eot_str) - 1);
-	cmd += sizeof(s_ctx->eot_str) - 1;
-	*cmd = '\n';
-	cmd += 1;
-	*cmd = 0;
-
-	if (!bne_sh_send(s_ctx, entire)) {
+	cmd = prne_build_str(sb, sizeof(sb)/sizeof(const char*));
+	if (cmd == NULL) {
+		goto END;
+	}
+	if (!bne_sh_send(s_ctx, cmd)) {
 		goto END;
 	}
 
@@ -681,7 +670,7 @@ static bool bne_sh_sudo (prne_bne_t *ctx, bne_sh_ctx_t *s_ctx) {
 	}
 
 	if (!(bne_sh_send(s_ctx, ctx->result.cred.pw) &&
-		bne_sh_send(s_ctx, "\n")))
+		bne_sh_send(s_ctx, s_ctx->nl)))
 	{
 		ctx->result.err = errno;
 		goto END;
@@ -691,6 +680,7 @@ static bool bne_sh_sudo (prne_bne_t *ctx, bne_sh_ctx_t *s_ctx) {
 	ret = bne_sh_sync(s_ctx) && bne_sh_get_uid(s_ctx) == 0;
 
 END:
+	prne_free(cmd);
 	return ret;
 }
 
@@ -892,21 +882,32 @@ static bool bne_sh_setup (
 		}
 	}
 
-	// available commands
-	bne_free_sh_parser(&parser);
-	bne_init_sh_parser(&parser);
-	parser.ctx = s_ctx;
-	parser.line_f = bne_sh_availcmd_parse_f;
-	if (!bne_sh_runcmd_line(
-		s_ctx,
-		&parser,
-		"echo 2> /dev/null > /dev/null; echo echo: $?\n"
-		"echo | cat 2> /dev/null > /dev/null; echo cat: $?\n"
-		"echo | dd 2> /dev/null > /dev/null; echo dd: $?\n"
-		"echo | base64 2> /dev/null > /dev/null; echo base64: $?\n"))
 	{
-		ctx->result.err = errno;
-		goto END;
+		// available commands
+		const char *sb[] = {
+			"echo 2> /dev/null > /dev/null; echo echo: $?", s_ctx->nl,
+			"echo | cat 2> /dev/null > /dev/null; echo cat: $?", s_ctx->nl,
+			"echo | dd 2> /dev/null > /dev/null; echo dd: $?", s_ctx->nl,
+			"echo | base64 2> /dev/null > /dev/null; echo base64: $?", s_ctx->nl
+		};
+		char *cmd = prne_build_str(sb, sizeof(sb)/sizeof(const char*));
+
+		if (cmd == NULL) {
+			ctx->result.err = errno;
+			goto END;
+		}
+
+		bne_free_sh_parser(&parser);
+		bne_init_sh_parser(&parser);
+		parser.ctx = s_ctx;
+		parser.line_f = bne_sh_availcmd_parse_f;
+
+		ret = bne_sh_runcmd_line(s_ctx, &parser, cmd);
+		prne_free(cmd);
+		if (!ret) {
+			ctx->result.err = errno;
+			goto END;
+		}
 	}
 	if (!((s_ctx->avail_cmds & BNE_AVAIL_CMD_ECHO) &&
 		(s_ctx->avail_cmds & BNE_AVAIL_CMD_CAT)))
@@ -1125,7 +1126,7 @@ static bool bne_sh_cleanup_upload (
 	bool ret = false;
 	char *cmd = NULL;
 	const char *sb[] = {
-		"rm -rf \"", s_ctx->upload_dir, "\"\n"
+		"rm -rf \"", s_ctx->upload_dir, "\"", s_ctx->nl
 	};
 
 	if (s_ctx->upload_dir == NULL) {
@@ -1224,6 +1225,7 @@ static bool bne_sh_upload_echo (
 	int poll_ret = 0;
 	bool ret = true;
 	const size_t exec_len = strlen(exec);
+	const size_t nl_len = strlen(s_ctx->nl);
 
 	if (exec_len > 255) {
 		ctx->result.err = E2BIG;
@@ -1262,8 +1264,7 @@ static bool bne_sh_upload_echo (
 			cmd_p += 4;
 			memcpy(cmd_p, exec, exec_len);
 			cmd_p += exec_len;
-			cmd_p[0] = '\n';
-			cmd_p[1] = 0;
+			memcpy(cmd_p, s_ctx->nl, nl_len + 1);
 
 			if (!bne_sh_send(s_ctx, cmd_buf)) {
 				ret = false;
@@ -1277,9 +1278,8 @@ static bool bne_sh_upload_echo (
 				break;
 			}
 		}
-		else {
-			pth_yield(NULL);
-		}
+
+		pth_yield(NULL);
 	}
 
 	if (poll_ret > 0) {
@@ -1815,6 +1815,7 @@ static bool bne_vssh_do_shell (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 	sh_ctx.read_f = bne_vssh_read_f;
 	sh_ctx.write_f = bne_vssh_write_f;
 	sh_ctx.pollin_f = bne_vssh_pollin_f;
+	sh_ctx.nl = "\n";
 
 	// TODO: try exec cat command on a separate channel, write() binary directly
 	ret = bne_do_shell(ctx, &sh_ctx);

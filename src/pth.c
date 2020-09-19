@@ -78,3 +78,13 @@ void prne_pth_cv_notify (pth_mutex_t *lock, pth_cond_t *cond, bool broadcast) {
 pth_time_t prne_pth_tstimeout (const struct timespec ts) {
 	return pth_timeout(ts.tv_sec, ts.tv_nsec / 1000);
 }
+
+void prne_pth_reset_timer (pth_event_t *ev, const struct timespec *ts) {
+	pth_event_free(*ev, FALSE);
+	if (ts != NULL) {
+		*ev = pth_event(
+			PTH_EVENT_TIME,
+			prne_pth_tstimeout(*ts));
+		prne_assert(*ev != NULL);
+	}
+}

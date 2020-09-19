@@ -38,3 +38,4 @@ int prne_pth_poll (
 	pth_event_t ev);
 void prne_pth_cv_notify (pth_mutex_t *lock, pth_cond_t *cond, bool broadcast);
 pth_time_t prne_pth_tstimeout (const struct timespec ts);
+void prne_pth_reset_timer (pth_event_t *ev, const struct timespec *ts);

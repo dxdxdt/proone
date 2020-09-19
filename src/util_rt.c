@@ -242,6 +242,33 @@ char *prne_strnstr (
 	return NULL;
 }
 
+char *prne_build_str (
+	const char **const arr,
+	const size_t cnt)
+{
+	char *ret, *p;
+	size_t len;
+
+	len = 0;
+	for (size_t i = 0; i < cnt; i += 1) {
+		len += prne_nstrlen(arr[i]);
+	}
+	ret = prne_alloc_str(len);
+	if (ret == NULL) {
+		return NULL;
+	}
+
+	p = ret;
+	for (size_t i = 0; i < cnt; i += 1) {
+		len = prne_nstrlen(arr[i]);
+		memcpy(p, arr[i], len);
+		p += len;
+	}
+	*p = 0;
+
+	return ret;
+}
+
 bool prne_hex_fromstr (const char *str, uint_fast8_t *out) {
 	static const uint_fast8_t shift[2] = { 4, 0 };
 	size_t i;

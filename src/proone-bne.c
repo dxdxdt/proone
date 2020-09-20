@@ -92,6 +92,8 @@ static void report_result (const prne_bne_result_t *r) {
 		r->err,
 		vec_str);
 	if (r->vec >= 0) {
+		const char *arch_str = prne_arch_tostr(r->arch);
+
 		if (r->cred.id != NULL) {
 			printf(
 				"\tcred:\n"
@@ -100,8 +102,9 @@ static void report_result (const prne_bne_result_t *r) {
 				r->cred.id,
 				r->cred.pw);
 		}
-		if (r->prc >= 0) {
-			printf("\tprc: %d\n", r->prc);
+		printf("\tprc: %d\n", r->prc);
+		if (arch_str != NULL) {
+			printf("\tarch: %s\n", arch_str);
 		}
 	}
 }

@@ -87,7 +87,14 @@ static int lssh2_handle (
 		}
 
 		f_ret = prne_pth_poll(&pfd, 1, -1, ev);
-		if (f_ret <= 0) {
+		if (f_ret < 0) {
+			if (errno == EINTR) {
+				if (ev == NULL ||
+					pth_event_status(ev) != PTH_STATUS_OCCURRED)
+				{
+					continue;
+				}
+			}
 			f_ret = -1;
 			break;
 		}

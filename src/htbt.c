@@ -26,6 +26,7 @@
 #define HTBT_CNCP_INT_VAR	1800000 // half an hour variance
 #define HTBT_LBD_PORT			prne_htobe16(PRNE_HTBT_PROTO_PORT)
 #define HTBT_LBD_BACKLOG		4
+#define HTBT_LBD_MAX_CLIENTS	5
 
 // CNCP TXT Record Data Transfer Timeout
 static const struct timespec HTBT_CNCP_STREAM_TIMEOUT = { 1800, 0 }; // 30m
@@ -2362,6 +2363,13 @@ static void htbt_lbd_serve_loop (prne_htbt_t *ctx) {
 				client = NULL;
 				ent = NULL;
 				do { // TRY
+					if (!prne_sck_fcntl(fret)) {
+						goto CATCH;
+					}
+					if (ctx->lbd.conn_list.size >= HTBT_LBD_MAX_CLIENTS) {
+						goto CATCH;
+					}
+
 					client = (htbt_lbd_client_t*)prne_malloc(
 						sizeof(htbt_lbd_client_t),
 						1);

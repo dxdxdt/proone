@@ -1436,7 +1436,7 @@ static bool bne_sh_upload_echo (
 			}
 			memcpy(hexstr_p, s_ctx->nl, strlen(s_ctx->nl) + 1);
 
-			if (!bne_sh_send(s_ctx, hexstr)) {
+			if (!s_ctx->flush_f(s_ctx->ctx) || !bne_sh_send(s_ctx, hexstr)) {
 				goto END;
 			}
 		}
@@ -1444,7 +1444,8 @@ static bool bne_sh_upload_echo (
 		pth_yield(NULL);
 	}
 
-	if (!bne_sh_send(s_ctx, s_ctx->nl) ||
+	if (!s_ctx->flush_f(s_ctx->ctx) ||
+		!bne_sh_send(s_ctx, s_ctx->nl) ||
 		!bne_sh_runcmd_line(s_ctx, &parser, "echo $EC;") ||
 		ec != 0)
 	{
@@ -1522,7 +1523,7 @@ static bool bne_sh_upload_base64 (
 				f_ret);
 			memcpy(line + len, s_ctx->nl, strlen(s_ctx->nl) + 1);
 
-			if (!bne_sh_send(s_ctx, line)) {
+			if (!s_ctx->flush_f(s_ctx->ctx) || !bne_sh_send(s_ctx, line)) {
 				goto END;
 			}
 		}
@@ -1530,7 +1531,8 @@ static bool bne_sh_upload_base64 (
 		pth_yield(NULL);
 	}
 
-	if (!bne_sh_send(s_ctx, s_ctx->nl) ||
+	if (!s_ctx->flush_f(s_ctx->ctx) ||
+		!bne_sh_send(s_ctx, s_ctx->nl) ||
 		!bne_sh_runcmd_line(s_ctx, &parser, "echo $EC;") ||
 		ec != 0)
 	{

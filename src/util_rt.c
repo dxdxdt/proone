@@ -221,19 +221,22 @@ void prne_transstr (char *str,  int(*trans_f)(int)) {
 	}
 }
 
-char *prne_strnstr (
-	const char *haystack,
-	size_t hs_len,
-	const char *const needle,
+void *prne_memmem (
+	const void *in_haystack,
+	const size_t in_hs_len,
+	const void *const needle,
 	const size_t n_len)
 {
+	const uint8_t *haystack = (const uint8_t *)in_haystack;
+	size_t hs_len = in_hs_len;
+
 	if (n_len == 0) {
 		return NULL;
 	}
 
 	while (hs_len >= n_len) {
-		if (*haystack == *needle && memcmp(haystack, needle, n_len) == 0) {
-			return (char*)haystack;
+		if (memcmp(haystack, needle, n_len) == 0) {
+			return (void*)haystack;
 		}
 		haystack += 1;
 		hs_len -= 1;
@@ -242,10 +245,11 @@ char *prne_strnstr (
 	return NULL;
 }
 
-char *prne_build_str (
-	const char **const arr,
-	const size_t cnt)
-{
+char *prne_build_str (const char **const arr, const size_t cnt) {
+	return prne_rebuild_str(NULL, arr, cnt);
+}
+
+char *prne_rebuild_str (void *prev, const char **const arr, const size_t cnt) {
 	char *ret, *p;
 	size_t len;
 
@@ -253,7 +257,7 @@ char *prne_build_str (
 	for (size_t i = 0; i < cnt; i += 1) {
 		len += prne_nstrlen(arr[i]);
 	}
-	ret = prne_alloc_str(len);
+	ret = prne_realloc(prev, 1, len + 1);
 	if (ret == NULL) {
 		return NULL;
 	}

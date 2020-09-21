@@ -1022,7 +1022,6 @@ int main (const int argc, const char **args) {
 	sigaddset(&ss_all, SIGPIPE);
 
 	prne_g.parent_start = prne_gettime(CLOCK_MONOTONIC);
-	prne_g.parent_pid = getpid();
 	prne_g.blackhole[0] = -1;
 	prne_g.blackhole[1] = -1;
 	prne_g.shm_fd = -1;
@@ -1056,6 +1055,24 @@ int main (const int argc, const char **args) {
 	if (argc > 1) {
 		set_host_credential(args[1]);
 	}
+
+	// post-init
+	{
+		// daemonise
+		const pid_t f_ret = fork();
+
+		if (f_ret < 0) {
+			exit_code = 2;
+			goto END;
+		}
+		else if (f_ret == 0) {
+			prne_g.parent_pid = getpid();
+		}
+		else {
+			goto END;
+		}
+	}
+
 
 	sigprocmask(SIG_BLOCK, &ss_all, NULL);
 	// main loop

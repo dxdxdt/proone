@@ -7,6 +7,11 @@
 
 #include <netinet/in.h>
 
+#define PRNE_PROONE_EC_OK		0
+#define PRNE_PROONE_EC_FAIL		1
+#define PRNE_PROONE_EC_LOCK		3
+
+
 typedef struct prne_net_endpoint prne_net_endpoint_t;
 typedef struct prne_ip_addr prne_ip_addr_t;
 typedef struct prne_host_cred prne_host_cred_t;

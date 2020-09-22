@@ -306,7 +306,7 @@ static int proone_main (void) {
 	pth_kill();
 	libssh2_exit();
 
-	return 0;
+	return PRNE_PROONE_EC_OK;
 }
 
 static void close_blackhole (void) {
@@ -1046,7 +1046,7 @@ int main (const int argc, const char **args) {
 	init_ids();
 	if (!init_shared_global()) {
 		prne_dbgpf("*** Another instance detected.\n");
-		exit_code = 1;
+		exit_code = PRNE_PROONE_EC_LOCK;
 		goto END;
 	}
 	delete_myself(args[0]);
@@ -1062,7 +1062,7 @@ int main (const int argc, const char **args) {
 		const pid_t f_ret = fork();
 
 		if (f_ret < 0) {
-			exit_code = 2;
+			exit_code = PRNE_PROONE_EC_FAIL;
 			goto END;
 		}
 		else if (f_ret == 0) {

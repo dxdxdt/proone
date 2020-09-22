@@ -1202,10 +1202,17 @@ static bool bne_sh_setup (
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 		const char *arch_str = prne_arch_tostr(ctx->result.arch);
 
-		prne_dbgpf(
-			"bne@%"PRIxPTR"\t: arch: %s\n",
-			(uintptr_t)ctx,
-			arch_str == NULL ? "?" : arch_str);
+		if (arch_str == NULL) {
+			prne_dbgpf(
+				"bne@%"PRIxPTR"\t: arch detection failed\n",
+				(uintptr_t)ctx);
+		}
+		else {
+			prne_dbgpf(
+				"bne@%"PRIxPTR"\t: arch: %s\n",
+				(uintptr_t)ctx,
+				arch_str);
+		}
 	}
 	ret = ctx->result.arch != PRNE_ARCH_NONE;
 
@@ -1559,7 +1566,7 @@ static bool bne_sh_run_exec (
 	char *cmd;
 	bne_sh_parser_t parser;
 	int ec = -1;
-	bool ret;
+	bool ret = false;
 
 	bne_init_sh_parser(&parser);
 	parser.ctx = &ec;
@@ -1571,7 +1578,17 @@ static bool bne_sh_run_exec (
 		return false;
 	}
 
-	ret = bne_sh_runcmd_line(s_ctx, &parser, cmd) && ec == 0;
+	if (bne_sh_runcmd_line(s_ctx, &parser, cmd)) {
+		switch (ec) {
+		case PRNE_PROONE_EC_OK:
+			// successful launch
+		case PRNE_PROONE_EC_LOCK:
+			// failed to acquire lock
+			// assume that a process is already running
+			ret = true;
+			break;
+		}
+	}
 
 	prne_free(cmd);
 	return ret;

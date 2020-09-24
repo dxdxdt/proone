@@ -43,6 +43,16 @@ void prne_rnd_anum_str (mbedtls_ctr_drbg_context *rnd, char *str, const size_t l
 char *prne_strnchr (const char *p, const char c, const size_t n);
 size_t prne_str_shift_spaces (char *str, const size_t len);
 void prne_transstr (char *str,  int(*trans_f)(int));
+void prne_transmem (void *m, size_t len, int(*trans_f)(int));
+void *prne_memrchr (
+	const void *haystack,
+	const int c,
+	const size_t hs_len);
+void *prne_memrmem (
+	const void *haystack,
+	const size_t hs_len,
+	const void *const needle,
+	const size_t n_len);
 void *prne_memmem (
 	const void *haystack,
 	const size_t hs_len,

@@ -141,16 +141,8 @@ bool prne_mbedtls_pth_handle (
 
 		do {
 			pollret = prne_pth_poll(&pfd, 1, -1, ev);
-			if (ev != NULL && pth_event_status(ev) == PTH_STATUS_OCCURRED) {
-				return false;
-			}
 			if (pollret < 0) {
-				if (errno == EINTR) {
-					continue;
-				}
-				else {
-					return false;
-				}
+				return false;
 			}
 		} while (false);
 	}

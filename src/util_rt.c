@@ -221,6 +221,49 @@ void prne_transstr (char *str,  int(*trans_f)(int)) {
 	}
 }
 
+void prne_transmem (void *m, size_t len, int(*trans_f)(int)) {
+	for (size_t i = 0; i < len; i += 1) {
+		((uint8_t*)m)[i] = (uint8_t)trans_f(((uint8_t*)m)[i]);
+	}
+}
+
+void *prne_memrchr (
+	const void *haystack,
+	const int c,
+	const size_t hs_len)
+{
+	for (size_t i = 0, idx = hs_len - 1; i < hs_len; i += 1, idx -= 1) {
+		if (((const uint8_t*)haystack)[idx] == (uint8_t)c) {
+			return (uint8_t*)haystack + idx;
+		}
+	}
+	return NULL;
+}
+
+void *prne_memrmem (
+	const void *in_haystack,
+	const size_t in_hs_len,
+	const void *const needle,
+	const size_t n_len)
+{
+	const uint8_t *haystack = (const uint8_t *)in_haystack - n_len + in_hs_len;
+	size_t hs_len = in_hs_len;
+
+	if (n_len == 0) {
+		return NULL;
+	}
+
+	while (hs_len >= n_len) {
+		if (memcmp(haystack, needle, n_len) == 0) {
+			return (void*)haystack;
+		}
+		haystack -= 1;
+		hs_len -= 1;
+	}
+
+	return NULL;
+}
+
 void *prne_memmem (
 	const void *in_haystack,
 	const size_t in_hs_len,

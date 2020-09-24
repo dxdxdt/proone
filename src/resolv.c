@@ -434,9 +434,6 @@ static bool resolv_ensure_act_dns_fd (prne_resolv_t *ctx) {
 		if (st == PTH_STATUS_OCCURRED) {
 			break;
 		}
-		else if (pollret < 0 && errno == EINTR) {
-			continue;
-		}
 		else if (pollret > 0) {
 			for (i = 0; i < 2; i += 1) {
 				if (pfs[i].fd < 0) {

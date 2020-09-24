@@ -357,11 +357,11 @@ static prne_htbt_status_code_t htbt_relay_child (
 		* when the program is terminating.
 		*/
 		f_ret = prne_pth_poll(pfd, 5, -1, ev);
-		if (f_ret < 0 && errno != EINTR) {
+		if (f_ret < 0) {
 			ret = PRNE_HTBT_STATUS_ERRNO;
 			break;
 		}
-		if (pth_event_status(ev) == PTH_STATUS_OCCURRED || f_ret == 0) {
+		if (pth_event_status(ev) == PTH_STATUS_OCCURRED) {
 			ret = PRNE_HTBT_STATUS_TIMEDOUT;
 			break;
 		}
@@ -1381,7 +1381,7 @@ static void *htbt_slv_entry (void *p) {
 		pth_mutex_release(ctx->cv.lock);
 
 		f_ret = poll(pfd, 2, 0);
-		if (f_ret < 0 && errno != EINTR) {
+		if (f_ret < 0) {
 			break;
 		}
 		else if (f_ret == 0) {

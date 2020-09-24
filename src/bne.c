@@ -55,6 +55,7 @@ typedef struct {
 	LIBSSH2_CHANNEL *ch_shell;
 	char *auth_list;
 	int fd;
+	unsigned int login_cnt;
 	prne_llist_t ports;
 } bne_vssh_ctx_t;
 
@@ -65,6 +66,7 @@ typedef struct {
 	uint8_t *ptr_lefto;
 	size_t lefto_len;
 	int fd;
+	unsigned int login_cnt;
 	prne_llist_t ports;
 } bne_vtn_ctx_t;
 
@@ -1631,6 +1633,13 @@ static bool bne_sh_run_exec (
 	}
 
 	if (bne_sh_runcmd_line(s_ctx, &parser, cmd)) {
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			prne_dbgpf(
+				"bne sh@%"PRIxPTR"\t: exec exit code %d\n",
+				(uintptr_t)ctx,
+				ec);
+		}
+
 		switch (ec) {
 		case PRNE_PROONE_EC_OK:
 			// successful launch
@@ -2481,6 +2490,12 @@ static bool bne_vtn_login (prne_bne_t *ctx, bne_vtn_ctx_t *t_ctx) {
 	int f_ret;
 
 	while (true) {
+		if (ctx->param.login_attempt > 0 &&
+			t_ctx->login_cnt > ctx->param.login_attempt)
+		{
+			break;
+		}
+
 		if (!bne_vtn_est_conn(ctx, t_ctx)) {
 			break;
 		}
@@ -2501,6 +2516,7 @@ static bool bne_vtn_login (prne_bne_t *ctx, bne_vtn_ctx_t *t_ctx) {
 
 		prne_pth_reset_timer(&ev, &BNE_SCK_OP_TIMEOUT);
 		f_ret = bne_vtn_try_cred(ctx, t_ctx, ev);
+		t_ctx->login_cnt += 1;
 		if (f_ret < 0) {
 			bne_vtn_drop_conn(t_ctx);
 			continue;
@@ -2714,6 +2730,12 @@ static bool bne_vssh_login (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 	int f_ret;
 
 	while (true) {
+		if (ctx->param.login_attempt > 0 &&
+			vs->login_cnt > ctx->param.login_attempt)
+		{
+			break;
+		}
+
 		if (!bne_vssh_est_sshconn(ctx, vs)) {
 			break;
 		}
@@ -2793,6 +2815,7 @@ static bool bne_vssh_login (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 				ctx->result.cred.id,
 				ctx->result.cred.pw,
 				ev);
+			vs->login_cnt += 1;
 			if (f_ret == LIBSSH2_ERROR_AUTHENTICATION_FAILED) {
 /*
 * server's not accepting the credentials that had been used for the

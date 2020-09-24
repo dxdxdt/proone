@@ -49,6 +49,7 @@ struct prne_bne_param {
 		prne_arch_t self;
 	} rcb;
 	prne_ip_addr_t subject;
+	unsigned int login_attempt;
 };
 
 struct prne_bne_result {

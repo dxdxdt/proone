@@ -59,6 +59,21 @@ bool prne_arch_inrange (const prne_arch_t x) {
 	return PRNE_ARCH_NONE < x && x < NB_PRNE_ARCH;
 }
 
+bool prne_eq_ipaddr (const prne_ip_addr_t *a, const prne_ip_addr_t *b) {
+	size_t l;
+
+	if (a->ver != b->ver) {
+		return false;
+	}
+	switch (a->ver) {
+	case PRNE_IPV_4: l = 4; break;
+	case PRNE_IPV_6: l = 16; break;
+	default: l = 0;
+	}
+
+	return memcmp(a->addr, b->addr, l) == 0;
+}
+
 void prne_net_ep_tosin4 (const prne_net_endpoint_t *ep, struct sockaddr_in *out) {
 	memcpy(&out->sin_addr, ep->addr.addr, 4);
 	out->sin_family = AF_INET;

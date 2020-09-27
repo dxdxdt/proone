@@ -134,7 +134,7 @@ INV_LINE:
 	return 2;
 }
 
-static void evt_cb (const prne_net_endpoint_t *ep) {
+static void evt_cb (void *ctx, const prne_net_endpoint_t *ep) {
 	char addr_str[prne_op_max(INET_ADDRSTRLEN, INET6_ADDRSTRLEN)];
 	const char *fmt;
 
@@ -273,7 +273,8 @@ int main (const int argc, const char **args) {
 	// fin worker
 	wkr.fin(wkr.ctx);
 	pth_join(wkr.pth, NULL);
-	wkr.free_ctx(wkr.ctx);
+	wkr.pth = NULL;
+	prne_free_worker(&wkr);
 
 END:
 	// clean up

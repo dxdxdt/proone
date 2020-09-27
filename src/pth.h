@@ -10,6 +10,7 @@ struct prne_worker {
 	void (*fin)(void*);
 	void (*free_ctx)(void*);
 	pth_t pth;
+	pth_attr_t attr;
 };
 typedef struct prne_worker prne_worker_t;
 

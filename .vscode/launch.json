@@ -165,6 +165,12 @@
 					"description": "Ignore SIGPIPE",
 					"text": "handle SIGPIPE nostop print",
 					"ignoreFailures": false
+				},
+				{
+					"description":
+						"Disable startup-with-shell to pass file cap",
+					"text": "set startup-with-shell off",
+					"ignoreFailures": false
 				}
 			],
 			"preLaunchTask": "Build proone",

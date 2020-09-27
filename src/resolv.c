@@ -27,7 +27,7 @@
 #include <mbedtls/ssl.h>
 #include <mbedtls/ctr_drbg.h>
 
-_Static_assert(sizeof(uint_fast16_t) <= sizeof(prne_imap_key_type_t), "prne_imap cannot contain uint_fast16_t");
+prne_static_assert(sizeof(uint_fast16_t) <= sizeof(prne_imap_key_type_t), "prne_imap cannot contain uint_fast16_t");
 
 #define OK_OR_ERR(v) if (v < 0) { goto ERR; }
 

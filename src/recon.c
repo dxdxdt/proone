@@ -529,7 +529,7 @@ static void rcn_main_recv_syn_tail (
 		ntohl(th->ack_seq) == exp_ack &&
 		th->ack && th->syn && !th->rst && !th->fin)
 	{
-		ctx->param.evt_cb(ep);
+		ctx->param.evt_cb(ctx->param.cb_ctx, ep);
 	}
 }
 

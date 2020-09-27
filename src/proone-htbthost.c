@@ -68,12 +68,12 @@ static void print_usage (const char *prog) {
 	fprintf(stderr, HELP_STR, prog);
 }
 
-static bool cb_txtrec (char *out) {
+static bool cb_txtrec (void *ctx, char *out) {
 	strcpy(out, htbthost_param.txtrec);
 	return true;
 }
 
-static bool cb_hostinfo (prne_htbt_host_info_t *out) {
+static bool cb_hostinfo (void *ctx, prne_htbt_host_info_t *out) {
 	static struct timespec now;
 	static uint8_t PROG_VER[] = PRNE_PROG_VER;
 	int fd;
@@ -86,7 +86,7 @@ static bool cb_hostinfo (prne_htbt_host_info_t *out) {
 	out->infect_cnt = 0;
 	out->parent_pid = out->child_pid = getpid();
 
-	_Static_assert(sizeof(PROG_VER) == sizeof(out->prog_ver), "FIXME");
+	prne_static_assert(sizeof(PROG_VER) == sizeof(out->prog_ver), "FIXME");
 	memcpy(out->prog_ver, PROG_VER, sizeof(PROG_VER));
 
 	fd = open("/proc/sys/kernel/random/boot_id", O_RDONLY);
@@ -95,7 +95,7 @@ static bool cb_hostinfo (prne_htbt_host_info_t *out) {
 		close(fd);
 	}
 
-	_Static_assert(sizeof(instance_id) == sizeof(out->instance_id), "FIXME");
+	prne_static_assert(sizeof(instance_id) == sizeof(out->instance_id), "FIXME");
 	memcpy(out->instance_id, instance_id, sizeof(instance_id));
 
 	if (prne_htbt_alloc_host_info(out, hostcred_len)) {
@@ -108,7 +108,10 @@ static bool cb_hostinfo (prne_htbt_host_info_t *out) {
 	return true;
 }
 
-static bool cb_ny_bin (const char *path, const prne_htbt_cmd_t *cmd)
+static bool cb_ny_bin (
+	void *ctx,
+	const char *path,
+	const prne_htbt_cmd_t *cmd)
 {
 	const size_t path_len = prne_nstrlen(path);
 
@@ -265,7 +268,7 @@ static bool parse_param (const char *arg) {
 	return true;
 }
 
-static char *mktmpfile (size_t req_size, const mode_t mode) {
+static char *mktmpfile (void *ctx, size_t req_size, const mode_t mode) {
 	static int ctr = 0;
 	char *path = NULL, *ret = NULL;
 	int fd = -1, len;
@@ -491,7 +494,8 @@ int main (const int argc, const char **args) {
 	}
 	for (size_t i = 0; i < sizeof(wkr_arr)/sizeof(prne_worker_t); i += 1) {
 		pth_join(wkr_arr[i].pth, NULL);
-		wkr_arr[i].free_ctx(wkr_arr[i].ctx);
+		wkr_arr[i].pth = NULL;
+		prne_free_worker(wkr_arr + i);
 	}
 
 	pth_kill();

@@ -122,10 +122,12 @@ static void report_result (const prne_bne_result_t *r) {
 		"- result:\n"
 		"\tsubject: %s\n"
 		"\terr: %d\n"
-		"\tvector: %s\n",
+		"\tvector: %s\n"
+		"\tny_instance: %s\n",
 		ip_str,
 		r->err,
-		vec_str);
+		vec_str,
+		r->ny_instance ? "true" : "false");
 	if (r->vec >= 0) {
 		const char *arch_str = prne_arch_tostr(r->arch);
 
@@ -144,7 +146,7 @@ static void report_result (const prne_bne_result_t *r) {
 	}
 }
 
-static char *cb_exec_name (void) {
+static char *cb_exec_name (void *ctx) {
 	static const char *EXEC_NAME = "proone";
 	const size_t len = strlen(EXEC_NAME);
 	char *ret = prne_alloc_str(len);
@@ -355,7 +357,7 @@ int main (const int argc, const char **args) {
 				w->pth = NULL;
 				report_result((const prne_bne_result_t*)result);
 
-				w->free_ctx(w->ctx);
+				prne_free_worker(w);
 				prne_free(w);
 				e = prne_llist_erase(&wkr_list, e);
 			}

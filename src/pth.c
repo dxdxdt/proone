@@ -5,19 +5,24 @@
 
 
 void prne_init_worker (prne_worker_t *w) {
-	w->ctx = NULL;
-	w->entry = NULL;
-	w->fin = NULL;
-	w->free_ctx = NULL;
-	w->pth = NULL;
+	prne_memzero(w, sizeof(prne_worker_t));
 }
 
 void prne_free_worker (prne_worker_t *w) {
+	if (w == NULL) {
+		return;
+	}
+
 	if (w->ctx != NULL) {
 		prne_assert(w->free_ctx != NULL);
 		w->free_ctx(w->ctx);
-		w->ctx = NULL;
 	}
+	if (w->pth != NULL) {
+		pth_abort(w->pth);
+	}
+	pth_attr_destroy(w->attr);
+
+	prne_memzero(w, sizeof(prne_worker_t));
 }
 
 void prne_fin_worker (prne_worker_t *w) {

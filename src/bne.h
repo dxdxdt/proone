@@ -35,10 +35,11 @@ struct prne_bne_param {
 		size_t cnt;
 	} vector;
 	struct {
-		char *(*exec_name)(void);
-		bool (*enter_dd)(void);
-		void (*exit_dd)(void);
+		char *(*exec_name)(void *ctx);
+		bool (*enter_dd)(void *ctx);
+		void (*exit_dd)(void *ctx);
 	} cb;
+	void *cb_ctx;
 	struct {
 		const uint8_t *m_self;
 		size_t self_len;
@@ -62,6 +63,7 @@ struct prne_bne_result {
 	prne_bne_vector_t vec;
 	prne_pack_rc_t prc;
 	prne_arch_t arch;
+	bool ny_instance;
 };
 
 void prne_init_bne_param (prne_bne_param_t *p);
@@ -73,3 +75,4 @@ prne_bne_t *prne_alloc_bne (
 	prne_worker_t *w,
 	mbedtls_ctr_drbg_context *ctr_drbg,
 	const prne_bne_param_t *param);
+const prne_ip_addr_t *prne_bne_get_subject (const prne_bne_t *bne);

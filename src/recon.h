@@ -8,7 +8,7 @@
 typedef struct prne_recon prne_recon_t;
 typedef struct prne_recon_param prne_recon_param_t;
 typedef struct prne_recon_network prne_recon_network_t;
-typedef void(*prne_recon_evt_ft)(const prne_net_endpoint_t *ep);
+typedef void(*prne_recon_evt_ft)(void *ctx, const prne_net_endpoint_t *ep);
 
 struct prne_recon_network {
 	prne_ip_addr_t addr;
@@ -29,6 +29,7 @@ struct prne_recon_param {
 		size_t cnt;
 	} ports;
 	prne_recon_evt_ft evt_cb;
+	void *cb_ctx;
 	bool ownership;
 };
 

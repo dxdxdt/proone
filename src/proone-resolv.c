@@ -292,6 +292,7 @@ int main (void) {
 	}
 	for (size_t i = 0; i < sizeof(wkr_arr)/sizeof(prne_worker_t); i += 1) {
 		assert(pth_join(wkr_arr[i].pth, NULL));
+		wkr_arr[i].pth = NULL;
 		prne_free_worker(wkr_arr + i);
 	}
 

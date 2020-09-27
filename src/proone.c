@@ -1453,25 +1453,24 @@ int main (const int argc, const char **args) {
 
 			prne_dbgpf("* Child: %d\n", prne_g.child_pid);
 
-			do {
-				prne_assert(sigwait(&ss_all, &caught_signal) == 0);
+WAIT_LOOP:
+			prne_assert(sigwait(&ss_all, &caught_signal) == 0);
 
-				switch (caught_signal) {
-				case SIGINT:
-				case SIGTERM:
-					// Exit requested. Notify the child and wait for it to exit.
-					loop = false;
-					sigprocmask(SIG_UNBLOCK, &ss_exit, NULL);
-					kill(prne_g.child_pid, SIGTERM);
-					continue;
-				case SIGCHLD:
-					prne_assert(waitpid(prne_g.child_pid, &status, WNOHANG) == prne_g.child_pid);
-					break;
-				case SIGPIPE:
-					prne_dbgpf("** Parent received SIGPIPE. WHAT???\n");
-					continue;
-				}
-			} while (false);
+			switch (caught_signal) {
+			case SIGINT:
+				// Exit requested. Notify the child and wait for it to exit.
+				loop = false;
+				sigprocmask(SIG_UNBLOCK, &ss_exit, NULL);
+				kill(prne_g.child_pid, SIGTERM);
+				goto WAIT_LOOP;
+			case SIGCHLD:
+				prne_assert(waitpid(
+					prne_g.child_pid,
+					&status,
+					0) == prne_g.child_pid);
+				break;
+			default: goto WAIT_LOOP;
+			}
 
 			if (prne_s_g != NULL) {
 				has_ny_bin = strlen(prne_s_g->ny_bin_path) > 0;
@@ -1482,10 +1481,15 @@ int main (const int argc, const char **args) {
 			}
 
 			if (WIFEXITED(status)) {
-				prne_dbgpf("* Child process %d exited with code %d!\n", prne_g.child_pid, WEXITSTATUS(status));
+				prne_dbgpf(
+					"* Child process %d exited with code %d!\n",
+					prne_g.child_pid,
+					WEXITSTATUS(status));
 				if (WEXITSTATUS(status) == 0) {
 					if (has_ny_bin) {
-						prne_dbgpf("* Detected new bin. Attempting to exec()\n");
+						prne_dbgpf(
+							"* Detected new bin. "
+							"Attempting to exec()\n");
 						run_ny_bin();
 						// run_ny_bin() returns if fails
 					}
@@ -1495,7 +1499,10 @@ int main (const int argc, const char **args) {
 				}
 			}
 			else if (WIFSIGNALED(status)) {
-				prne_dbgpf("** Child process %d received signal %d!\n", prne_g.child_pid, WTERMSIG(status));
+				prne_dbgpf(
+					"** Child process %d received signal %d!\n",
+					prne_g.child_pid,
+					WTERMSIG(status));
 			}
 
 			if (has_ny_bin) {

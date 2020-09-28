@@ -508,7 +508,7 @@ static void reap_bne (void) {
 	for (prne_llist_entry_t *e = bne_list.head; e != NULL;) {
 		w = (prne_worker_t*)e->element;
 		a = pth_attr_of(w->pth);
-		pth_attr_get(a, PTH_ATTR_STATE, &st);
+		prne_assert(pth_attr_get(a, PTH_ATTR_STATE, &st));
 		pth_attr_destroy(a);
 
 		if (st == PTH_STATE_DEAD) {

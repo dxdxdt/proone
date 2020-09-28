@@ -39,7 +39,6 @@ bool prne_own_realloc (
 
 bool prne_nstreq (const char *a, const char *b);
 size_t prne_nstrlen (const char *s);
-void prne_rnd_anum_str (mbedtls_ctr_drbg_context *rnd, char *str, const size_t len);
 char *prne_strnchr (const char *p, const char c, const size_t n);
 size_t prne_str_shift_spaces (char *str, const size_t len);
 void prne_transstr (char *str,  int(*trans_f)(int));
@@ -67,20 +66,32 @@ void prne_hex_tochar (const uint_fast8_t in, char *out, const bool upper);
 bool prne_uuid_fromstr (const char *str, uint8_t *out);
 void prne_uuid_tostr (const uint8_t *in, char *out);
 
-struct timespec prne_add_timespec (const struct timespec a, const struct timespec b);
-struct timespec prne_sub_timespec (const struct timespec a, const struct timespec b);
+struct timespec prne_add_timespec (
+	const struct timespec a,
+	const struct timespec b);
+struct timespec prne_sub_timespec (
+	const struct timespec a,
+	const struct timespec b);
 double prne_real_timespec (const struct timespec ts);
 struct timespec prne_ms_timespec (const long ms);
 int prne_cmp_timespec (const struct timespec a, const struct timespec b);
-struct timespec prne_min_timespec (const struct timespec a, const struct timespec b);
-struct timespec prne_max_timespec (const struct timespec a, const struct timespec b);
+struct timespec prne_min_timespec (
+	const struct timespec a,
+	const struct timespec b);
+struct timespec prne_max_timespec (
+	const struct timespec a,
+	const struct timespec b);
 struct timespec prne_gettime (const clockid_t cid);
 
 struct timeval prne_ts2tv (const struct timespec ts);
 struct timeval prne_ms_timeval (const long ms);
 
 char *prne_enc_base64_mem (const uint8_t *data, const size_t size);
-bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data, size_t *size);
+bool prne_dec_base64_mem (
+	const char *str,
+	const size_t str_len,
+	uint8_t **data,
+	size_t *size);
 
 // getrandom polyfill
 ssize_t prne_geturandom (void *buf, const size_t len);

@@ -1096,7 +1096,8 @@ static bool bne_sh_setup (
 	{
 		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
 			prne_dbgpf(
-				"bne sh@%"PRIxPTR"\t: echo and cat unavailable on this system\n",
+				"bne sh@%"PRIxPTR"\t: "
+				"echo and cat unavailable on this system\n",
 				(uintptr_t)ctx);
 		}
 		ctx->result.err = ENOSYS;

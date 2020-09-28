@@ -60,7 +60,9 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 	static regmatch_t rm[3];
 
 	if (regexec(&prmpt_regex, line, 3, rm, 0) == 0) {
-		prne_resolv_prm_t *prm = (prne_resolv_prm_t*)prne_malloc(sizeof(prne_resolv_prm_t), 1);
+		prne_resolv_prm_t *prm = (prne_resolv_prm_t*)prne_malloc(
+			sizeof(prne_resolv_prm_t),
+			1);
 		char *verb, *obj;
 		size_t verb_len, obj_len;
 		bool has_prm = false;
@@ -76,13 +78,27 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 		obj[obj_len] = 0;
 
 		if (strncmp(verb, "A", verb_len) == 0) {
-			has_prm = prne_resolv_prm_gethostbyname(resolv, obj, PRNE_IPV_4, &prm_cv, prm);
+			has_prm = prne_resolv_prm_gethostbyname(
+				resolv,
+				obj,
+				PRNE_IPV_4,
+				&prm_cv,
+				prm);
 		}
 		else if (strncmp(verb, "AAAA", verb_len) == 0) {
-			has_prm = prne_resolv_prm_gethostbyname(resolv, obj, PRNE_IPV_6, &prm_cv, prm);
+			has_prm = prne_resolv_prm_gethostbyname(
+				resolv,
+				obj,
+				PRNE_IPV_6,
+				&prm_cv,
+				prm);
 		}
 		else if (strncmp(verb, "TXT", verb_len) == 0) {
-			has_prm = prne_resolv_prm_gettxtrec(resolv, obj, &prm_cv, prm);
+			has_prm = prne_resolv_prm_gettxtrec(
+				resolv,
+				obj,
+				&prm_cv,
+				prm);
 		}
 		else {
 			abort();
@@ -99,7 +115,9 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 			prne_free(prm);
 		}
 	}
-	else if (line_len > 0 && regexec(&empty_line_regex, line, 0, NULL, 0) != 0) {
+	else if (line_len > 0 &&
+		regexec(&empty_line_regex, line, 0, NULL, 0) != 0)
+	{
 		fprintf(stderr, "* Line not recognised.\n");
 	}
 }
@@ -111,7 +129,10 @@ static void *stdin_wkr_entry (void *ctx) {
 		static bool missed_line = false;
 		int read_len;
 
-		read_len = pth_read(STDIN_FILENO, line_buf + line_buf_cnt, sizeof(line_buf) - line_buf_cnt);
+		read_len = pth_read(
+			STDIN_FILENO,
+			line_buf + line_buf_cnt,
+			sizeof(line_buf) - line_buf_cnt);
 		if (read_len > 0) {
 			char *line_buf_end, *line, *line_end;
 			size_t line_len, consumed = 0;
@@ -187,7 +208,9 @@ static void *stdout_wkr_entry (void *ctx) {
 				qr_str = prne_resolv_qr_tostr(prm->fut->qr);
 				prne_assert(qr_str != NULL);
 				status_str = NULL;
-				if (prm->fut->qr == PRNE_RESOLV_QR_OK || prm->fut->qr == PRNE_RESOLV_QR_STATUS) {
+				if (prm->fut->qr == PRNE_RESOLV_QR_OK ||
+					prm->fut->qr == PRNE_RESOLV_QR_STATUS)
+				{
 					status_str = prne_resolv_rcode_tostr(prm->fut->status);
 				}
 				if (status_str == NULL) {
@@ -204,14 +227,41 @@ static void *stdout_wkr_entry (void *ctx) {
 						type_str = "";
 					}
 
-					printf(";\ttype: (%2u)%5s, ttl: %10u, len: %5u, name: %s\n",
-						rr->rr_type, type_str, rr->rr_ttl, rr->rd_len, rr->name);
+					printf(
+						";\ttype: (%2u)%5s, ttl: %10u, len: %5u, name: %s\n",
+						rr->rr_type,
+						type_str,
+						rr->rr_ttl,
+						rr->rd_len,
+						rr->name);
 					switch (rr->rr_type) {
-					case PRNE_RESOLV_RTYPE_A: printf(";\t\t%s\n", inet_ntop(AF_INET, rr->rd_data, ntop_buf, INET6_ADDRSTRLEN)); break;
-					case PRNE_RESOLV_RTYPE_AAAA: printf(";\t\t%s\n", inet_ntop(AF_INET6, rr->rd_data, ntop_buf, INET6_ADDRSTRLEN)); break;
+					case PRNE_RESOLV_RTYPE_A:
+						printf(
+							";\t\t%s\n",
+							inet_ntop(
+								AF_INET,
+								rr->rd_data,
+								ntop_buf,
+								INET6_ADDRSTRLEN));
+						break;
+					case PRNE_RESOLV_RTYPE_AAAA:
+						printf(
+							";\t\t%s\n",
+							inet_ntop(
+								AF_INET6,
+								rr->rd_data,
+								ntop_buf,
+								INET6_ADDRSTRLEN));
+						break;
 					case PRNE_RESOLV_RTYPE_TXT:
-						if (isatty(STDOUT_FILENO) && !printable_str((const char *)rr->rd_data + 1, rr->rd_data[0])) {
-							printf(";\t\t* (binary data - unable to print on terminal)\n");
+						if (isatty(STDOUT_FILENO) &&
+							!printable_str(
+								(const char *)rr->rd_data + 1,
+								rr->rd_data[0]))
+						{
+							printf(
+								";\t\t* (binary data - "
+								"unable to print on terminal)\n");
 						}
 						else {
 							uint8_t tmp = rr->rd_data[0];
@@ -261,15 +311,30 @@ int main (void) {
 	pth_main = pth_self();
 
 	// org regex: (A|AAAA|TXT)\s+([a-z0-9\-\.]+)
-	prne_assert(regcomp(&prmpt_regex, "(A|AAAA|TXT)\\s+([a-z0-9\\-\\.]+)", REG_ICASE | REG_EXTENDED) == 0);
+	prne_assert(regcomp(
+		&prmpt_regex,
+		"(A|AAAA|TXT)\\s+([a-z0-9\\-\\.]+)",
+		REG_ICASE | REG_EXTENDED) == 0);
 	// org regex: ^\s+$
-	prne_assert(regcomp(&empty_line_regex, "^\\s+$", REG_NOSUB | REG_EXTENDED) == 0);
+	prne_assert(regcomp(
+		&empty_line_regex,
+		"^\\s+$",
+		REG_NOSUB | REG_EXTENDED) == 0);
 	prne_mbedtls_entropy_init(&entropy);
 	mbedtls_ctr_drbg_init(&rnd);
-	prne_assert(mbedtls_ctr_drbg_seed(&rnd, mbedtls_entropy_func, &entropy, NULL, 0) == 0);
+	prne_assert(mbedtls_ctr_drbg_seed(
+		&rnd,
+		mbedtls_entropy_func,
+		&entropy,
+		NULL,
+		0) == 0);
 	prne_init_llist(&prm_list);
 
-	resolv = prne_alloc_resolv(&wkr_arr[0], &rnd, PRNE_RESOLV_DEF_IPV4_POOL, PRNE_RESOLV_DEF_IPV6_POOL);
+	resolv = prne_alloc_resolv(
+		&wkr_arr[0],
+		&rnd,
+		PRNE_RESOLV_DEF_IPV4_POOL,
+		PRNE_RESOLV_DEF_IPV6_POOL);
 	prne_assert(resolv != NULL);
 
 	wkr_arr[1].entry = stdin_wkr_entry;
@@ -277,7 +342,10 @@ int main (void) {
 
 	main_flag = true;
 	for (size_t i = 0; i < sizeof(wkr_arr)/sizeof(prne_worker_t); i += 1) {
-		wkr_arr[i].pth = pth_spawn(PTH_ATTR_DEFAULT, wkr_arr[i].entry, wkr_arr[i].ctx);
+		wkr_arr[i].pth = pth_spawn(
+			PTH_ATTR_DEFAULT,
+			wkr_arr[i].entry,
+			wkr_arr[i].ctx);
 	}
 
 	pth_sigmask(SIG_BLOCK, &sigset, NULL);
@@ -301,7 +369,10 @@ int main (void) {
 	regfree(&prmpt_regex);
 	regfree(&empty_line_regex);
 
-	for (prne_llist_entry_t *cur = prm_list.head; cur != NULL; cur = cur->next) {
+	for (prne_llist_entry_t *cur = prm_list.head;
+		cur != NULL;
+		cur = cur->next)
+	{
 		prne_resolv_prm_t *prm = (prne_resolv_prm_t*)cur->element;
 		prne_resolv_free_prm(prm);
 		prne_free(prm);

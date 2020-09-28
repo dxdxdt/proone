@@ -23,7 +23,7 @@ static void print_help (FILE *o, const char *prog) {
 		"Cred File Format: <WEIGHT> <ID> [PW]\n"
 		"\t<WEIGHT>: uint8_t weight value\n"
 		"\t<ID>: c_str username\n"
-		"\t[PW]: c_Str password (optional)\n"
+		"\t[PW]: c_str password (optional)\n"
 		"\tNote:\n"
 		"\t\t- <ID> and <PW> are case-sensitive\n"
 		"\t\t- Lines start with \"#\" are ignored\n"

@@ -29,8 +29,25 @@ int main (const int argc, const char **args) {
 			memset(addr, 0, sizeof(addr));
 
 			if (inet_pton(AF[i], buf + rm[1].rm_so, addr) != 0) {
-				printf("{ 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x }",
-					addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7], addr[8], addr[9], addr[10], addr[11], addr[12], addr[13], addr[14], addr[15]);
+				printf(
+					"{ 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, "
+					"0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x }",
+					addr[0],
+					addr[1],
+					addr[2],
+					addr[3],
+					addr[4],
+					addr[5],
+					addr[6],
+					addr[7],
+					addr[8],
+					addr[9],
+					addr[10],
+					addr[11],
+					addr[12],
+					addr[13],
+					addr[14],
+					addr[15]);
 				break;
 			}
 		}

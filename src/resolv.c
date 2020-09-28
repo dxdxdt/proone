@@ -27,9 +27,12 @@
 #include <mbedtls/ssl.h>
 #include <mbedtls/ctr_drbg.h>
 
-prne_static_assert(sizeof(uint_fast16_t) <= sizeof(prne_imap_key_type_t), "prne_imap cannot contain uint_fast16_t");
+prne_static_assert(
+	sizeof(uint_fast16_t) <= sizeof(prne_imap_key_type_t),
+	"prne_imap cannot contain uint_fast16_t");
 
 #define OK_OR_ERR(v) if (v < 0) { goto ERR; }
+
 
 typedef enum {
 	RESOLV_CTX_STATE_OK,
@@ -219,7 +222,13 @@ ERR:
 	return NULL;
 }
 
-static bool resolv_qq (prne_resolv_t *ctx, const char *name, prne_pth_cv_t *cv, prne_resolv_prm_t *out, query_entry_t **ny_q_ent) {
+static bool resolv_qq (
+	prne_resolv_t *ctx,
+	const char *name,
+	prne_pth_cv_t *cv,
+	prne_resolv_prm_t *out,
+	query_entry_t **ny_q_ent)
+{
 	query_entry_t *q_ent = NULL;
 
 	if (ctx->ctx_state != RESOLV_CTX_STATE_OK) {
@@ -288,7 +297,10 @@ static void resolv_disown_qent (query_entry_t *qent) {
 static size_t resolv_next_pool_ptr (prne_resolv_t *ctx, const size_t cnt) {
 	size_t ret = 0;
 
-	prne_assert(mbedtls_ctr_drbg_random(ctx->ssl.ctr_drbg, (unsigned char*)&ret, sizeof(size_t)) == 0);
+	prne_assert(mbedtls_ctr_drbg_random(
+		ctx->ssl.ctr_drbg,
+		(unsigned char*)&ret,
+		sizeof(size_t)) == 0);
 
 	return ret % cnt;
 }
@@ -297,7 +309,10 @@ static uint16_t resolv_next_qid (prne_resolv_t *ctx) {
 	uint16_t ret;
 
 	for (uint_fast16_t i = 0; i < UINT16_MAX; i += 1) {
-		prne_assert(mbedtls_ctr_drbg_random(ctx->ssl.ctr_drbg, (unsigned char*)&ret, sizeof(uint16_t)) == 0);
+		prne_assert(mbedtls_ctr_drbg_random(
+			ctx->ssl.ctr_drbg,
+			(unsigned char*)&ret,
+			sizeof(uint16_t)) == 0);
 
 		ret = (ret % UINT16_MAX) + 1;
 		if (prne_imap_lookup(&ctx->qid_map, ret) == NULL) {
@@ -308,7 +323,11 @@ static uint16_t resolv_next_qid (prne_resolv_t *ctx) {
 	return 0;
 }
 
-static void resolv_close_sck (prne_resolv_t *ctx, const struct timespec *pause, bool change_srvr) {
+static void resolv_close_sck (
+	prne_resolv_t *ctx,
+	const struct timespec *pause,
+	bool change_srvr)
+{
 	size_t i;
 	query_entry_t *qent;
 	prne_llist_entry_t *lent;
@@ -445,19 +464,35 @@ static bool resolv_ensure_act_dns_fd (prne_resolv_t *ctx) {
 					pfs[i].fd = -1;
 				}
 				else if (pfs[i].revents & POLLOUT) {
-					if (getsockopt(pfs[i].fd, SOL_SOCKET, SO_ERROR, &optval, &optval_len) < 0 || optval != 0) {
+					if (getsockopt(
+							pfs[i].fd,
+							SOL_SOCKET,
+							SO_ERROR,
+							&optval,
+							&optval_len) < 0 ||
+						optval != 0)
+					{
 						prne_close(pfs[i].fd);
 						pfs[i].fd = -1;
 					}
 					else {
-						if (mbedtls_ssl_setup(&ctx->ssl.ctx, &ctx->ssl.conf) != 0 || mbedtls_ssl_set_hostname(&ctx->ssl.ctx, NULL) != 0) {
+						if (mbedtls_ssl_setup(
+								&ctx->ssl.ctx,
+								&ctx->ssl.conf) != 0 ||
+							mbedtls_ssl_set_hostname(&ctx->ssl.ctx, NULL) != 0)
+						{
 							err_sleep = &RESOLV_RSRC_ERR_PAUSE;
 							goto END;
 						}
 						ctx->act_sck_pfd.fd = pfs[i].fd;
 						pfs[i].fd = -1;
 
-						mbedtls_ssl_set_bio(&ctx->ssl.ctx, &ctx->act_sck_pfd.fd, prne_mbedtls_ssl_send_cb, prne_mbedtls_ssl_recv_cb, NULL);
+						mbedtls_ssl_set_bio(
+							&ctx->ssl.ctx,
+							&ctx->act_sck_pfd.fd,
+							prne_mbedtls_ssl_send_cb,
+							prne_mbedtls_ssl_recv_cb,
+							NULL);
 						ret = true;
 						break;
 					}
@@ -524,7 +559,14 @@ END:
 	return true;
 }
 
-static const uint8_t* resolv_index_labels (prne_imap_t *map, const uint8_t *start, const uint8_t *end, const uint8_t *p, prne_resolv_qr_t *qr, int *err) {
+static const uint8_t* resolv_index_labels (
+	prne_imap_t *map,
+	const uint8_t *start,
+	const uint8_t *end,
+	const uint8_t *p,
+	prne_resolv_qr_t *qr,
+	int *err)
+{
 	uint16_t ptr;
 	const prne_imap_tuple_t *tpl;
 
@@ -566,7 +608,12 @@ static const uint8_t* resolv_index_labels (prne_imap_t *map, const uint8_t *star
 	return p + 1;
 }
 
-static int resolv_mapped_qname_cmp (prne_imap_t *map, const uint8_t *a, const uint8_t *b, prne_resolv_qr_t *qr) {
+static int resolv_mapped_qname_cmp (
+	prne_imap_t *map,
+	const uint8_t *a,
+	const uint8_t *b,
+	prne_resolv_qr_t *qr)
+{
 	const uint8_t *p[2] = { a, b };
 	size_t i;
 	uint16_t ptr;
@@ -607,7 +654,12 @@ static int resolv_mapped_qname_cmp (prne_imap_t *map, const uint8_t *a, const ui
 	return ret;
 }
 
-static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const size_t len, bool *err_flag) {
+static bool resolv_proc_dns_msg (
+	prne_resolv_t *ctx,
+	const uint8_t *data,
+	const size_t len,
+	bool *err_flag)
+{
 	typedef struct {
 		const uint8_t *name;
 		const uint8_t *data;
@@ -706,7 +758,13 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 		goto END;
 	}
 	qname = data + 12;
-	p = resolv_index_labels(&ptr_map, data, end, (const uint8_t*)qname, &qr, &err);
+	p = resolv_index_labels(
+		&ptr_map,
+		data,
+		end,
+		(const uint8_t*)qname,
+		&qr,
+		&err);
 	if (p == NULL) {
 		goto END;
 	}
@@ -720,8 +778,10 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 		*err_flag = true;
 		goto END;
 	}
-	if ((ttype != 0 && ttype != (((uint_fast16_t)p[0] << 8) | (uint_fast16_t)p[1])) ||
-		(((uint_fast16_t)p[2] << 8) | (uint_fast16_t)p[3]) != 1) {
+	if ((ttype != 0 &&
+			ttype != (((uint_fast16_t)p[0] << 8) | (uint_fast16_t)p[1])) ||
+		(((uint_fast16_t)p[2] << 8) | (uint_fast16_t)p[3]) != 1)
+	{
 		qr = PRNE_RESOLV_QR_PRO_ERR;
 		*err_flag = true;
 		goto END;
@@ -755,7 +815,11 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 		}
 		tpl->rtype = ((uint_fast16_t)p[0] << 8) | (uint_fast16_t)p[1];
 		tpl->rclass = ((uint_fast16_t)p[2] << 8) | (uint_fast16_t)p[3];
-		tpl->ttl = ((uint_fast32_t)p[4]) | ((uint_fast32_t)p[5]) | ((uint_fast32_t)p[6]) | ((uint_fast32_t)p[7]);
+		tpl->ttl =
+			((uint_fast32_t)p[4]) |
+			((uint_fast32_t)p[5]) |
+			((uint_fast32_t)p[6]) |
+			((uint_fast32_t)p[7]);
 		tpl->data_len = ((uint_fast16_t)p[8] << 8) | (uint_fast16_t)p[9];
 		rname = tpl->data = p + 10;
 
@@ -789,7 +853,13 @@ static bool resolv_proc_dns_msg (prne_resolv_t *ctx, const uint8_t *data, const 
 			loop_cnt = 0;
 		}
 		for (j = 0; j < loop_cnt; j += 1) {
-			rname = resolv_index_labels(&ptr_map, data, tpl->data + tpl->data_len, rname, &qr, &err);
+			rname = resolv_index_labels(
+				&ptr_map,
+				data,
+				tpl->data + tpl->data_len,
+				rname,
+				&qr,
+				&err);
 			if (rname == NULL) {
 				goto END;
 			}
@@ -843,7 +913,10 @@ QNAME_START:
 			goto END;
 		}
 		if (cmp_ret && ttype == tpl->rtype) {
-			if (prne_llist_append(&ret_list, (prne_llist_element_t)tpl) == NULL) {
+			if (prne_llist_append(
+				&ret_list,
+				(prne_llist_element_t)tpl) == NULL)
+			{
 				qr = PRNE_RESOLV_QR_ERR;
 				err = errno;
 				goto END;
@@ -858,7 +931,9 @@ QNAME_START:
 		prne_llist_entry_t *cur;
 		rr_tuple_t *tpl;
 
-		qent->fut.rr = (prne_resolv_rr_t*)prne_malloc(sizeof(prne_resolv_rr_t), ret_list.size);
+		qent->fut.rr = (prne_resolv_rr_t*)prne_malloc(
+			sizeof(prne_resolv_rr_t),
+			ret_list.size);
 		if (qent->fut.rr == NULL) {
 			qr = PRNE_RESOLV_QR_ERR;
 			err = errno;
@@ -878,8 +953,14 @@ QNAME_START:
 			qent->fut.rr[i].rr_type = tpl->rtype;
 			qent->fut.rr[i].rr_ttl = tpl->ttl;
 			if (tpl->data_len > 0) {
-				if ((qent->fut.rr[i].name = resolv_qname_tostr(qent->qname)) == NULL ||
-					(qent->fut.rr[i].rd_data = (uint8_t*)prne_malloc(1, tpl->data_len)) == NULL) {
+				qent->fut.rr[i].name = resolv_qname_tostr(qent->qname);
+				qent->fut.rr[i].rd_data = (uint8_t*)prne_malloc(
+					1,
+					tpl->data_len);
+
+				if (qent->fut.rr[i].name == NULL ||
+					qent->fut.rr[i].rd_data == NULL)
+				{
 					qr = PRNE_RESOLV_QR_ERR;
 					err = errno;
 					goto END;
@@ -928,7 +1009,11 @@ END:
 }
 
 static size_t resolv_calc_dot_msg_len (query_entry_t *qent) {
-	return 2/*DoT head*/ + 12/*msg head*/ + qent->qname_size + 4/*QCLASS, QTYPE*/;
+	return
+		2/*DoT head*/ +
+		12/*msg head*/ +
+		qent->qname_size +
+		4/*QCLASS, QTYPE*/;
 }
 
 static void resolv_write_dns_msg (query_entry_t *qent, uint8_t *mem) {
@@ -1011,7 +1096,9 @@ static bool resolv_send_dns_msgs (prne_resolv_t *ctx) {
 				ctx->iobuf[1].m[ctx->iobuf[1].len + 1] =
 					prne_getmsb16(dns_msg_len, 1);
 				qent->qid = qid;
-				resolv_write_dns_msg(qent, ctx->iobuf[1].m + ctx->iobuf[1].len + 2);
+				resolv_write_dns_msg(
+					qent,
+					ctx->iobuf[1].m + ctx->iobuf[1].len + 2);
 				prne_iobuf_shift(ctx->iobuf + 1, dot_msg_len);
 				ret |= true;
 			}
@@ -1033,7 +1120,10 @@ static void resolv_proc_expired (prne_resolv_t *ctx) {
 	while (cur != NULL) {
 		qent = (query_entry_t*)cur->element;
 
-		if (prne_cmp_timespec(RESOLV_QUERY_TIMEOUT, prne_sub_timespec(now, qent->tp_queued)) < 0) {
+		if (prne_cmp_timespec(
+				RESOLV_QUERY_TIMEOUT,
+				prne_sub_timespec(now, qent->tp_queued)) < 0)
+		{
 			qent->fut.qr = PRNE_RESOLV_QR_TIMEOUT;
 			cur = prne_llist_erase(&ctx->qlist, cur);
 			resolv_disown_qent(qent);
@@ -1114,13 +1204,19 @@ LOOP:
 						ctx->iobuf[0].m[pos],
 						ctx->iobuf[0].m[pos + 1]);
 					if (msg_len > 512) { // unimplemented.
-						prne_dbgpf("* [resolv_wkr] Protocol error: received %zu bytes long msg. Dropping connection!\n", msg_len);
+						prne_dbgpf(
+							"* [resolv_wkr] Protocol error: "
+							"received %zu bytes long msg.\n"
+							"* [resolv_wkr] Dropping connection!\n",
+							msg_len);
 						// try to get qid
 						if (ctx->iobuf[0].len > pos + 4) {
 							const uint16_t qid = prne_recmb_msb16(
 								ctx->iobuf[0].m[pos + 2],
 								ctx->iobuf[0].m[pos + 3]);
-							const prne_imap_tuple_t *tpl = prne_imap_lookup(&ctx->qid_map, qid);
+							const prne_imap_tuple_t *tpl = prne_imap_lookup(
+								&ctx->qid_map,
+								qid);
 
 							if (tpl->val != (prne_imap_val_type_t)NULL) {
 								query_entry_t *qent = (query_entry_t*)tpl->val;
@@ -1136,7 +1232,11 @@ LOOP:
 						break;
 					}
 
-					proc |= resolv_proc_dns_msg(ctx, ctx->iobuf[0].m + pos + 2, msg_len, &err_flag);
+					proc |= resolv_proc_dns_msg(
+						ctx,
+						ctx->iobuf[0].m + pos + 2,
+						msg_len,
+						&err_flag);
 					if (err_flag) {
 						resolv_close_sck(ctx, &RESOLV_CONN_ERR_PAUSE, true);
 						goto LOOP;
@@ -1228,7 +1328,9 @@ static void *resolv_wkr_entry (void *p) {
 			pth_event_t ev;
 
 			if (ctx->act_sck_pfd.fd >= 0) {
-				ev = pth_event(PTH_EVENT_TIME, pth_timeout(RESOLV_SCK_IDLE_TIMEOUT.tv_sec, 0));
+				ev = pth_event(
+					PTH_EVENT_TIME,
+					pth_timeout(RESOLV_SCK_IDLE_TIMEOUT.tv_sec, 0));
 				prne_assert(ev != NULL);
 			}
 			else {
@@ -1258,7 +1360,12 @@ static void *resolv_wkr_entry (void *p) {
 	return NULL;
 }
 
-prne_resolv_t *prne_alloc_resolv (prne_worker_t *wkr, mbedtls_ctr_drbg_context *ctr_drbg, const prne_resolv_ns_pool_t pool_v4, const prne_resolv_ns_pool_t pool_v6) {
+prne_resolv_t *prne_alloc_resolv (
+	prne_worker_t *wkr,
+	mbedtls_ctr_drbg_context *ctr_drbg,
+	const prne_resolv_ns_pool_t pool_v4,
+	const prne_resolv_ns_pool_t pool_v6)
+{
 	prne_resolv_t *ctx = NULL;
 
 	if (wkr == NULL ||
@@ -1300,10 +1407,18 @@ prne_resolv_t *prne_alloc_resolv (prne_worker_t *wkr, mbedtls_ctr_drbg_context *
 	ctx->nspool6 = pool_v6;
 	ctx->ptr_nspool4 = resolv_next_pool_ptr(ctx, ctx->nspool4.cnt);
 	ctx->ptr_nspool6 = resolv_next_pool_ptr(ctx, ctx->nspool6.cnt);
-	if (mbedtls_ssl_config_defaults(&ctx->ssl.conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) != 0) {
+	if (mbedtls_ssl_config_defaults(
+			&ctx->ssl.conf,
+			MBEDTLS_SSL_IS_CLIENT,
+			MBEDTLS_SSL_TRANSPORT_STREAM,
+			MBEDTLS_SSL_PRESET_DEFAULT) != 0)
+	{
 		goto ERR;
 	}
-	mbedtls_ssl_conf_rng(&ctx->ssl.conf, mbedtls_ctr_drbg_random, ctx->ssl.ctr_drbg);
+	mbedtls_ssl_conf_rng(
+		&ctx->ssl.conf,
+		mbedtls_ctr_drbg_random,
+		ctx->ssl.ctr_drbg);
 	mbedtls_ssl_conf_authmode(&ctx->ssl.conf, MBEDTLS_SSL_VERIFY_NONE);
 
 	wkr->ctx = ctx;
@@ -1324,7 +1439,13 @@ ERR:
 	return NULL;
 }
 
-bool prne_resolv_prm_gethostbyname (prne_resolv_t *wkr, const char *name, const prne_ipv_t ipv, prne_pth_cv_t *cv, prne_resolv_prm_t *out) {
+bool prne_resolv_prm_gethostbyname (
+	prne_resolv_t *wkr,
+	const char *name,
+	const prne_ipv_t ipv,
+	prne_pth_cv_t *cv,
+	prne_resolv_prm_t *out)
+{
 	bool ret;
 	query_entry_t *q_ent;
 	prne_resolv_query_type_t qt;
@@ -1346,7 +1467,12 @@ bool prne_resolv_prm_gethostbyname (prne_resolv_t *wkr, const char *name, const 
 	return ret;
 }
 
-bool prne_resolv_prm_gettxtrec (prne_resolv_t *wkr, const char *name, prne_pth_cv_t *cv, prne_resolv_prm_t *out) {
+bool prne_resolv_prm_gettxtrec (
+	prne_resolv_t *wkr,
+	const char *name,
+	prne_pth_cv_t *cv,
+	prne_resolv_prm_t *out)
+{
 	bool ret;
 	query_entry_t *q_ent;
 
@@ -1403,7 +1529,10 @@ bool prne_resolv_alloc_ns_pool (prne_resolv_ns_pool_t *pool, const size_t cnt) {
 		cnt);
 }
 
-prne_resolv_ns_pool_t prne_resolv_own_ns_pool(const prne_resolv_ns_pool_t *pool, const bool ownership) {
+prne_resolv_ns_pool_t prne_resolv_own_ns_pool(
+	const prne_resolv_ns_pool_t *pool,
+	const bool ownership)
+{
 	prne_resolv_ns_pool_t ret = *pool;
 	ret.ownership = ownership;
 	return ret;

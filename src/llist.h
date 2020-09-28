@@ -24,6 +24,13 @@ void prne_init_llist (prne_llist_t *llist);
 void prne_free_llist (prne_llist_t *llist);
 
 void prne_llist_clear (prne_llist_t *llist);
-prne_llist_entry_t *prne_llist_insert (prne_llist_t *llist, prne_llist_entry_t *entry, const prne_llist_element_t element);
-prne_llist_entry_t *prne_llist_append (prne_llist_t *llist, const prne_llist_element_t element);
-prne_llist_entry_t *prne_llist_erase (prne_llist_t *llist, prne_llist_entry_t *entry);
+prne_llist_entry_t *prne_llist_insert (
+	prne_llist_t *llist,
+	prne_llist_entry_t *entry,
+	const prne_llist_element_t element);
+prne_llist_entry_t *prne_llist_append (
+	prne_llist_t *llist,
+	const prne_llist_element_t element);
+prne_llist_entry_t *prne_llist_erase (
+	prne_llist_t *llist,
+	prne_llist_entry_t *entry);

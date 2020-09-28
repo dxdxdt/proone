@@ -95,7 +95,9 @@ static bool cb_hostinfo (void *ctx, prne_htbt_host_info_t *out) {
 		close(fd);
 	}
 
-	prne_static_assert(sizeof(instance_id) == sizeof(out->instance_id), "FIXME");
+	prne_static_assert(
+		sizeof(instance_id) == sizeof(out->instance_id),
+		"FIXME");
 	memcpy(out->instance_id, instance_id, sizeof(instance_id));
 
 	if (prne_htbt_alloc_host_info(out, hostcred_len)) {
@@ -196,7 +198,13 @@ static void load_ssl_conf (
 	}
 }
 
-static void mbedtls_dbg_f(void *ctx, int level, const char *filename, int line, const char *msg) {
+static void mbedtls_dbg_f(
+	void *ctx,
+	int level,
+	const char *filename,
+	int line,
+	const char *msg)
+{
 	prne_dbgpf("<MBEDTLS> %s", msg);
 }
 

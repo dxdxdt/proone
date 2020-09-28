@@ -311,7 +311,8 @@ int main (const int argc, const char **args) {
 	if (argc < 3) {
 		fprintf(
 			stderr,
-			"Usage: %s <outfile prefix> <path to dvault> [path to binary 1 [path to binary ...]]\n",
+			"Usage: %s <outfile prefix> <path to dvault> "
+			"[path to binary 1 [path to binary ...]]\n",
 			args[0]);
 		ret = 2;
 		goto END;

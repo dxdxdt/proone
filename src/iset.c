@@ -36,7 +36,7 @@ bool prne_iset_insert (prne_iset_t *s, const prne_iset_val_t v) {
 	if (prne_iset_lookup(s, v)) {
 		return true;
 	}
-	
+
 	ny_mem = prne_realloc(s->arr, sizeof(prne_iset_val_t), s->size + 1);
 	if (ny_mem == NULL) {
 		return false;
@@ -52,27 +52,42 @@ bool prne_iset_insert (prne_iset_t *s, const prne_iset_val_t v) {
 void prne_iset_erase (prne_iset_t *s, const prne_iset_val_t v) {
 	prne_iset_val_t *p;
 
-	p = (prne_iset_val_t*)bsearch(&v, s->arr, s->size, sizeof(prne_iset_val_t), iset_comp_func);
-	if (p != NULL) {
-		if (s->size == 1) {
-			prne_free(s->arr);
-			s->arr = NULL;
-			s->size = 0;
-		}
-		else {
-			void *ny_mem;
+	p = (prne_iset_val_t*)bsearch(
+		&v,
+		s->arr,
+		s->size,
+		sizeof(prne_iset_val_t),
+		iset_comp_func);
+	if (p == NULL) {
+		return;
+	}
 
-			memmove(p, p + 1, sizeof(prne_iset_val_t) * (s->size - 1 - (p - s->arr)));
-			
-			s->size -= 1;
-			ny_mem = prne_realloc(s->arr, sizeof(prne_iset_val_t), s->size);
-			if (ny_mem != NULL) {
-				s->arr = (prne_iset_val_t*)ny_mem;
-			}
+	if (s->size == 1) {
+		prne_free(s->arr);
+		s->arr = NULL;
+		s->size = 0;
+	}
+	else {
+		void *ny_mem;
+
+		memmove(
+			p,
+			p + 1,
+			sizeof(prne_iset_val_t) * (s->size - 1 - (p - s->arr)));
+
+		s->size -= 1;
+		ny_mem = prne_realloc(s->arr, sizeof(prne_iset_val_t), s->size);
+		if (ny_mem != NULL) {
+			s->arr = (prne_iset_val_t*)ny_mem;
 		}
 	}
 }
 
 bool prne_iset_lookup (prne_iset_t *s, const prne_iset_val_t v) {
-	return bsearch(&v, s->arr, s->size, sizeof(prne_iset_val_t), iset_comp_func) != NULL;
+	return bsearch(
+		&v,
+		s->arr,
+		s->size,
+		sizeof(prne_iset_val_t),
+		iset_comp_func) != NULL;
 }

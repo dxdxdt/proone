@@ -20,8 +20,10 @@
 #define prne_op_max(a, b) ((a) > (b) ? (a) : (b))
 #define prne_op_spaceship(a, b) ((a) == (b) ? 0 : (a) < (b) ? -1 : 1)
 
-#define prne_salign_next(x, align) (((x) % (align) == 0) ? (x) : ((x) / (align) + 1) * (align))
-#define prne_salign_at(x, align) (((x) % (align) == 0) ? (x) : ((x) / (align)) * (align))
+#define prne_salign_next(x, align) \
+	(((x) % (align) == 0) ? (x) : ((x) / (align) + 1) * (align))
+#define prne_salign_at(x, align) \
+	(((x) % (align) == 0) ? (x) : ((x) / (align)) * (align))
 
 #if PRNE_DEBUG
 #define prne_dbgpf(...) fprintf(stderr, __VA_ARGS__)

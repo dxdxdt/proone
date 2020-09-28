@@ -157,28 +157,6 @@ size_t prne_nstrlen (const char *s) {
 	return s == NULL ? 0 : strlen(s);
 }
 
-void prne_rnd_anum_str (mbedtls_ctr_drbg_context *rnd, char *str, const size_t len) {
-	static const char SET[] = { 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'z', 'x', 'c', 'v', 'b', 'n', 'm', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' };
-	size_t i = 0;
-	uint32_t n;
-
-	if (len >= 4) {
-		for (; i < len / 4 * 4; i += 4) {
-			mbedtls_ctr_drbg_random(rnd, (uint8_t*)&n, sizeof(n));
-			str[i + 0] = SET[((uint8_t*)&n)[0] % sizeof(SET)];
-			str[i + 1] = SET[((uint8_t*)&n)[1] % sizeof(SET)];
-			str[i + 2] = SET[((uint8_t*)&n)[2] % sizeof(SET)];
-			str[i + 3] = SET[((uint8_t*)&n)[3] % sizeof(SET)];
-		}
-	}
-	if (i < len) {
-		mbedtls_ctr_drbg_random(rnd, (uint8_t*)&n, sizeof(n));
-		for (; i < len; i += 1) {
-			str[i] = SET[((uint8_t*)&n)[i % 4] % sizeof(SET)];
-		}
-	}
-}
-
 char *prne_strnchr (const char *p, const char c, const size_t n) {
 	size_t i;
 
@@ -427,7 +405,10 @@ struct timespec prne_add_timespec (
 	return ret;
 }
 
-struct timespec prne_sub_timespec (const struct timespec a, const struct timespec b) {
+struct timespec prne_sub_timespec (
+	const struct timespec a,
+	const struct timespec b)
+{
 	struct timespec ret;
 
 	if (a.tv_nsec < b.tv_nsec) {
@@ -466,11 +447,17 @@ int prne_cmp_timespec (const struct timespec a, const struct timespec b) {
 	return a.tv_nsec < b.tv_nsec ? -1 : a.tv_nsec > b.tv_nsec ? 1 : 0;
 }
 
-struct timespec prne_min_timespec (const struct timespec a, const struct timespec b) {
+struct timespec prne_min_timespec (
+	const struct timespec a,
+	const struct timespec b)
+{
 	return prne_cmp_timespec(a, b) < 0 ? a : b;
 }
 
-struct timespec prne_max_timespec (const struct timespec a, const struct timespec b) {
+struct timespec prne_max_timespec (
+	const struct timespec a,
+	const struct timespec b)
+{
 	return prne_cmp_timespec(a, b) > 0 ? a : b;
 }
 
@@ -507,7 +494,13 @@ char *prne_enc_base64_mem (const uint8_t *data, const size_t size) {
 		return NULL;
 	}
 
-	if (mbedtls_base64_encode((uint8_t*)ret, ret_size, &ret_size, data, size) < 0) {
+	if (mbedtls_base64_encode(
+		(uint8_t*)ret,
+		ret_size,
+		&ret_size,
+		data,
+		size) < 0)
+	{
 		prne_free(ret);
 		return NULL;
 	}
@@ -515,7 +508,12 @@ char *prne_enc_base64_mem (const uint8_t *data, const size_t size) {
 	return ret;
 }
 
-bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data, size_t *size) {
+bool prne_dec_base64_mem (
+	const char *str,
+	const size_t str_len,
+	uint8_t **data,
+	size_t *size)
+{
 	size_t ret_size;
 	uint8_t *ret;
 
@@ -530,7 +528,13 @@ bool prne_dec_base64_mem (const char *str, const size_t str_len, uint8_t **data,
 		return false;
 	}
 
-	if (mbedtls_base64_decode(ret, ret_size, &ret_size, (uint8_t*)str, str_len) < 0) {
+	if (mbedtls_base64_decode(
+		ret,
+		ret_size,
+		&ret_size,
+		(uint8_t*)str,
+		str_len) < 0)
+	{
 		prne_free(ret);
 		errno = EINVAL;
 		return false;

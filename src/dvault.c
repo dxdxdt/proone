@@ -13,8 +13,12 @@ static uint8_t *m_unmasked;
 static size_t m_unmasked_size;
 static uint8_t m_salt;
 
-
-static void invert_entry (const prne_data_key_t key, prne_data_type_t *type, const uint8_t **data_start, size_t *len) {
+static void invert_entry (
+	const prne_data_key_t key,
+	prne_data_type_t *type,
+	const uint8_t **data_start,
+	size_t *len)
+{
 	size_t entry_len;
 
 	m_salt = m_data[m_offsets[key]];
@@ -53,7 +57,13 @@ prne_data_type_t prne_data_type_fstr (const char *str) {
 	return PRNE_DATA_TYPE_NONE;
 }
 
-void prne_dvault_invert_mem (const size_t size, void *m, const uint8_t salt, const size_t salt_ofs, const uint8_t *mask) {
+void prne_dvault_invert_mem (
+	const size_t size,
+	void *m,
+	const uint8_t salt,
+	const size_t salt_ofs,
+	const uint8_t *mask)
+{
 	size_t i;
 
 	for (i = 0; i < size; i += 1) {
@@ -74,7 +84,13 @@ void prne_free_dvault_mask_result (prne_dvault_mask_result_t *r) {
 	r->result = PRNE_DVAULT_MASK_OK;
 }
 
-prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const uint8_t salt, const uint8_t *mask, const size_t data_size, const uint8_t *data) {
+prne_dvault_mask_result_t prne_dvault_mask (
+	const prne_data_type_t type,
+	const uint8_t salt,
+	const uint8_t *mask,
+	const size_t data_size,
+	const uint8_t *data)
+{
 	prne_dvault_mask_result_t ret;
 
 	prne_init_dvault_mask_result(&ret);
@@ -103,7 +119,9 @@ prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const u
 	return ret;
 }
 
-const char *prne_dvault_mask_result_tostr (const prne_dvault_mask_result_code_t code) {
+const char *prne_dvault_mask_result_tostr (
+	const prne_dvault_mask_result_code_t code)
+{
 	switch (code) {
 	case PRNE_DVAULT_MASK_OK: return "ok";
 	case PRNE_DVAULT_MASK_MEM_ERR: return "memory error";
@@ -114,7 +132,11 @@ const char *prne_dvault_mask_result_tostr (const prne_dvault_mask_result_code_t 
 }
 
 void prne_init_dvault (const void *m) {
-	prne_dbgast(m_mask == NULL && m_offsets == NULL && m_data == NULL && m_unmasked == NULL);
+	prne_dbgast(
+		m_mask == NULL &&
+		m_offsets == NULL &&
+		m_data == NULL &&
+		m_unmasked == NULL);
 
 	m_data = (uint8_t*)m;
 	m_mask = (uint8_t*)m + 0;
@@ -141,7 +163,11 @@ void prne_deinit_dvault (void) {
 	m_data = NULL;
 }
 
-static const uint8_t *dvault_get_bin (const prne_data_key_t key, const prne_data_type_t desired, size_t *len) {
+static const uint8_t *dvault_get_bin (
+	const prne_data_key_t key,
+	const prne_data_type_t desired,
+	size_t *len)
+{
 	const uint8_t *data_start;
 	prne_data_type_t type;
 
@@ -153,7 +179,10 @@ static const uint8_t *dvault_get_bin (const prne_data_key_t key, const prne_data
 }
 
 const char *prne_dvault_get_cstr (const prne_data_key_t key, size_t *len) {
-	const char *ret = (const char*)dvault_get_bin(key, PRNE_DATA_TYPE_CSTR, len);
+	const char *ret = (const char*)dvault_get_bin(
+		key,
+		PRNE_DATA_TYPE_CSTR,
+		len);
 
 	if (len != NULL) {
 		*len -= 1;

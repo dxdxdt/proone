@@ -56,7 +56,8 @@ static void child_signal_handler (const int sn);
 static void sendall(const int sn);
 
 int main (const int argc, const char **args) {
-	static const size_t ALIGNED_SHARED_SIZE = prne_salign_next(sizeof(shared_t), 8);
+	static const size_t ALIGNED_SHARED_SIZE =
+		prne_salign_next(sizeof(shared_t), 8);
 #define END_ON_ERR(retval, val, fname, eq)\
 	if ((eq && retval != val) || (!eq && retval == val)) {\
 		perror(fname);\
@@ -95,7 +96,8 @@ int main (const int argc, const char **args) {
 		fprintf(stderr,
 			"Usage: %s <nproc> [page num range]\n"
 			"\t<nproc>: number of processes to spawn\n"
-			"\t[page num range]: number of page to use. '1-5' for 1 to 5 pages, '1' for just one page. Defaults to '1'\n",
+			"\t[page num range]: number of page to use. '1-5' for 1 to 5 pages,"
+			" '1' for just one page. Defaults to '1'\n",
 			args[0]);
 		return 2;
 	}
@@ -289,13 +291,19 @@ static void do_cycle (priv_ctx_t *priv_ctx, shared_ctx_t *ctx) {
 	unsigned long *arr;
 	size_t nb_elements;
 
-	assert(mbedtls_ctr_drbg_random(&priv_ctx->ctx, (unsigned char*)&pages, sizeof(pages)) == 0);
+	assert(mbedtls_ctr_drbg_random(
+		&priv_ctx->ctx,
+		(unsigned char*)&pages,
+		sizeof(pages)) == 0);
 
 	pages = (pages % (nb_pages_max - nb_pages_min + 1)) + nb_pages_min;
 	nb_elements = pagesize / sizeof(unsigned long) * pages;
 
 	arr = (unsigned long*)prne_malloc(pagesize, pages);
-	assert(mbedtls_ctr_drbg_random(&priv_ctx->ctx, (unsigned char*)arr, 2 * sizeof(unsigned int)) == 0);
+	assert(mbedtls_ctr_drbg_random(
+		&priv_ctx->ctx,
+		(unsigned char*)arr,
+		2 * sizeof(unsigned int)) == 0);
 
 	for (size_t i = 2; i < nb_elements; i += 1) {
 		arr[i] = arr[i - 2] + arr[i - 1];
@@ -309,7 +317,12 @@ static void child_main (shared_ctx_t *ctx) {
 
 	prne_mbedtls_entropy_init(&priv_ctx.ent);
 	mbedtls_ctr_drbg_init(&priv_ctx.ctx);
-	assert(mbedtls_ctr_drbg_seed(&priv_ctx.ctx, mbedtls_entropy_func, &priv_ctx.ent, NULL, 0) == 0);
+	assert(mbedtls_ctr_drbg_seed(
+		&priv_ctx.ctx,
+		mbedtls_entropy_func,
+		&priv_ctx.ent,
+		NULL,
+		0) == 0);
 
 	while (shared->good) {
 		do_cycle(&priv_ctx, ctx);

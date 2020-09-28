@@ -25,7 +25,11 @@ void prne_llist_clear (prne_llist_t *llist) {
 	llist->size = 0;
 }
 
-prne_llist_entry_t *prne_llist_insert (prne_llist_t *llist, prne_llist_entry_t *entry, const prne_llist_element_t element) {
+prne_llist_entry_t *prne_llist_insert (
+	prne_llist_t *llist,
+	prne_llist_entry_t *entry,
+	const prne_llist_element_t element)
+{
 	prne_llist_entry_t *ny;
 
 	if (entry == NULL) {
@@ -51,8 +55,13 @@ prne_llist_entry_t *prne_llist_insert (prne_llist_t *llist, prne_llist_entry_t *
 	return ny;
 }
 
-prne_llist_entry_t *prne_llist_append (prne_llist_t *llist, const prne_llist_element_t element) {
-	prne_llist_entry_t *ny = (prne_llist_entry_t*)prne_malloc(sizeof(prne_llist_entry_t), 1);
+prne_llist_entry_t *prne_llist_append (
+	prne_llist_t *llist,
+	const prne_llist_element_t element)
+{
+	prne_llist_entry_t *ny = (prne_llist_entry_t*)prne_malloc(
+		sizeof(prne_llist_entry_t),
+		1);
 
 	if (ny == NULL) {
 		return NULL;
@@ -74,7 +83,10 @@ prne_llist_entry_t *prne_llist_append (prne_llist_t *llist, const prne_llist_ele
 	return ny;
 }
 
-prne_llist_entry_t *prne_llist_erase (prne_llist_t *llist, prne_llist_entry_t *entry) {
+prne_llist_entry_t *prne_llist_erase (
+	prne_llist_t *llist,
+	prne_llist_entry_t *entry)
+{
 	prne_llist_entry_t *ret;
 
 	if (entry == NULL) {

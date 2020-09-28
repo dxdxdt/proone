@@ -63,7 +63,11 @@ static void test_alloc (void) {
 	prne_free(NULL);
 
 	errno = 0;
-	assert(prne_malloc(0, 0) == NULL && prne_malloc(1, 0) == NULL && prne_malloc(0, 1) == NULL && errno == 0);
+	assert(
+		prne_malloc(0, 0) == NULL &&
+		prne_malloc(1, 0) == NULL &&
+		prne_malloc(0, 1) == NULL &&
+		errno == 0);
 	errno = 0;
 	assert(prne_malloc(2, SIZE_MAX / 2 + 1) == NULL);
 	assert(errno == ENOMEM);
@@ -72,7 +76,11 @@ static void test_alloc (void) {
 	assert(errno == ENOMEM);
 
 	errno = 0;
-	assert(prne_calloc(0, 0) == NULL && prne_calloc(1, 0) == NULL && prne_calloc(0, 1) == NULL && errno == 0);
+	assert(
+		prne_calloc(0, 0) == NULL &&
+		prne_calloc(1, 0) == NULL &&
+		prne_calloc(0, 1) == NULL &&
+		errno == 0);
 	errno = 0;
 	assert(prne_calloc(2, SIZE_MAX / 2 + 1) == NULL);
 	assert(errno == ENOMEM);
@@ -81,7 +89,11 @@ static void test_alloc (void) {
 	assert(errno == ENOMEM);
 
 	errno = 0;
-	assert(prne_realloc(NULL, 0, 0) == NULL && prne_realloc(NULL, 1, 0) == NULL && prne_realloc(NULL, 0, 1) == NULL && errno == 0);
+	assert(
+		prne_realloc(NULL, 0, 0) == NULL &&
+		prne_realloc(NULL, 1, 0) == NULL &&
+		prne_realloc(NULL, 0, 1) == NULL &&
+		errno == 0);
 	errno = 0;
 	assert(prne_realloc(NULL, 2, SIZE_MAX / 2 + 1) == NULL);
 	assert(errno == ENOMEM);
@@ -96,9 +108,12 @@ static void test_alloc (void) {
 
 static void test_uuid (void) {
 	static const char *sample_str = "f31605bb-5ec9-46e7-918d-4810a39a858d";
-	static const uint8_t sample_arr[16] = { 0xf3, 0x16, 0x05, 0xbb, 0x5e, 0xc9, 0x46, 0xe7, 0x91, 0x8d, 0x48, 0x10, 0xa3, 0x9a, 0x85, 0x8d };
+	static const uint8_t sample_arr[16] = {
+		0xf3, 0x16, 0x05, 0xbb, 0x5e, 0xc9, 0x46, 0xe7,
+		0x91, 0x8d, 0x48, 0x10, 0xa3, 0x9a, 0x85, 0x8d
+	};
 	static const char *empty_str = "00000000-0000-0000-0000-000000000000";
-	static const uint8_t empty_arr[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+	static const uint8_t empty_arr[16];
 	uint8_t out_arr[16];
 	char out_str[37];
 
@@ -120,12 +135,20 @@ static void test_uuid (void) {
 	assert(!prne_uuid_fromstr("", out_arr));
 	assert(errno == EINVAL);
 	errno = 0;
-	assert(!prne_uuid_fromstr("f31605bb-5ec9-46e7-918d-4810a39a858da", out_arr));
+	assert(!prne_uuid_fromstr(
+		"f31605bb-5ec9-46e7-918d-4810a39a858da",
+		out_arr));
 	assert(errno == EINVAL);
-	assert(!prne_uuid_fromstr("f31605bb-5ec9-46e7-918d-4810a39a858d-", out_arr));
+	assert(!prne_uuid_fromstr(
+		"f31605bb-5ec9-46e7-918d-4810a39a858d-",
+		out_arr));
 	assert(errno == EINVAL);
-	assert(!prne_uuid_fromstr("f31605bb-5ec9-46e7-918d-4810Z39a858d", out_arr));
+	assert(!prne_uuid_fromstr(
+		"f31605bb-5ec9-46e7-918d-4810Z39a858d",
+		out_arr));
 	assert(errno == EINVAL);
-	assert(!prne_uuid_fromstr("f31605bb-5ec9046e7-918d-4810a39a858d", out_arr));
+	assert(!prne_uuid_fromstr(
+		"f31605bb-5ec9046e7-918d-4810a39a858d",
+		out_arr));
 	assert(errno == EINVAL);
 }

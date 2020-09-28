@@ -15,7 +15,7 @@ typedef enum {
 
 	PRNE_DATA_TYPE_CSTR,
 	PRNE_DATA_TYPE_BIN,
-	
+
 	NB_PRNE_DATA_TYPE
 } prne_data_type_t;
 PRNE_LIMIT_ENUM(prne_data_type_t, NB_PRNE_DATA_TYPE, 0xFF);
@@ -36,12 +36,23 @@ struct prne_dvault_mask_result {
 
 const char *prne_data_type_tostr (const prne_data_type_t t);
 prne_data_type_t prne_data_type_fstr (const char *str);
-void prne_dvault_invert_mem (const size_t size, void *m, const uint8_t salt, const size_t salt_ofs, const uint8_t *mask);
+void prne_dvault_invert_mem (
+	const size_t size,
+	void *m,
+	const uint8_t salt,
+	const size_t salt_ofs,
+	const uint8_t *mask);
 
 void prne_init_dvault_mask_result (prne_dvault_mask_result_t *r);
 void prne_free_dvault_mask_result (prne_dvault_mask_result_t *r);
-prne_dvault_mask_result_t prne_dvault_mask (const prne_data_type_t type, const uint8_t salt, const uint8_t *mask, const size_t data_size, const uint8_t *data);
-const char *prne_dvault_mask_result_tostr (const prne_dvault_mask_result_code_t code);
+prne_dvault_mask_result_t prne_dvault_mask (
+	const prne_data_type_t type,
+	const uint8_t salt,
+	const uint8_t *mask,
+	const size_t data_size,
+	const uint8_t *data);
+const char *prne_dvault_mask_result_tostr (
+	const prne_dvault_mask_result_code_t code);
 
 /* prne_init_dvault(const void *m)
 *

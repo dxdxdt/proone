@@ -1,0 +1,20 @@
+# response msg id 0xA00
+0A00
+# PRNE_HTBT_OP_HOST_INFO
+02
+	# prog_ver
+	11f76b87621a479ca2185c5540337c9f
+	# boot_id
+	301d2539908542fd90b6200b4a3b0855
+	# instance_id
+	25dc7ea24ac64a299facbe184233c485
+	ABBABABEFEFFFFFE # parent_uptime
+	DEADBEEFAABBCCDD # child_uptime
+	8899AABBCCDDEEFF # bne_cnt
+	ABBAABBAABBAABBA # infect_cnt
+	11223344 # crash_cnt
+	DEADBEEF # parent_pid
+	BABEBABE # child_pid
+	04 # host_cred_len
+	00 # arch
+	54455354 # "TEST"

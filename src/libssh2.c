@@ -131,7 +131,7 @@ int prne_lssh2_ua_pwd (
 	const size_t pw_len = prne_nstrlen(pw);
 
 	if (id_len > UINT_MAX || pw_len > UINT_MAX) {
-		errno = E2BIG;
+		errno = EOVERFLOW;
 		return -1;
 	}
 
@@ -273,7 +273,7 @@ int prne_lssh2_ch_read (
 {
 	lssh2_cbctx_ch_f_t ctx;
 	if (len > INT_MAX) {
-		errno = E2BIG;
+		errno = EOVERFLOW;
 		return -1;
 	}
 	ctx.c = c;
@@ -294,7 +294,7 @@ int prne_lssh2_ch_write (
 {
 	lssh2_cbctx_ch_f_t ctx;
 	if (len > INT_MAX) {
-		errno = E2BIG;
+		errno = EOVERFLOW;
 		return -1;
 	}
 	ctx.c = c;

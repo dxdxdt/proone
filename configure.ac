@@ -32,6 +32,17 @@ esac],
 [static=false])
 AM_CONDITIONAL(STATIC_RT, test x"$static" = x"true")
 
+AC_ARG_ENABLE(hostinfod,
+AS_HELP_STRING([--enable-hostinfod],
+			   [build statically linked executables. Default: no]),
+[case "${enableval}" in
+			 yes) hostinfod=true ;;
+			 no)  hostinfod=false ;;
+			 *)	  AC_MSG_ERROR([bad value ${enableval} for --enable-hostinfod]) ;;
+esac],
+[hostinfod=false])
+AM_CONDITIONAL(BUILD_HOSTINFOD, test x"$hostinfod" = x"true")
+
 
 AC_ARG_VAR(
 	[PRNE_VERBOSE],
@@ -77,6 +88,28 @@ AC_CHECK_LIB(
 	[pth_init],
 	[],
 	[AC_MSG_ERROR([pthsem not found])])
+AS_IF([test x"$hostinfod" = x"true"], [
+	AC_CHECK_LIB([yaml],
+		[yaml_parser_initialize],
+		[],
+		[AC_MSG_ERROR([yaml not found])])
+	AC_CHECK_LIB([mariadb],
+		[mysql_init],
+		[],
+		[AC_MSG_ERROR([mariadb not found])])
+
+	AC_MSG_CHECKING([mbedtls threading support])
+	AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
+		#include <mbedtls/config.h>
+		#if !defined(MBEDTLS_THREADING_C)
+		#error "mbedtls must be compiled with threading support"
+		#endif
+	]])],
+	[ AC_MSG_RESULT([yes]) ],
+	[
+		AC_MSG_RESULT([no])
+		AC_MSG_ERROR([mbedtls not compiled with threading support])])
+])
 
 AC_CHECK_PROG(TOOL_XXD, [xxd], [yes])
 AS_IF([test x"$TOOL_XXD" != x"yes"], [AC_MSG_ERROR([xxd not found])])

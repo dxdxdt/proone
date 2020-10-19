@@ -519,7 +519,8 @@ prne_htbt_ser_rc_t prne_htbt_ser_msg_head (
 	}
 	if (in->id & 0x8000 ||
 		PRNE_HTBT_OP_NONE == in->op ||
-		(in->id == 0) ^ (in->op == PRNE_HTBT_OP_NOOP)) {
+		(in->op == PRNE_HTBT_OP_NOOP && in->id != 0) ||
+		(in->id == 0 && in->op != PRNE_HTBT_OP_NOOP)) {
 		return PRNE_HTBT_SER_RC_FMT_ERR;
 	}
 

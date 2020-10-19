@@ -143,6 +143,21 @@
 			"preLaunchTask": "Build bne",
 			"miDebuggerPath": "/usr/bin/gdb"
 		},
+		{
+			"name": "hostinfod",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-hostinfod",
+			"args": [ "./src/data/hostinfod.conf" ],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [],
+			"preLaunchTask": "Build hostinfod",
+			"miDebuggerPath": "/usr/bin/gdb"
+		},
 
 		{
 			"name": "proone",

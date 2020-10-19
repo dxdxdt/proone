@@ -26,4 +26,5 @@ void prne_iobuf_setextbuf (
 	const size_t size,
 	const size_t len);
 void prne_iobuf_reset (prne_iobuf_t *ib);
+void prne_iobuf_zero (prne_iobuf_t *ib);
 void prne_iobuf_shift (prne_iobuf_t *ib, const ssize_t amount);

@@ -61,6 +61,11 @@
 			"command": "make -C ./src proone-mkcdict proone-bne && ./src/proone-mkcdict ./src/data/cred_dict.txt ./src/data/cred_dict.bin"
 		},
 		{
+			"label": "Build hostinfod",
+			"type": "shell",
+			"command": "make -C ./src proone-hostinfod"
+		}
+		{
 			"label": "Build proone",
 			"type": "shell",
 			"command": "make -C ./src proone"

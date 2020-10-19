@@ -45,6 +45,9 @@ bin_PROGRAMS =\
 	proone-recon\
 	proone-mkcdict\
 	proone-bne
+if BUILD_HOSTINFOD
+bin_PROGRAMS += proone-hostinfod
+endif
 
 proone_tests =\
 	proone-test_proto\
@@ -123,6 +126,11 @@ proone_bne_SOURCES = proone-bne.c
 
 proone_recon_LDADD = libproone.a
 proone_recon_SOURCES = proone-recon.c
+
+if BUILD_HOSTINFOD
+proone_hostinfod_LDADD = libproone.a
+proone_hostinfod_SOURCES = proone-hostinfod.c
+endif
 
 proone_test_proto_LDADD = libproone.a
 proone_test_proto_SOURCES = proone-test_proto.c

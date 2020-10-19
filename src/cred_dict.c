@@ -33,7 +33,7 @@ bool prne_build_cred_dict (
 	uint16_t idx_id, idx_pw;
 
 	if (cnt > UINT16_MAX) {
-		errno = E2BIG;
+		errno = EOVERFLOW;
 		return false;
 	}
 
@@ -56,7 +56,7 @@ bool prne_build_cred_dict (
 	}
 	l = 2/*head*/ + 5 * cnt/*entries*/ + sum_str;
 	if (sum_str > UINT16_MAX || l > UINT16_MAX) {
-		errno = E2BIG;
+		errno = EOVERFLOW;
 		goto END;
 	}
 

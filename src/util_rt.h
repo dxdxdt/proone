@@ -27,6 +27,7 @@ void *prne_malloc (const size_t se, const size_t cnt);
 void *prne_realloc (void *ptr, const size_t se, const size_t cnt);
 void *prne_calloc (const size_t se, const size_t cnt);
 char *prne_alloc_str (const size_t len);
+char *prne_dup_str (const char *str);
 void prne_free (void *ptr);
 size_t prne_getpagesize (void);
 
@@ -73,6 +74,7 @@ struct timespec prne_sub_timespec (
 	const struct timespec a,
 	const struct timespec b);
 double prne_real_timespec (const struct timespec ts);
+long prne_timespec_ms (const struct timespec ts);
 struct timespec prne_ms_timespec (const long ms);
 int prne_cmp_timespec (const struct timespec a, const struct timespec b);
 struct timespec prne_min_timespec (

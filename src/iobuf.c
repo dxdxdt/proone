@@ -81,3 +81,8 @@ void prne_iobuf_shift (prne_iobuf_t *ib, const ssize_t amount) {
 		memmove(ib->m, ib->m + (-amount), ib->len);
 	}
 }
+
+void prne_iobuf_zero (prne_iobuf_t *ib) {
+	prne_memzero(ib->m, ib->size);
+	prne_iobuf_reset(ib);
+}

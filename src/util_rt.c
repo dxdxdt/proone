@@ -110,6 +110,18 @@ char *prne_alloc_str (const size_t len) {
 	return (char*)prne_malloc(1, len + 1);
 }
 
+char *prne_dup_str (const char *str) {
+	const size_t len = prne_nstrlen(str);
+	char *ret = prne_alloc_str(len);
+
+	if (ret == NULL) {
+		return NULL;
+	}
+	memcpy(ret, str, len + 1);
+
+	return ret;
+}
+
 void prne_free (void *ptr) {
 	free(ptr);
 }
@@ -425,6 +437,12 @@ struct timespec prne_sub_timespec (
 
 double prne_real_timespec (const struct timespec ts) {
 	return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
+}
+
+long prne_timespec_ms (const struct timespec ts) {
+	return
+		ts.tv_sec * 1000 +
+		ts.tv_nsec / 1000000;
 }
 
 struct timespec prne_ms_timespec (const long ms) {

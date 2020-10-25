@@ -34,7 +34,7 @@ AM_CONDITIONAL(STATIC_RT, test x"$static" = x"true")
 
 AC_ARG_ENABLE(hostinfod,
 AS_HELP_STRING([--enable-hostinfod],
-			   [build statically linked executables. Default: no]),
+			   [build hostinfod. Default: no]),
 [case "${enableval}" in
 			 yes) hostinfod=true ;;
 			 no)  hostinfod=false ;;

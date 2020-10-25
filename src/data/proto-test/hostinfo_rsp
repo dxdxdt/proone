@@ -15,6 +15,6 @@
 	11223344 # crash_cnt
 	DEADBEEF # parent_pid
 	BABEBABE # child_pid
-	04 # host_cred_len
+	0A # host_cred_len
 	00 # arch
-	54455354 # "TEST"
+	5445535400 3132333400 # "TEST", "1234"

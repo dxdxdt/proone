@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <arpa/inet.h>
 
 #include <sys/sysinfo.h>
 
@@ -48,6 +49,7 @@ typedef struct {
 	mbedtls_ssl_context ssl;
 	uint16_t exp_msg_id;
 	client_state_t state;
+	char ipaddr_str[INET6_ADDRSTRLEN];
 } client_ctx_t;
 
 typedef struct {
@@ -144,21 +146,260 @@ static void set_def_prog_param (void) {
 	prog_conf.listen_port = DEFCONF_LISTEN_PORT;
 }
 
-static bool load_conf (const int fd) {
-	// TODO
-	prog_conf.db.host = prne_dup_str("localhost");
-	prog_conf.db.user = prne_dup_str("root");
-	prog_conf.db.db = prne_dup_str("prne");
-	prog_conf.db.port = 3306;
+typedef enum {
+	PS_INIT,
+	PS_STREAM,
+	PS_DOC,
+	PS_SEQ_START,
+	PS_SEQ,
+	PS_MAPPING_START,
+	PS_MAPPING_VAL
+} parse_state_t;
 
-	prog_conf.ssl.path_ca = prne_dup_str("./src/proone_conf/pki/ca.crt");
-	prog_conf.ssl.path_crt = prne_dup_str("./src/proone_conf/pki/issued/proone_server_11f76b87-621a-479c-a218-5c5540337c9f.pem.crt");
-	prog_conf.ssl.path_key = prne_dup_str("./src/proone_conf/pki/private/proone_server_11f76b87-621a-479c-a218-5c5540337c9f.pem.key");
-	prog_conf.ssl.path_dh = prne_dup_str("./src/proone_conf/pki/dh.pem");
+typedef struct {
+	char *path;
+	prne_llist_t path_list;
+	parse_state_t state;
+	bool err;
+} parse_context_t;
 
-	prog_conf.verbose = INT_MAX;
+static void yaml_parse_build_path (parse_context_t *ctx) {
+	const char **sb = prne_malloc(sizeof(char*) * 2, ctx->path_list.size);
+	size_t ptr = 0;
+
+	for (prne_llist_entry_t *e = ctx->path_list.head; e != NULL; e = e->next) {
+		sb[ptr + 0] = "/";
+		sb[ptr + 1] = (char*)e->element;
+		ptr += 2;
+	}
+
+	ctx->path = prne_rebuild_str(ctx->path, sb, ctx->path_list.size * 2);
+	assert(ctx->path != NULL);
+}
+
+static void yaml_parse_push_path (
+	parse_context_t *ctx,
+	const yaml_char_t *name)
+{
+	char *tag;
+	prne_llist_entry_t *ent;
+
+	tag = prne_dup_str((const char*)name);
+	ent = prne_llist_append(&ctx->path_list, (prne_llist_element_t)tag);
+	assert(tag != NULL && ent != NULL);
+}
+
+static void yaml_parse_pop_path (parse_context_t *ctx) {
+	if (ctx->path_list.size == 0) {
+		return;
+	}
+	prne_free((void*)ctx->path_list.tail->element);
+	prne_llist_erase(&ctx->path_list, ctx->path_list.tail);
+}
+
+static void yaml_parse_dup_str (char **str, const yaml_char_t *val) {
+	prne_free(*str);
+	*str = prne_dup_str((const char*)val);
+	assert(*str != NULL);
+}
+
+static bool yaml_parse_handle_node (
+	parse_context_t *ctx,
+	const yaml_char_t *val)
+{
+	if (strcmp(ctx->path, "/hostinfod/db/host") == 0) {
+		yaml_parse_dup_str(&prog_conf.db.host, val);
+	}
+	else if (strcmp(ctx->path, "/hostinfod/db/port") == 0) {
+		int tmp;
+
+		ctx->err =
+			sscanf((const char*)val, "%d", &tmp) != 1 ||
+			!(0 < tmp && tmp <= 65535);
+		if (!ctx->err) {
+			prog_conf.db.port = (uint16_t)tmp;
+		}
+	}
+	else if (strcmp(ctx->path, "/hostinfod/db/user") == 0) {
+		yaml_parse_dup_str(&prog_conf.db.user, val);
+	}
+	else if (strcmp(ctx->path, "/hostinfod/db/pw") == 0) {
+		yaml_parse_dup_str(&prog_conf.db.pw, val);
+	}
+	else if (strcmp(ctx->path, "/hostinfod/db/db") == 0) {
+		yaml_parse_dup_str(&prog_conf.db.db, val);
+	}
+	else if (strcmp(ctx->path, "/hostinfod/db/table_prefix") == 0) {
+		yaml_parse_dup_str(&prog_conf.db.tbl_pfx, val);
+	}
+	else if (strcmp(ctx->path, "/hostinfod/ssl/ca") == 0) {
+		yaml_parse_dup_str(&prog_conf.ssl.path_ca, val);
+	}
+	else if (strcmp(ctx->path, "/hostinfod/ssl/crt") == 0) {
+		yaml_parse_dup_str(&prog_conf.ssl.path_crt, val);
+	}
+	else if (strcmp(ctx->path, "/hostinfod/ssl/key") == 0) {
+		yaml_parse_dup_str(&prog_conf.ssl.path_key, val);
+	}
+	else if (strcmp(ctx->path, "/hostinfod/ssl/key_pw") == 0) {
+		yaml_parse_dup_str(&prog_conf.ssl.key_pw, val);
+	}
+	else if (strcmp(ctx->path, "/hostinfod/ssl/dh") == 0) {
+		yaml_parse_dup_str(&prog_conf.ssl.path_dh, val);
+	}
+	else if (strcmp(ctx->path, "/hostinfod/max_conn") == 0) {
+		ctx->err = sscanf((const char*)val, "%zu", &prog_conf.max_conn) != 1;
+	}
+	else if (strcmp(ctx->path, "/hostinfod/report_int") == 0) {
+		unsigned long tmp;
+
+		ctx->err = sscanf((const char*)val, "%lu", &tmp) != 1;
+		if (!ctx->err) {
+			prog_conf.report_int = prne_ms_timespec(tmp);
+		}
+	}
+	else if (strcmp(ctx->path, "/hostinfod/sck_op_timeout") == 0) {
+		unsigned long tmp;
+
+		ctx->err = sscanf((const char*)val, "%lu", &tmp) != 1;
+		if (!ctx->err) {
+			prog_conf.sck_op_timeout = prne_ms_timespec(tmp);
+		}
+	}
+	else if (strcmp(ctx->path, "/hostinfod/nb_thread") == 0) {
+		ctx->err = sscanf((const char*)val, "%u", &prog_conf.nb_thread) != 1;
+	}
+	else if (strcmp(ctx->path, "/hostinfod/backlog") == 0) {
+		ctx->err = sscanf((const char*)val, "%u", &prog_conf.backlog) != 1;
+	}
+	else if (strcmp(ctx->path, "/hostinfod/listen_port") == 0) {
+		ctx->err = sscanf(
+			(const char*)val,
+			"%"SCNu16,
+			&prog_conf.listen_port) != 1;
+	}
+	else if (strcmp(ctx->path, "/hostinfod/verbose") == 0) {
+		ctx->err = sscanf((const char*)val, "%d", &prog_conf.verbose) != 1;
+	}
 
 	return true;
+}
+
+static void yaml_parse_handle_doc (
+	parse_context_t *ctx,
+	const yaml_event_t *event)
+{
+	switch (event->type) {
+	case YAML_SEQUENCE_START_EVENT:
+		ctx->state = PS_SEQ_START;
+		break;
+	case YAML_MAPPING_START_EVENT:
+		ctx->state = PS_MAPPING_START;
+		break;
+	case YAML_SCALAR_EVENT:
+		switch (ctx->state) {
+		case PS_SEQ_START:
+			yaml_parse_push_path(ctx, event->data.scalar.value);
+			ctx->state = PS_SEQ;
+			break;
+		case PS_MAPPING_START:
+			yaml_parse_push_path(ctx, event->data.scalar.value);
+			ctx->state = PS_MAPPING_VAL;
+			break;
+		case PS_SEQ:
+			break;
+		case PS_MAPPING_VAL:
+			yaml_parse_build_path(ctx);
+			yaml_parse_handle_node(ctx, event->data.scalar.value);
+			yaml_parse_pop_path(ctx);
+			ctx->state = PS_MAPPING_START;
+			break;
+		}
+		break;
+	case YAML_SEQUENCE_END_EVENT:
+	case YAML_MAPPING_END_EVENT:
+		yaml_parse_pop_path(ctx);
+		ctx->state = PS_MAPPING_START;
+		break;
+	case YAML_DOCUMENT_END_EVENT:
+		ctx->state = PS_STREAM;
+		break;
+	default: abort();
+	}
+}
+
+static bool yaml_parse_func (
+	parse_context_t *ctx,
+	const yaml_event_t *event)
+{
+	switch (ctx->state) {
+	case PS_INIT:
+		assert(event->type == YAML_STREAM_START_EVENT);
+		ctx->state = PS_STREAM;
+		break;
+	case PS_STREAM:
+		if (event->type == YAML_STREAM_END_EVENT) {
+			return false;
+		}
+		ctx->state = PS_DOC;
+		assert(event->type == YAML_DOCUMENT_START_EVENT);
+		break;
+	default:
+		yaml_parse_handle_doc(ctx, event);
+	}
+
+	return true;
+}
+
+static bool load_conf (FILE *file) {
+	yaml_parser_t parser;
+	yaml_event_t event;
+	parse_context_t p_ctx;
+	bool p_ret;
+
+	prne_memzero(&p_ctx, sizeof(parse_context_t));
+	prne_init_llist(&p_ctx.path_list);
+
+	if (yaml_parser_initialize(&parser) == 0) {
+		fprintf(
+			stderr,
+			"*** YAML error: %s\n",
+			parser.problem);
+		abort();
+	}
+
+	yaml_parser_set_input_file(&parser, file);
+	do {
+		if (yaml_parser_parse(&parser, &event) == 0) {
+			fprintf(
+				stderr,
+				"*** YAML parse error %zu:%zu: %s\n",
+				parser.problem_mark.line,
+				parser.problem_mark.column,
+				parser.problem);
+			p_ctx.err = true;
+			break;
+		}
+		p_ret = yaml_parse_func(&p_ctx, &event);
+		if (p_ctx.err) {
+			fprintf(
+				stderr,
+				"*** Config error %zu:%zu: invalid value\n",
+				parser.mark.line,
+				parser.mark.column);
+			break;
+		}
+		yaml_event_delete(&event);
+	} while (p_ret);
+
+	yaml_parser_delete(&parser);
+	for (prne_llist_entry_t *e = p_ctx.path_list.head; e != NULL; e = e->next) {
+		prne_free((void*)e->element);
+	}
+	prne_free_llist(&p_ctx.path_list);
+	prne_free(p_ctx.path);
+
+	return !p_ctx.err;
 }
 
 static int setup_conf (const char *conf_path) {
@@ -167,11 +408,11 @@ static int setup_conf (const char *conf_path) {
 		err_msg = (msg);\
 		break;\
 	}
-	const int fd = open(conf_path, O_RDONLY);
 	bool f_ret;
 	const char *err_msg = NULL;
+	FILE *file = fopen(conf_path, "r");
 
-	if (fd < 0) {
+	if (file == NULL) {
 		if (prog_conf.verbose >= PRNE_VL_FATAL) {
 			perror(conf_path);
 		}
@@ -179,8 +420,8 @@ static int setup_conf (const char *conf_path) {
 	}
 
 	set_def_prog_param();
-	f_ret = load_conf(fd);
-	close(fd);
+	f_ret = load_conf(file);
+	fclose(file);
 
 	if (!f_ret) {
 		return 2;
@@ -253,13 +494,13 @@ static int prep_socket (void) {
 
 	if (bind(ret, (const struct sockaddr*)&sa, sizeof(sa)) != 0) {
 		if (prog_conf.verbose >= PRNE_VL_FATAL) {
-			perror("bind()");
+			perror("*** bind()");
 		}
 		goto ERR;
 	}
 	if (listen(ret, prog_conf.backlog) != 0) {
 		if (prog_conf.verbose >= PRNE_VL_FATAL) {
-			perror("listen()");
+			perror("*** listen()");
 		}
 		goto ERR;
 	}
@@ -272,7 +513,7 @@ ERR:
 
 static void report_mysql_err (void) {
 	pthread_mutex_lock(&prog_g.stdio_lock);
-	fprintf(stderr, "MySQL: %s\n", mysql_error(&prog_g.db.c));
+	fprintf(stderr, "* MySQL: %s\n", mysql_error(&prog_g.db.c));
 	pthread_mutex_unlock(&prog_g.stdio_lock);
 }
 
@@ -296,7 +537,7 @@ static int init_global (void) {
 		!prne_sck_fcntl(sigpipe[0]) ||
 		!prne_sck_fcntl(sigpipe[1]))
 	{
-		perror("pipe()");
+		perror("*** pipe()");
 		return 1;
 	}
 
@@ -396,7 +637,7 @@ static int init_global (void) {
 
 			str[0] = 0;
 			mbedtls_strerror(f_ret, str, sizeof(str));
-			fprintf(stderr, "%s: %s\n", f_name, str);
+			fprintf(stderr, "*** %s: %s\n", f_name, str);
 		}
 
 		return 1;
@@ -456,7 +697,7 @@ static bool resize_pfd_arr (th_ctx_t *ctx, const size_t ny_size) {
 
 	if (ny_size > 0 && ny == NULL) {
 		if (prog_conf.verbose >= PRNE_VL_ERR) {
-			sync_perror("resize_pfd_arr()");
+			sync_perror("** resize_pfd_arr()");
 		}
 		return false;
 	}
@@ -540,7 +781,7 @@ static bool fab_client_status_rsp (
 	else {
 		ret = false;
 		if (prog_conf.verbose >= PRNE_VL_ERR) {
-			client_sync_perror(c, "proc_client_stream()");
+			client_sync_perror(c, "** proc_client_stream()");
 		}
 	}
 
@@ -765,6 +1006,103 @@ static bool handle_hostinfo (
 		goto END;
 	}
 
+	if (prog_conf.verbose >= PRNE_VL_DBG0) {
+		const char *pr[2] = { qv.cred_id, qv.cred_pw };
+
+		for (const char *p = pr[0]; *p != 0; p += 1) {
+			if (!isprint(*p)) {
+				pr[0] = "(bin)";
+				break;
+			}
+		}
+		for (const char *p = pr[1]; *p != 0; p += 1) {
+			if (!isprint(*p)) {
+				pr[1] = "(bin)";
+				break;
+			}
+		}
+
+		pthread_mutex_lock(&prog_g.stdio_lock);
+		fprintf(
+			stderr,
+			"client@%"PRIxPTR" [%s]:%"PRIu16" hostinfo("
+			"parent_uptime = %"PRIu64", "
+			"child_uptime = %"PRIu64", "
+			"bne_cnt = %"PRIu64", "
+			"infect_cnt = %"PRIu64", "
+			"parent_pid = %"PRIu32", "
+			"child_pid = %"PRIu32", "
+			"prog_ver = %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X, "
+			"boot_id = %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X, "
+			"instance_id = %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X, "
+			"host_cred.id = %s, "
+			"host_cred.pw = %s, "
+			"crash_cnt = %"PRIu32", "
+			"arch = '%s')\n",
+			(uintptr_t)client,
+			client->ipaddr_str,
+			ntohs(client->sa.sin6_port),
+			hi->parent_uptime,
+			hi->child_uptime,
+			hi->bne_cnt,
+			hi->infect_cnt,
+			hi->parent_pid,
+			hi->child_pid,
+			hi->prog_ver[0],
+			hi->prog_ver[1],
+			hi->prog_ver[2],
+			hi->prog_ver[3],
+			hi->prog_ver[4],
+			hi->prog_ver[5],
+			hi->prog_ver[6],
+			hi->prog_ver[7],
+			hi->prog_ver[8],
+			hi->prog_ver[9],
+			hi->prog_ver[10],
+			hi->prog_ver[11],
+			hi->prog_ver[12],
+			hi->prog_ver[13],
+			hi->prog_ver[14],
+			hi->prog_ver[15],
+			hi->boot_id[0],
+			hi->boot_id[1],
+			hi->boot_id[2],
+			hi->boot_id[3],
+			hi->boot_id[4],
+			hi->boot_id[5],
+			hi->boot_id[6],
+			hi->boot_id[7],
+			hi->boot_id[8],
+			hi->boot_id[9],
+			hi->boot_id[10],
+			hi->boot_id[11],
+			hi->boot_id[12],
+			hi->boot_id[13],
+			hi->boot_id[14],
+			hi->boot_id[15],
+			hi->instance_id[0],
+			hi->instance_id[1],
+			hi->instance_id[2],
+			hi->instance_id[3],
+			hi->instance_id[4],
+			hi->instance_id[5],
+			hi->instance_id[6],
+			hi->instance_id[7],
+			hi->instance_id[8],
+			hi->instance_id[9],
+			hi->instance_id[10],
+			hi->instance_id[11],
+			hi->instance_id[12],
+			hi->instance_id[13],
+			hi->instance_id[14],
+			hi->instance_id[15],
+			pr[0],
+			pr[1],
+			hi->crash_cnt,
+			qv.arch);
+		pthread_mutex_unlock(&prog_g.stdio_lock);
+	}
+
 	f_ret = build_hostinfo_query_str(
 		hi,
 		&client->sa,
@@ -848,7 +1186,7 @@ static int proc_client_hostinfo (
 		prne_iobuf_shift(c->ib + 0, -(off + actual));
 		if (!handle_hostinfo(c, &hi)) {
 			if (prog_conf.verbose >= PRNE_VL_ERR) {
-				client_sync_perror(c, "handle_hostinfo");
+				client_sync_perror(c, "** handle_hostinfo");
 			}
 		}
 		break;
@@ -914,7 +1252,7 @@ static int proc_client_stream (th_ctx_t *ctx, client_ctx_t *c) {
 		else {
 			ret = -1;
 			if (prog_conf.verbose >= PRNE_VL_ERR) {
-				client_sync_perror(c, "proc_client_stream()");
+				client_sync_perror(c, "** proc_client_stream()");
 			}
 		}
 
@@ -973,7 +1311,7 @@ static int serve_client (th_ctx_t *ctx, client_ctx_t *c) {
 				fprintf(
 					stderr,
 					"client@%"PRIxPTR": "
-					"client shutdown read whilst there's still data to "
+					"** client shutdown read whilst there's still data to "
 					"receive\n",
 					(uintptr_t)c);
 				pthread_mutex_unlock(&prog_g.stdio_lock);
@@ -995,7 +1333,7 @@ static int serve_client (th_ctx_t *ctx, client_ctx_t *c) {
 			pthread_mutex_lock(&prog_g.stdio_lock);
 			fprintf(
 				stderr,
-				"client@%"PRIxPTR": no buffer left to process stream!\n",
+				"** client@%"PRIxPTR": no buffer left to process stream!\n",
 				(uintptr_t)c);
 			pthread_mutex_unlock(&prog_g.stdio_lock);
 		}
@@ -1086,7 +1424,7 @@ static void thread_tick (th_ctx_t *ctx) {
 					if (errno == 0) {
 						client_sync_mbedtls_err(
 							f_ret,
-							"mbedtls_ssl_handshake()",
+							"* mbedtls_ssl_handshake()",
 							(uintptr_t)c);
 					}
 					else {
@@ -1094,7 +1432,7 @@ static void thread_tick (th_ctx_t *ctx) {
 						case EPIPE:
 							break;
 						default:
-							client_sync_perror(c, "mbedtls_ssl_handshake()");
+							client_sync_perror(c, "* mbedtls_ssl_handshake()");
 						}
 					}
 				}
@@ -1122,7 +1460,7 @@ static void thread_tick (th_ctx_t *ctx) {
 					if (errno == 0) {
 						client_sync_mbedtls_err(
 							f_ret,
-							"mbedtls_ssl_close_notify()",
+							"* mbedtls_ssl_close_notify()",
 							(uintptr_t)c);
 					}
 					else {
@@ -1130,7 +1468,9 @@ static void thread_tick (th_ctx_t *ctx) {
 						case EPIPE:
 							break;
 						default:
-							client_sync_perror(c, "mbedtls_ssl_close_notify()");
+							client_sync_perror(
+								c,
+								"* mbedtls_ssl_close_notify()");
 						}
 					}
 				}
@@ -1234,7 +1574,7 @@ static void do_take_client (th_ctx_t *ctx) {
 		continue;
 ERR: // CATCH
 		if (prog_conf.verbose >= PRNE_VL_ERR) {
-			sync_perror("do_take_client()");
+			sync_perror("** do_take_client()");
 		}
 		free_client_ctx(c);
 		incre_conn_ctr(-1);
@@ -1339,7 +1679,7 @@ static void join_threads (th_ctx_t **arr, const size_t cnt) {
 	for (size_t i = 0; i < cnt; i += 1) {
 		th_ctx_t *ctx = *arr + i;
 
-		prne_dbgtrap(pthread_join(ctx->th, NULL) == 0);
+		pthread_join(ctx->th, NULL);
 		pthread_mutex_destroy(&ctx->lock);
 		prne_free(ctx->pfd);
 		prne_free_llist(&ctx->p_list);
@@ -1362,7 +1702,7 @@ static void pass_client_conn (
 	pthread_mutex_t *lock = NULL;
 
 // TRY
-	if (prog_g.conn_ctr.cnt >= prog_conf.max_conn) { // TODO: test
+	if (prog_g.conn_ctr.cnt >= prog_conf.max_conn) {
 		if (prog_conf.verbose >= PRNE_VL_WARN) {
 			static struct timespec last_max_conn_report;
 			struct timespec d, now;
@@ -1401,6 +1741,11 @@ static void pass_client_conn (
 	c_ctx->sck = fd;
 	fd = -1;
 	c_ctx->sa = *sa;
+	inet_ntop(
+		AF_INET6,
+		&sa->sin6_addr,
+		c_ctx->ipaddr_str,
+		sizeof(c_ctx->ipaddr_str));
 	mbedtls_ssl_init(&c_ctx->ssl);
 
 	// find the least busy thread
@@ -1426,6 +1771,19 @@ static void pass_client_conn (
 	}
 	write(c_th_ctx->ihcp[1], &sewage, 1);
 	incre_conn_ctr(1);
+
+	if (prog_conf.verbose >= PRNE_VL_DBG0) {
+		pthread_mutex_lock(&prog_g.stdio_lock);
+		fprintf(
+			stderr,
+			"New client from [%s]:%"PRIu16" "
+			"client@%"PRIxPTR", th@%"PRIxPTR"\n",
+			c_ctx->ipaddr_str,
+			ntohs(sa->sin6_port),
+			(uintptr_t)c_ctx,
+			(uintptr_t)c_th_ctx);
+		pthread_mutex_unlock(&prog_g.stdio_lock);
+	}
 
 	c_ctx = NULL;
 END: // CATCH
@@ -1476,7 +1834,7 @@ int main (const int argc, const char **args) {
 		(errno = pthread_mutex_init(&prog_g.conn_ctr.lock, NULL)) != 0)
 	{
 		if (prog_conf.verbose >= PRNE_VL_FATAL) {
-			perror("pthread_mutex_init()");
+			perror("*** pthread_mutex_init()");
 		}
 		abort();
 	}
@@ -1492,7 +1850,7 @@ int main (const int argc, const char **args) {
 	fd = prep_socket();
 	if (fd < 0) {
 		if (prog_conf.verbose >= PRNE_VL_FATAL) {
-			perror("prep_socket()");
+			perror("*** prep_socket()");
 		}
 		ret = 1;
 		goto END;
@@ -1500,7 +1858,7 @@ int main (const int argc, const char **args) {
 
 	if ((ret = init_threads(prog_conf.nb_thread, &th_arr)) != 0) {
 		if (prog_conf.verbose >= PRNE_VL_FATAL) {
-			perror("init_threads()");
+			perror("*** init_threads()");
 		}
 		return 1;
 	}
@@ -1527,7 +1885,7 @@ int main (const int argc, const char **args) {
 		}
 
 		sl = sizeof(sa);
-		f_ret = accept(fd, (struct sockaddr*)&sa, &sl); // this blocks
+		f_ret = accept(fd, (struct sockaddr*)&sa, &sl);
 		if (f_ret >= 0) {
 			if (!prne_sck_fcntl(f_ret)) {
 				if (prog_conf.verbose >= PRNE_VL_FATAL) {

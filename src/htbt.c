@@ -2034,7 +2034,7 @@ static void htbt_cncp_do_probe (prne_htbt_t *ctx) {
 			}
 			rr = prm.fut->rr + idx;
 
-			// <uint32_t number of entries in hex> <txt rec name suffix>
+			// format: <uint32_t number of entries in hex><txt rec name suffix>
 			// Parse header
 			if (rr->rd_data[0] < 9) {
 				prne_dbgpf("* TXTREC format error: insufficient length\n");

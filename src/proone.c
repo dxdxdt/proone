@@ -815,7 +815,7 @@ static void load_ssl_conf (void) {
 			// Client stuff
 			mret = mbedtls_ssl_config_defaults(
 				&prne_g.c_ssl.conf,
-				MBEDTLS_SSL_IS_SERVER,
+				MBEDTLS_SSL_IS_CLIENT,
 				MBEDTLS_SSL_TRANSPORT_STREAM,
 				MBEDTLS_SSL_PRESET_DEFAULT);
 			BREAKIF_ERR("mbedtls_ssl_config_defaults");

@@ -2071,6 +2071,8 @@ static void *htbt_cncp_entry (void *p) {
 	pth_event_t ev = NULL;
 
 	while (ctx->loop_flag) {
+		htbt_cncp_do_probe(ctx);
+
 		// calc interval variance
 		intvar = 0; // ignore failure of mbedtls_ctr_drbg_random()
 		mbedtls_ctr_drbg_random(
@@ -2090,8 +2092,6 @@ static void *htbt_cncp_entry (void *p) {
 			pth_cond_await(&ctx->cncp.cond, &ctx->cncp.lock, ev);
 		}
 		pth_mutex_release(&ctx->cncp.lock);
-
-		htbt_cncp_do_probe(ctx);
 	}
 
 	pth_event_free(ev, FALSE);

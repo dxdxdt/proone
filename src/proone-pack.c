@@ -415,6 +415,9 @@ int main (const int argc, const char **args) {
 	for (i = 0; i < archive_arr_cnt; i += 1) {
 		archive = archive_arr + i;
 
+		/* FIXME
+		* Zero size arhive allowed?
+		*/
 		archive->m_exec = prne_malloc(1, archive->st.st_size);
 		prne_assert(archive->m_exec != NULL);
 

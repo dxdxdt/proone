@@ -57,6 +57,10 @@ prne_pack_rc_t prne_index_bin_archive (
 		goto END;
 	}
 
+	/* FIXME
+	* Is an empty bin archive possible?
+	* This will fail when nb_bin == 0
+	*/
 	bin = (prne_bin_tuple_t*)prne_malloc(sizeof(prne_bin_tuple_t), nb_bin);
 	if (bin == NULL) {
 		ret = PRNE_PACK_RC_ERRNO;

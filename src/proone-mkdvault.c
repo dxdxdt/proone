@@ -56,6 +56,9 @@ static void add_file (const prne_data_key_t key, const char *path) {
 
 	prne_assert(fd >= 0 && size >= 0);
 	prne_assert(lseek(fd, 0, SEEK_SET) == 0);
+	/* FIXME
+	* Are empty entries allowed?
+	*/
 	ENTRIES[key].data = prne_malloc(1, size);
 	ENTRIES[key].size = size;
 	ENTRIES[key].type = PRNE_DATA_TYPE_BIN;

@@ -48,7 +48,11 @@ typedef struct {
 	struct sockaddr_in6 sa;
 	mbedtls_ssl_context ssl;
 	uint16_t exp_msg_id;
-	client_state_t state;
+	client_state_t con_state;
+	struct {
+		bool hi_sent;
+		bool hi_received;
+	} proto_state;
 	char ipaddr_str[INET6_ADDRSTRLEN];
 } client_ctx_t;
 
@@ -686,6 +690,7 @@ static prne_llist_entry_t *pop_client_ctx (
 	prne_free(c);
 	ret = prne_llist_erase(&ctx->c_list, e);
 	incre_conn_ctr(-1);
+
 	return ret;
 }
 
@@ -703,6 +708,12 @@ static bool resize_pfd_arr (th_ctx_t *ctx, const size_t ny_size) {
 	}
 	ctx->pfd = (struct pollfd*)ny;
 	return true;
+}
+
+static void client_sync_msg (client_ctx_t *c, const char *msg) {
+	pthread_mutex_lock(&prog_g.stdio_lock);
+	fprintf(stderr, "client@%"PRIxPTR": %s\n", (uintptr_t)c, msg);
+	pthread_mutex_unlock(&prog_g.stdio_lock);
 }
 
 static void client_sync_perror (client_ctx_t *c, const char *msg) {
@@ -1006,7 +1017,7 @@ static bool handle_hostinfo (
 		goto END;
 	}
 
-	if (prog_conf.verbose >= PRNE_VL_DBG0) {
+	if (prog_conf.verbose >= PRNE_VL_DBG0 + 1) {
 		const char *pr[2] = { qv.cred_id, qv.cred_pw };
 
 		for (const char *p = pr[0]; *p != 0; p += 1) {
@@ -1127,6 +1138,9 @@ static bool handle_hostinfo (
 		qv.arch,
 		q_str,
 		q_len + 1);
+	if (prog_conf.verbose >= PRNE_VL_DBG0 + 2) {
+		client_sync_msg(client, q_str);
+	}
 
 	ret = true;
 	pthread_mutex_lock(&prog_g.db.lock);
@@ -1183,7 +1197,13 @@ static int proc_client_hostinfo (
 		&hi);
 	switch (src) {
 	case PRNE_HTBT_SER_RC_OK:
+		if (prog_conf.verbose >= PRNE_VL_DBG0) {
+			client_sync_msg(c, "< OP_HOST_INFO");
+		}
+
 		prne_iobuf_shift(c->ib + 0, -(off + actual));
+		c->proto_state.hi_received = true;
+		c->con_state = CS_CLOSE;
 		if (!handle_hostinfo(c, &hi)) {
 			if (prog_conf.verbose >= PRNE_VL_ERR) {
 				client_sync_perror(c, "** handle_hostinfo");
@@ -1197,14 +1217,14 @@ static int proc_client_hostinfo (
 		ret = -2;
 		goto END;
 	default:
+		if (prog_conf.verbose >= PRNE_VL_ERR) {
+			client_sync_perror(c, "prne_htbt_dser_host_info()");
+		}
 		ret = -1;
 		goto END;
 	}
 
 END: // CATCH
-	if (ret < 0) {
-		prne_iobuf_reset(c->ib + 0);
-	}
 	prne_htbt_free_host_info(&hi);
 	return ret;
 }
@@ -1229,8 +1249,13 @@ static int proc_client_stream (th_ctx_t *ctx, client_ctx_t *c) {
 	switch (mh.op) {
 	case PRNE_HTBT_OP_SOLICIT:
 		prne_iobuf_shift(c->ib + 0, -actual);
-		if (mh.is_rsp) {
+		if (mh.is_rsp || c->proto_state.hi_sent) {
 			goto PROTO_ERR;
+		}
+
+		if (prog_conf.verbose >= PRNE_VL_DBG0) {
+			client_sync_msg(c, "< OP_SOLICIT");
+			client_sync_msg(c, "> OP_HOST_INFO");
 		}
 
 		mh.op = PRNE_HTBT_OP_HOST_INFO;
@@ -1248,6 +1273,8 @@ static int proc_client_stream (th_ctx_t *ctx, client_ctx_t *c) {
 				&actual,
 				&mh);
 			prne_iobuf_shift(c->ib + 1, actual);
+			c->proto_state.hi_sent = true;
+			ret = 0;
 		}
 		else {
 			ret = -1;
@@ -1269,10 +1296,19 @@ static int proc_client_stream (th_ctx_t *ctx, client_ctx_t *c) {
 	default:
 		prne_iobuf_reset(c->ib + 0);
 		if (fab_client_status_rsp(c, mh.id, PRNE_HTBT_STATUS_UNIMPL, 0)) {
-			c->state = CS_SHUT;
+			c->con_state = CS_SHUT;
 		}
 		else {
 			ret = -1;
+		}
+		if (prog_conf.verbose >= PRNE_VL_WARN) {
+			pthread_mutex_lock(&prog_g.stdio_lock);
+			fprintf(
+				stderr,
+				"client@%"PRIxPTR": * unimplemented op code %d.\n",
+				(uintptr_t)c,
+				mh.op);
+			pthread_mutex_unlock(&prog_g.stdio_lock);
 		}
 		goto END;
 	}
@@ -1281,20 +1317,30 @@ static int proc_client_stream (th_ctx_t *ctx, client_ctx_t *c) {
 PROTO_ERR:
 	prne_iobuf_reset(c->ib + 0);
 	if (fab_client_status_rsp(c, mh.id, PRNE_HTBT_STATUS_PROTO_ERR, 0)) {
-		c->state = CS_SHUT;
+		c->con_state = CS_SHUT;
 	}
 	else {
 		ret = -1;
+	}
+
+	if (prog_conf.verbose >= PRNE_VL_ERR) {
+		client_sync_msg(c, "** protocol error.");
 	}
 END: // CATCH
 	prne_htbt_free_msg_head(&mh);
 	return ret;
 }
 
-static int serve_client (th_ctx_t *ctx, client_ctx_t *c) {
+static int serve_client (
+	th_ctx_t *ctx,
+	client_ctx_t *c,
+	const struct timespec now,
+	const int revents)
+{
 	ssize_t f_ret;
+	int ret;
 
-	if (c->ib[1].len > 0) {
+	if (c->ib[1].len > 0 && revents & POLLOUT) {
 		// consume out bufs
 		f_ret = mbedtls_ssl_write(&c->ssl, c->ib[1].m, c->ib[1].len);
 		if (f_ret < 0) {
@@ -1306,59 +1352,111 @@ static int serve_client (th_ctx_t *ctx, client_ctx_t *c) {
 			}
 		}
 		else if (f_ret == 0) {
+			if (prog_conf.verbose >= PRNE_VL_DBG0 + 1) {
+				client_sync_msg(c, "write EOF.");
+			}
 			if (prog_conf.verbose >= PRNE_VL_ERR) {
-				pthread_mutex_lock(&prog_g.stdio_lock);
-				fprintf(
-					stderr,
-					"client@%"PRIxPTR": "
-					"** client shutdown read whilst there's still data to "
-					"receive\n",
-					(uintptr_t)c);
-				pthread_mutex_unlock(&prog_g.stdio_lock);
+				client_sync_msg(
+					c,
+					"** client shutdown whilst there's still data to send.");
 			}
 			return -1;
 		}
 		else {
+			if (prog_conf.verbose >= PRNE_VL_DBG0 + 1 ) {
+				pthread_mutex_lock(&prog_g.stdio_lock);
+				if (prog_conf.verbose >= PRNE_VL_DBG0 + 2) {
+					fprintf(
+						stderr,
+						"client@%"PRIxPTR": > %zd bytes: ",
+						(uintptr_t)c,
+						f_ret);
+					for (ssize_t i = 0; i < f_ret; i += 1) {
+						fprintf(stderr, "%02"PRIx8" ", c->ib[1].m[i]);
+					}
+					fprintf(stderr, "\n");
+				}
+				else {
+					fprintf(
+						stderr,
+						"client@%"PRIxPTR": > %zd bytes.\n",
+						(uintptr_t)c,
+						f_ret);
+				}
+				pthread_mutex_unlock(&prog_g.stdio_lock);
+			}
+
 			prne_iobuf_shift(c->ib + 1, -f_ret);
 		}
 	}
 
-	if (c->state != CS_PROC) {
-		return c->ib[1].len > 0 ? 1 : 0;
+	if (c->con_state != CS_PROC) {
+		if (c->ib[1].len == 0) {
+			c->con_state = CS_CLOSE;
+		}
+		return 0;
 	}
 
 	// process incoming data from clients
 	if (c->ib[0].avail == 0) {
 		if (prog_conf.verbose >= PRNE_VL_ERR) {
-			pthread_mutex_lock(&prog_g.stdio_lock);
-			fprintf(
-				stderr,
-				"** client@%"PRIxPTR": no buffer left to process stream!\n",
-				(uintptr_t)c);
-			pthread_mutex_unlock(&prog_g.stdio_lock);
+			client_sync_msg(c, "** no buffer left to process stream!");
 		}
 		return -1;
 	}
 
-	f_ret = mbedtls_ssl_read(
-		&c->ssl,
-		c->ib[0].m + c->ib[0].len,
-		c->ib[0].avail);
-	if (f_ret < 0) {
-		if (errno != EAGAIN && errno != EWOULDBLOCK) {
-			if (prog_conf.verbose >= PRNE_VL_DBG0) {
-				client_sync_perror(c, "mbedtls_ssl_read()");
+	if (revents & POLLIN) {
+		f_ret = mbedtls_ssl_read(
+			&c->ssl,
+			c->ib[0].m + c->ib[0].len,
+			c->ib[0].avail);
+		if (f_ret < 0) {
+			if (errno != EAGAIN && errno != EWOULDBLOCK) {
+				if (prog_conf.verbose >= PRNE_VL_DBG0) {
+					client_sync_perror(c, "mbedtls_ssl_read()");
+				}
+				return -1;
 			}
-			return -1;
+			return 1;
 		}
-		return 1;
-	}
-	else if (f_ret == 0) {
-		return 0;
+		else if (f_ret == 0) {
+			c->con_state = CS_SHUT;
+			if (prog_conf.verbose >= PRNE_VL_DBG0 + 1) {
+				client_sync_msg(c, "read EOF.");
+			}
+		}
+
+		if (prog_conf.verbose >= PRNE_VL_DBG0 + 1 && f_ret > 0) {
+			pthread_mutex_lock(&prog_g.stdio_lock);
+			if (prog_conf.verbose >= PRNE_VL_DBG0 + 2) {
+				fprintf(
+					stderr,
+					"client@%"PRIxPTR": < %zd bytes: ",
+					(uintptr_t)c,
+					f_ret);
+				for (ssize_t i = 0; i < f_ret; i += 1) {
+					fprintf(stderr, "%02"PRIx8" ", c->ib[0].m[i + c->ib[0].len]);
+				}
+				fprintf(stderr, "\n");
+			}
+			else {
+				fprintf(
+					stderr,
+					"client@%"PRIxPTR": < %zd bytes.\n",
+					(uintptr_t)c,
+					f_ret);
+			}
+			pthread_mutex_unlock(&prog_g.stdio_lock);
+		}
+
+		prne_iobuf_shift(c->ib + 0, f_ret);
 	}
 
-	prne_iobuf_shift(c->ib + 0, f_ret);
-	return proc_client_stream(ctx, c);
+	while ((ret = proc_client_stream(ctx, c)) == 0) {
+		c->last_op = now;
+	}
+
+	return ret;
 }
 
 static void thread_tick (th_ctx_t *ctx) {
@@ -1376,6 +1474,9 @@ static void thread_tick (th_ctx_t *ctx) {
 			prog_conf.sck_op_timeout);
 
 		if (prne_cmp_timespec(now, to_tp) > 0) {
+			if (prog_conf.verbose >= PRNE_VL_DBG0) {
+				client_sync_msg(c, "timed out(inactive).");
+			}
 			e = pop_client_ctx(ctx, e);
 		}
 		else {
@@ -1396,7 +1497,7 @@ static void thread_tick (th_ctx_t *ctx) {
 		client_ctx_t *c = (client_ctx_t*)e->element;
 		short events;
 
-		switch (c->state) {
+		switch (c->con_state) {
 		case CS_HANDSHAKE:
 			errno = 0;
 			f_ret = mbedtls_ssl_handshake(&c->ssl);
@@ -1406,10 +1507,18 @@ static void thread_tick (th_ctx_t *ctx) {
 					mbedtls_ssl_get_alpn_protocol(&c->ssl),
 					PRNE_HTBT_TLS_ALP))
 				{
+					if (prog_conf.verbose >= PRNE_VL_WARN) {
+						client_sync_msg(c, "* ALPN error.");
+					}
 					e = pop_client_ctx(ctx, e);
 					continue;
 				}
-				c->state = CS_PROC;
+				c->con_state = CS_PROC;
+				c->last_op = now;
+
+				if (prog_conf.verbose >= PRNE_VL_DBG0) {
+					client_sync_msg(c, "mbedtls_ssl_handshake() successful.");
+				}
 				/* fall-through */
 			case MBEDTLS_ERR_SSL_WANT_READ:
 				events = POLLIN;
@@ -1455,6 +1564,10 @@ static void thread_tick (th_ctx_t *ctx) {
 			default:
 				if (f_ret == 0) {
 					shutdown(c->sck, SHUT_RDWR);
+
+					if (prog_conf.verbose >= PRNE_VL_DBG0) {
+						client_sync_msg(c, "graceful close.");
+					}
 				}
 				else if (prog_conf.verbose >= PRNE_VL_WARN) {
 					if (errno == 0) {
@@ -1480,6 +1593,9 @@ static void thread_tick (th_ctx_t *ctx) {
 			}
 			break;
 		case CS_SHUT:
+			events = POLLOUT;
+			e = e->next;
+			break;
 		case CS_PROC:
 			if (c->ib[1].len > 0) {
 				events = POLLOUT;
@@ -1517,7 +1633,7 @@ static void thread_tick (th_ctx_t *ctx) {
 	for (prne_llist_entry_t *e = ctx->c_list.head; e != NULL; pfd_ptr += 1) {
 		client_ctx_t *c = (client_ctx_t*)e->element;
 
-		switch (c->state) {
+		switch (c->con_state) {
 		case CS_PROC:
 		case CS_SHUT:
 			break;
@@ -1526,16 +1642,9 @@ static void thread_tick (th_ctx_t *ctx) {
 			continue;
 		}
 
-		f_ret = serve_client(ctx, c);
+		f_ret = serve_client(ctx, c, now, ctx->pfd[pfd_ptr].revents);
 
-		if (f_ret >= 0) {
-			c->last_op = prne_gettime(CLOCK_MONOTONIC);
-		}
-
-		if (f_ret == 0) {
-			c->state = CS_CLOSE;
-		}
-		else if (f_ret < 0) {
+		if (f_ret < 0) {
 			e = pop_client_ctx(ctx, e);
 		}
 		else {
@@ -1586,11 +1695,18 @@ static void *thread_main (void *ctx_p) {
 	th_ctx_t *ctx = (th_ctx_t*)ctx_p;
 
 	assert(!mysql_thread_init());
+	if (prog_conf.verbose >= PRNE_VL_DBG0) {
+		pthread_mutex_lock(&prog_g.stdio_lock);
+		fprintf(
+			stderr,
+			"th@%"PRIxPTR" initialised. Loop start.\n",
+			(uintptr_t)ctx);
+		pthread_mutex_unlock(&prog_g.stdio_lock);
+	}
 
 	while (true) {
-		read(ctx->ihcp[0], &sewage, 1);
-
 		pthread_mutex_lock(&ctx->lock);
+		while (read(ctx->ihcp[0], &sewage, 1) == 1);
 		do_take_client(ctx);
 		if (ctx->term && ctx->c_list.size == 0) {
 			pthread_mutex_unlock(&ctx->lock);
@@ -1606,6 +1722,15 @@ static void *thread_main (void *ctx_p) {
 		}
 
 		thread_tick(ctx);
+	}
+
+	if (prog_conf.verbose >= PRNE_VL_DBG0) {
+		pthread_mutex_lock(&prog_g.stdio_lock);
+		fprintf(
+			stderr,
+			"th@%"PRIxPTR" loop end.\n",
+			(uintptr_t)ctx);
+		pthread_mutex_unlock(&prog_g.stdio_lock);
 	}
 
 	mysql_thread_end();
@@ -1777,11 +1902,12 @@ static void pass_client_conn (
 		fprintf(
 			stderr,
 			"New client from [%s]:%"PRIu16" "
-			"client@%"PRIxPTR", th@%"PRIxPTR"\n",
+			"client@%"PRIxPTR", th@%"PRIxPTR", fd:%d\n",
 			c_ctx->ipaddr_str,
 			ntohs(sa->sin6_port),
 			(uintptr_t)c_ctx,
-			(uintptr_t)c_th_ctx);
+			(uintptr_t)c_th_ctx,
+			c_ctx->sck);
 		pthread_mutex_unlock(&prog_g.stdio_lock);
 	}
 
@@ -1864,6 +1990,12 @@ int main (const int argc, const char **args) {
 	}
 	th_cnt = prog_conf.nb_thread;
 
+	if (prog_conf.verbose >= PRNE_VL_DBG0) {
+		pthread_mutex_lock(&prog_g.stdio_lock);
+		fprintf(stderr, "Initialisation complete. Loop start.\n");
+		pthread_mutex_unlock(&prog_g.stdio_lock);
+	}
+
 	pfd[0].fd = fd;
 	pfd[0].events = POLLIN;
 	pfd[1].fd = sigpipe[0];
@@ -1901,7 +2033,19 @@ int main (const int argc, const char **args) {
 	}
 
 END: // CATCH
+	if (prog_conf.verbose >= PRNE_VL_DBG0) {
+		pthread_mutex_lock(&prog_g.stdio_lock);
+		fprintf(stderr, "Loop end. Joining threads ...\n");
+		pthread_mutex_unlock(&prog_g.stdio_lock);
+	}
 	join_threads(&th_arr, th_cnt);
+
+	if (prog_conf.verbose >= PRNE_VL_DBG0) {
+		pthread_mutex_lock(&prog_g.stdio_lock);
+		fprintf(stderr, "Freeing resources ...\n");
+		pthread_mutex_unlock(&prog_g.stdio_lock);
+	}
+
 	prne_close(fd);
 
 	mysql_close(&prog_g.db.c);

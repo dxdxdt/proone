@@ -23,7 +23,7 @@ bool prne_alloc_iobuf (prne_iobuf_t *ib, const size_t ny_size) {
 	uint8_t *ny;
 
 	ny = (uint8_t*)prne_realloc(ib->ownership ? ib->m : NULL, 1, ny_size);
-	if (ny == NULL) {
+	if (ny == NULL && ny_size > 0) {
 		return false;
 	}
 

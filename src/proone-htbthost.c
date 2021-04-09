@@ -185,10 +185,11 @@ static void load_ssl_conf (
 	mbedtls_ssl_conf_verify(c_conf, prne_mbedtls_x509_crt_verify_cb, NULL);
 	mbedtls_ssl_conf_rng(c_conf, mbedtls_ctr_drbg_random, rnd);
 
+	assert(
+		mbedtls_ssl_conf_alpn_protocols(c_conf, ALP_LIST) == 0 &&
+		mbedtls_ssl_conf_alpn_protocols(s_conf, ALP_LIST) == 0);
+
 	if (htbthost_param.verify) {
-		assert(
-			mbedtls_ssl_conf_alpn_protocols(c_conf, ALP_LIST) == 0 &&
-			mbedtls_ssl_conf_alpn_protocols(s_conf, ALP_LIST) == 0);
 		mbedtls_ssl_conf_authmode(c_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
 		mbedtls_ssl_conf_authmode(s_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
 	}

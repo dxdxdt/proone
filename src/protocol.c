@@ -262,7 +262,7 @@ bool prne_htbt_alloc_host_info (
 	}
 
 	ny_mem = prne_calloc(1, cred_len);
-	if (ny_mem == NULL) {
+	if (ny_mem == NULL && cred_len > 0) {
 		return false;
 	}
 
@@ -345,6 +345,9 @@ bool prne_htbt_alloc_cmd (
 	if (0 < argc) {
 		mem_len = pos;
 		args = (char**)prne_malloc(sizeof(char*), argc + 1);
+		/* FIXME
+		* What if mem_len == 0?
+		*/
 		mem = (char*)prne_malloc(1, mem_len);
 		if (args == NULL || mem == NULL) {
 			goto ERR;
@@ -832,7 +835,6 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (
 		data[91]);
 	out->arch = (prne_arch_t)data[93];
 	memcpy(out->host_cred, data + 94, cred_size);
-	out->host_cred[cred_size] = 0;
 
 	return PRNE_HTBT_SER_RC_OK;
 }
@@ -881,6 +883,9 @@ prne_htbt_ser_rc_t prne_htbt_dser_cmd (
 	}
 
 	if (args_len > 0) {
+		/* FIXME
+		* args_len == 0 allowed?
+		*/
 		mem = (char*)prne_malloc(1, args_len);
 		if (mem == NULL) {
 			ret = PRNE_HTBT_SER_RC_ERRNO;

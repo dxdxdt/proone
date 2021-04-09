@@ -226,7 +226,7 @@ int main (const int argc, const char **args) {
 	arr = (prne_ip_addr_t*)prne_calloc(sizeof(prne_ip_addr_t), cnt);
 	if (arr == NULL) {
 		ret = 2;
-		perror("prne_malloc()");
+		perror("prne_calloc()");
 		goto END;
 	}
 	for (size_t i = 0; i < cnt; i += 1) {

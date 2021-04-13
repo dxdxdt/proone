@@ -163,6 +163,7 @@ typedef enum {
 	*/
 	PRNE_HTBT_OP_RUN_BIN,
 	/* STDIO Frame
+	* TODO
 	*
 	*	uint1_t err		: 0 - stdin/stdout, 1 - stderr
 	*	uint1_t fin
@@ -170,6 +171,21 @@ typedef enum {
 	*	uint12_t len
 	*/
 	PRNE_HTBT_OP_STDIO,
+	/* Get Binary Operation
+	* TODO
+	*
+	*	uint8_t arch
+	*	uint8_t rsv
+	*/
+	PRNE_HTBT_OP_GET_BIN,
+	/* Binary Frame
+	* TODO
+	*
+	*	uint1_t fin
+	*	uint3_t rsv
+	*	uint12_t len
+	*/
+	PRNE_HTBT_OP_BIN,
 
 	NB_PRNE_HTBT_OP
 } prne_htbt_op_t;
@@ -319,6 +335,8 @@ bool prne_net_ep_set_ipv6 (
 	const char *str,
 	const uint16_t port,
 	prne_net_endpoint_t *out);
+
+const char *prne_htbt_op_tostr (const prne_htbt_op_t x);
 
 void prne_htbt_init_msg_head (prne_htbt_msg_head_t *mh);
 void prne_htbt_free_msg_head (prne_htbt_msg_head_t *mh);

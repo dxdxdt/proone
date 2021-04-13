@@ -112,6 +112,23 @@ bool prne_net_ep_set_ipv6 (
 	return inet_pton(AF_INET6, str, &out->addr.addr) != 0;
 }
 
+const char *prne_htbt_op_tostr (const prne_htbt_op_t x) {
+	switch (x) {
+	case PRNE_HTBT_OP_NOOP: return "noop";
+	case PRNE_HTBT_OP_STATUS: return "status";
+	case PRNE_HTBT_OP_HOST_INFO: return "hostinfo";
+	case PRNE_HTBT_OP_HOVER: return "hover";
+	case PRNE_HTBT_OP_SOLICIT: return "solicit";
+	case PRNE_HTBT_OP_RUN_CMD: return "runcmd";
+	case PRNE_HTBT_OP_NY_BIN: return "nybin";
+	case PRNE_HTBT_OP_RUN_BIN: return "runbin";
+	case PRNE_HTBT_OP_STDIO: return "stdio";
+	case PRNE_HTBT_OP_GET_BIN: return "getbin";
+	case PRNE_HTBT_OP_BIN: return "bin";
+	}
+	return NULL;
+}
+
 void prne_htbt_init_msg_head (prne_htbt_msg_head_t *mh) {
 	mh->op = PRNE_HTBT_OP_NOOP;
 	mh->id = 0;

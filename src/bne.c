@@ -18,13 +18,12 @@
 #include <mbedtls/base64.h>
 
 
-static const struct timespec BNE_CONN_OP_TIMEOUT = { 30, 0 }; // 30s
-static const struct timespec BNE_SCK_OP_TIMEOUT = { 10, 0 }; // 10s
+static const struct timespec BNE_CONN_OP_TIMEOUT = { 15, 0 }; // 15s
+static const struct timespec BNE_SCK_OP_TIMEOUT = { 30, 0 }; // 30s
 static const struct timespec BNE_CLOSE_OP_TIMEOUT = { 1, 0 }; // 1s
 static const struct timespec BNE_ERR_PAUSE = { 0, 500000000 }; // 500ms
 static const struct timespec BNE_PROMPT_PAUSE = { 4, 0 }; // 4s
 
-#define BNE_CONN_TIMEOUT 5000 // 5s
 #define BNE_CONN_ATTEMPT 3
 
 #define BNE_HDELAY_TYPE_MIN		150		// 150ms
@@ -434,7 +433,7 @@ static bool bne_do_connect (
 
 	pfd.fd = *fd;
 	pfd.events = POLLOUT;
-	f_ret = prne_pth_poll(&pfd, 1, BNE_CONN_TIMEOUT, ev);
+	f_ret = prne_pth_poll(&pfd, 1, -1, ev);
 	if (f_ret > 0) {
 		socklen_t sl = sizeof(int);
 		int sov = 0;
@@ -1831,11 +1830,16 @@ static bool bne_do_vec_htbt (prne_bne_t *ctx) {
 *
 * - Check the program version and update if necessary via PRNE_HTBT_OP_NY_BIN
 */
+		prne_pth_reset_timer(&ev, &BNE_SCK_OP_TIMEOUT);
+		if (prne_mbedtls_pth_handle(&ssl, mbedtls_ssl_close_notify, fd, ev)) {
+			prne_shutdown(fd, SHUT_RDWR);
+		}
 	}
 
 END: // CATCH
 	mbedtls_ssl_free(&ssl);
 	prne_close(fd);
+	pth_event_free(ev, FALSE);
 
 	return ret;
 }

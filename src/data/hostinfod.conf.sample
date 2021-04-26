@@ -15,7 +15,7 @@ hostinfod:
   # max_conn: 0
   # db_q_size: 0
   report_int: 60000
-  sck_op_timeout: 5000
+  sck_op_timeout: 10000
   # nb_thread:
   # backlog: 10
   listen_port: 64420

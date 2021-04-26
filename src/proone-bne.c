@@ -4,6 +4,7 @@
 #include <string.h>
 #include <errno.h>
 
+#include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <arpa/inet.h>
@@ -185,6 +186,8 @@ int main (const int argc, const char **args) {
 	} htbt_ssl;
 	pth_event_t ev_root = NULL;
 	prne_llist_t wkr_list;
+
+	signal(SIGPIPE, SIG_IGN);
 
 	prne_init_cred_dict(&dict);
 	prne_init_bne_param(&param);

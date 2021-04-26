@@ -354,11 +354,11 @@ int main (const int argc, const char **args) {
 		} c;
 	} ssl;
 
+	signal(SIGPIPE, SIG_IGN);
 	sigemptyset(&ss_all);
 	sigemptyset(&ss_exit);
 	sigaddset(&ss_all, SIGTERM);
 	sigaddset(&ss_all, SIGINT);
-	sigaddset(&ss_all, SIGPIPE);
 	sigaddset(&ss_exit, SIGTERM);
 	sigaddset(&ss_exit, SIGINT);
 	assert(regcomp(

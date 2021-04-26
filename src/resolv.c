@@ -109,7 +109,7 @@ const prne_resolv_ns_pool_t PRNE_RESOLV_DEF_IPV6_POOL = {
 
 static const struct timespec RESOLV_RSRC_ERR_PAUSE = { 1, 0 }; // 1s
 static const struct timespec RESOLV_CONN_ERR_PAUSE = { 0, 100 }; // 100ms
-static const struct timespec RESOLV_QUERY_TIMEOUT = { 15, 0 }; // 15s
+static const struct timespec RESOLV_QUERY_TIMEOUT = { 60, 0 }; // 60s
 static const struct timespec RESOLV_SCK_OP_TIMEOUT = { 10, 0 }; // 10s
 static const struct timespec RESOLV_SCK_IDLE_TIMEOUT = { 15, 0 }; // 15s
 static const struct timespec RESOLV_SCK_CLOSE_TIMEOUT = { 1, 0 }; // 1s

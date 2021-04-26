@@ -38,8 +38,6 @@
 struct prne_global prne_g;
 struct prne_shared_global *prne_s_g = NULL;
 
-sigset_t ss_exit, ss_all;
-
 static prne_worker_t wkr_arr[3];
 static size_t wkr_cnt;
 static prne_llist_t bne_list;
@@ -536,6 +534,7 @@ static void reap_bne (void) {
 static int proone_main (void) {
 	static int caught_sig;
 	static pth_event_t root_ev = NULL;
+	static sigset_t ss;
 
 	prne_assert(pth_init());
 	prne_assert(libssh2_init(0) == 0);
@@ -547,6 +546,11 @@ static int proone_main (void) {
 		pth_attr_destroy(attr);
 	}
 	seed_ssl_rnd(true);
+
+	sigemptyset(&ss);
+	sigaddset(&ss, SIGTERM);
+	sigaddset(&ss, SIGINT);
+	pth_sigmask(SIG_BLOCK, &ss, NULL);
 
 	alloc_workers();
 	for (size_t i = 0; i < wkr_cnt; i += 1) {
@@ -562,17 +566,14 @@ static int proone_main (void) {
 		root_ev = build_bne_ev();
 
 		caught_sig = -1;
-		pth_sigwait_ev(&ss_all, &caught_sig, root_ev);
-		if (caught_sig >= 0 &&
-			sigismember(&ss_exit, caught_sig) &&
-			caught_sig != SIGINT)
-		{
+		pth_sigwait_ev(&ss, &caught_sig, root_ev);
+		if (caught_sig == SIGTERM) {
 			break;
 		}
 
 		reap_bne();
 	}
-	sigprocmask(SIG_UNBLOCK, &ss_exit, NULL);
+	pth_sigmask(SIG_UNBLOCK, &ss, NULL);
 
 	// reap generic workers
 	for (size_t i = 0; i < wkr_cnt; i += 1) {
@@ -1214,13 +1215,15 @@ END:
 }
 
 static void do_exec (const char *exec, char **args) {
-	sigset_t old_ss;
+	sigset_t ss, old_ss;
 	bool has_ss;
+
+	sigfillset(&ss);
 
 	// Clean the house for the new image.
 	// Free any resource that survives exec() call.
 	deinit_shared_global();
-	has_ss = sigprocmask(SIG_UNBLOCK, &ss_all, &old_ss) == 0;
+	has_ss = sigprocmask(SIG_UNBLOCK, &ss, &old_ss) == 0;
 
 	execv(exec, args);
 	prne_dbgperr("** exec()");
@@ -1369,6 +1372,7 @@ static void deinit_bne (void) {
 int main (const int argc, const char **args) {
 	static int exit_code;
 	static bool loop = true;
+	static sigset_t ss_all;
 
 	// done with the terminal
 	close(STDIN_FILENO);
@@ -1378,14 +1382,11 @@ int main (const int argc, const char **args) {
 	close(STDERR_FILENO);
 #endif
 
-	sigemptyset(&ss_exit);
 	sigemptyset(&ss_all);
-	sigaddset(&ss_exit, SIGINT);
-	sigaddset(&ss_exit, SIGTERM);
 	sigaddset(&ss_all, SIGINT);
 	sigaddset(&ss_all, SIGTERM);
 	sigaddset(&ss_all, SIGCHLD);
-	sigaddset(&ss_all, SIGPIPE);
+	signal(SIGPIPE, SIG_IGN);
 
 	prne_g.parent_start = prne_gettime(CLOCK_MONOTONIC);
 	prne_g.blackhole[0] = -1;
@@ -1447,9 +1448,10 @@ int main (const int argc, const char **args) {
 		prne_g.child_pid = fork();
 
 		if (prne_g.child_pid > 0) {
-			static int status;
+			static int status, caught_signal;
+			static pid_t f_ret;
+			static sigset_t ss;
 			static bool has_ny_bin;
-			static int caught_signal;
 
 			prne_dbgpf("* Child: %d\n", prne_g.child_pid);
 
@@ -1460,14 +1462,16 @@ WAIT_LOOP:
 			case SIGINT:
 				// Exit requested. Notify the child and wait for it to exit.
 				loop = false;
-				sigprocmask(SIG_UNBLOCK, &ss_exit, NULL);
+				sigemptyset(&ss);
+				sigaddset(&ss, SIGINT);
+				sigprocmask(SIG_UNBLOCK, &ss, NULL);
 				kill(prne_g.child_pid, SIGTERM);
 				goto WAIT_LOOP;
 			case SIGCHLD:
-				prne_assert(waitpid(
-					prne_g.child_pid,
-					&status,
-					0) == prne_g.child_pid);
+				f_ret = waitpid(prne_g.child_pid, &status, 0);
+				if (f_ret != prne_g.child_pid) {
+					abort();
+				}
 				break;
 			default: goto WAIT_LOOP;
 			}
@@ -1512,15 +1516,21 @@ WAIT_LOOP:
 
 			sleep(1);
 		}
-		else {
+		else if (prne_g.child_pid == 0) {
 			prne_close(prne_g.shm_fd);
 			prne_g.shm_fd = -1;
+			sigprocmask(SIG_UNBLOCK, &ss_all, NULL);
+
 			prne_g.is_child = true;
 			prne_g.child_start = prne_gettime(CLOCK_MONOTONIC);
 			prne_g.child_pid = getpid();
 
 			exit_code = proone_main();
 			break;
+		}
+		else {
+			prne_dbgperr("** fork()");
+			sleep(1);
 		}
 	}
 	prne_g.child_pid = 0;

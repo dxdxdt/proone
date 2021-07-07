@@ -1061,6 +1061,9 @@ static bool bne_sh_setup (
 	parser.ctx = s_ctx;
 	parser.line_f = bne_sh_availcmd_parse_f;
 
+	/* FIXME
+	* DO NOT assume that /dev is available
+	*/
 	ret = bne_sh_runcmd_line(
 		s_ctx,
 		&parser,
@@ -1821,10 +1824,10 @@ static bool bne_do_vec_htbt (prne_bne_t *ctx) {
 		goto END;
 	}
 
-	ret =
-		prne_nstreq(
-			mbedtls_ssl_get_alpn_protocol(&ssl),
-			PRNE_HTBT_TLS_ALP);
+	ret = prne_mbedtls_verify_alp(
+		ctx->param.htbt_ssl_conf,
+		&ssl,
+		PRNE_HTBT_TLS_ALP);
 	if (ret) {
 /* here goes ...
 *

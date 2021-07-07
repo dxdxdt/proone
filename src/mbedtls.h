@@ -34,3 +34,8 @@ bool prne_mbedtls_pth_handle (
 	int(*mbedtls_f)(mbedtls_ssl_context*),
 	const int fd,
 	pth_event_t ev);
+
+bool prne_mbedtls_verify_alp (
+	const mbedtls_ssl_config *conf,
+	const mbedtls_ssl_context *ctx,
+	const char *alp);

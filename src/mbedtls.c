@@ -183,3 +183,26 @@ bool prne_mbedtls_pth_handle (
 		} while (false);
 	}
 }
+
+bool prne_mbedtls_verify_alp (
+	const mbedtls_ssl_config *conf,
+	const mbedtls_ssl_context *ctx,
+	const char *alp)
+{
+	bool has_alpn = false;
+
+	for (const char **a = conf->alpn_list; a != NULL && *a != NULL; a += 1) {
+		if (strcmp(*a, alp) == 0) {
+			has_alpn = true;
+			break;
+		}
+	}
+
+	if (!has_alpn) {
+		// ALP verification is disabled.
+		return true;
+	}
+	return prne_nstreq(
+		mbedtls_ssl_get_alpn_protocol(ctx),
+		alp);
+}

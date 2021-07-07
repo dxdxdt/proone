@@ -319,28 +319,6 @@ static void htbt_main_empty_req_q (prne_htbt_t *ctx) {
 	prne_llist_clear(&ctx->main.req_q);
 }
 
-static bool htbt_verify_alp (
-	const mbedtls_ssl_config *conf,
-	const mbedtls_ssl_context *ctx)
-{
-	bool has_alpn = false;
-
-	for (const char **a = conf->alpn_list; a != NULL && *a != NULL; a += 1) {
-		if (strcmp(*a, PRNE_HTBT_TLS_ALP) == 0) {
-			has_alpn = true;
-			break;
-		}
-	}
-
-	if (!has_alpn) {
-		// ALP verification is disabled.
-		return true;
-	}
-	return prne_nstreq(
-		mbedtls_ssl_get_alpn_protocol(ctx),
-		PRNE_HTBT_TLS_ALP);
-}
-
 /* htbt_relay_child()
 */
 static prne_htbt_status_code_t htbt_relay_child (
@@ -1728,7 +1706,11 @@ static bool htbt_main_slv_setup_f (void *ioctx, pth_event_t ev) {
 		ret = false;
 		goto END;
 	}
-	if (!htbt_verify_alp(ctx->parent->param.main_ssl_conf, &ctx->ssl)) {
+	if (!prne_mbedtls_verify_alp(
+		ctx->parent->param.main_ssl_conf,
+		&ctx->ssl,
+		PRNE_HTBT_TLS_ALP))
+	{
 		ret = false;
 		goto END;
 	}
@@ -2421,7 +2403,10 @@ static bool htbt_lbd_slv_setup_f (void *ioctx, pth_event_t ev) {
 		&ctx->ssl,
 		mbedtls_ssl_handshake,
 		ctx->fd,
-		ev) && htbt_verify_alp(ctx->parent->param.lbd_ssl_conf, &ctx->ssl);
+		ev) && prne_mbedtls_verify_alp(
+			ctx->parent->param.lbd_ssl_conf,
+			&ctx->ssl,
+			PRNE_HTBT_TLS_ALP);
 }
 
 static void htbt_lbd_slv_cleanup_f (void *ioctx, pth_event_t ev) {

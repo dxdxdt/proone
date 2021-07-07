@@ -429,9 +429,9 @@ static void alloc_workers (void) {
 	for (size_t i = 0; i < sizeof(wkr_arr)/sizeof(prne_worker_t); i += 1) {
 		prne_init_worker(wkr_arr + i);
 	}
+	alloc_recon();
 	alloc_resolv();
 	alloc_htbt();
-	alloc_recon();
 }
 
 static void free_workers (void) {

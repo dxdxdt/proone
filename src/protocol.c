@@ -1041,3 +1041,17 @@ char **prne_htbt_parse_args (
 
 	return ret;
 }
+
+uint16_t prne_htbt_gen_msgid (void *ctx, uint16_t(*rnd_f)(void*)) {
+	return (rnd_f(ctx) % PRNE_HTBT_MSG_ID_DELTA) + PRNE_HTBT_MSG_ID_MIN;
+}
+
+const char *prne_htbt_serrc_tostr (const prne_htbt_ser_rc_t x) {
+	switch (x) {
+	case PRNE_HTBT_SER_RC_OK: return "ok";
+	case PRNE_HTBT_SER_RC_MORE_BUF: return "more buf";
+	case PRNE_HTBT_SER_RC_ERRNO: return "errno";
+	case PRNE_HTBT_SER_RC_FMT_ERR: return "format error";
+	}
+	return NULL;
+}

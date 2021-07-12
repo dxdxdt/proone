@@ -32,16 +32,16 @@ esac],
 [static=false])
 AM_CONDITIONAL(STATIC_RT, test x"$static" = x"true")
 
-AC_ARG_ENABLE(hostinfod,
-AS_HELP_STRING([--enable-hostinfod],
-			   [build hostinfod. Default: no]),
+AC_ARG_ENABLE(mttools,
+AS_HELP_STRING([--enable-mttools],
+			   [build maintenance tools. Default: no]),
 [case "${enableval}" in
-			 yes) hostinfod=true ;;
-			 no)  hostinfod=false ;;
-			 *)	  AC_MSG_ERROR([bad value ${enableval} for --enable-hostinfod]) ;;
+			 yes) mttools=true ;;
+			 no)  mttools=false ;;
+			 *)	  AC_MSG_ERROR([bad value ${enableval} for --enable-mttools]) ;;
 esac],
-[hostinfod=false])
-AM_CONDITIONAL(BUILD_HOSTINFOD, test x"$hostinfod" = x"true")
+[mttools=false])
+AM_CONDITIONAL(BUILD_MTTOOLS, test x"$mttools" = x"true")
 
 
 AC_ARG_VAR(
@@ -88,7 +88,7 @@ AC_CHECK_LIB(
 	[pth_init],
 	[],
 	[AC_MSG_ERROR([pthsem not found])])
-AS_IF([test x"$hostinfod" = x"true"], [
+AS_IF([test x"$mttools" = x"true"], [
 	AC_CHECK_LIB([yaml],
 		[yaml_parser_initialize],
 		[],

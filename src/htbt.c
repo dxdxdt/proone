@@ -26,7 +26,7 @@
 // between 30 minutes and an hour
 #define HTBT_CNCP_INT_MIN	1800000 // half an hour minimum interval
 #define HTBT_CNCP_INT_JIT	1800000 // half an hour jitter
-#define HTBT_LBD_PORT			prne_htobe16(PRNE_HTBT_PROTO_PORT)
+#define HTBT_LBD_PORT			prne_htobe16((uint16_t)PRNE_HTBT_PROTO_PORT)
 #define HTBT_LBD_BACKLOG		4
 #define HTBT_LBD_MAX_CLIENTS	5
 

@@ -909,13 +909,13 @@ static bool handle_db_qe (
 		const char *pr[2] = { qv.cred_id, qv.cred_pw };
 
 		for (const char *p = pr[0]; *p != 0; p += 1) {
-			if (!isprint(*p)) {
+			if (!prne_cisspace(*p)) {
 				pr[0] = "(bin)";
 				break;
 			}
 		}
 		for (const char *p = pr[1]; *p != 0; p += 1) {
-			if (!isprint(*p)) {
+			if (!prne_cisspace(*p)) {
 				pr[1] = "(bin)";
 				break;
 			}

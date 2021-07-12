@@ -23,14 +23,15 @@
 #define HELP_STR \
 "Usage: %s <TXT REC> [options ...] [DNS SPECs...]\n"\
 "Options:\n"\
-"	<TXT REC>		Target TXT record for CNCP\n"\
-"	--help			print this message\n"\
-"	--no-verify		Do not verify client cert\n"\
-"	--no-default-dns	Do not use hard-coded nameserver pools\n"\
-"	@<DNS SPEC>		DNS over TLS nameserver\n"\
+"  <TXT REC>            target TXT record for CNCP\n"\
+"  --help               print this message\n"\
+"  --no-verify          do not verify client cert\n"\
+"  --no-default-dns     do not use hard-coded nameserver pools\n"\
+"  --hostcred=<BASE64>  specify hostcred data\n"\
+"  @<DNS SPEC>          DNS over TLS nameserver\n"\
 "Notes:\n"\
-"	IPv4 <DNS SPEC> example: @192.0.2.1 or 192.0.2.1:853\n"\
-"	IPv6 <DNS SPEC> example: @[2001:db8::1] or [2001:db8::1]:853\n"
+"  IPv4 <DNS SPEC> example: @192.0.2.1 or 192.0.2.1:853\n"\
+"  IPv6 <DNS SPEC> example: @[2001:db8::1] or [2001:db8::1]:853\n"
 
 typedef struct {
 	char txtrec[256];
@@ -41,14 +42,14 @@ typedef struct {
 } htbthost_param_t;
 
 static htbthost_param_t htbthost_param;
-static regex_t re_ns4, re_ns6;
+static regex_t re_ns4, re_ns6, re_hc;
 static char m_nybin_path[256];
 static char m_nybin_args[1024];
 static size_t m_nybin_args_size;
 static sigset_t ss_all, ss_exit;
 static struct timespec proc_start;
 static uint8_t instance_id[16];
-static char hostcred[255];
+static uint8_t *hostcred;
 static size_t hostcred_len;
 static pth_t main_pth;
 
@@ -102,6 +103,9 @@ static bool cb_hostinfo (void *ctx, prne_htbt_host_info_t *out) {
 
 	if (prne_htbt_alloc_host_info(out, hostcred_len)) {
 		memcpy(out->host_cred, hostcred, hostcred_len);
+	}
+	else {
+		return false;
 	}
 
 	out->crash_cnt = 0;
@@ -270,6 +274,17 @@ static bool parse_param (const char *arg) {
 			htbthost_param.pool6.arr[pos] = ep;
 		}
 	}
+	else if (regexec(&re_hc, arg, 2, rm, 0) == 0) {
+		if (!prne_dec_base64_mem(
+				arg + rm[1].rm_so,
+				rm[1].rm_eo - rm[1].rm_so,
+				&hostcred,
+				&hostcred_len))
+		{
+			perror("--hostcred");
+			return false;
+		}
+	}
 	else {
 		return false;
 	}
@@ -368,6 +383,10 @@ int main (const int argc, const char **args) {
 	assert(regcomp(
 		&re_ns6,
 		"^@\\[([0-9a-f:]+)\\](:[0-9]{1,5})?$",
+		REG_ICASE | REG_EXTENDED) == 0);
+	assert(regcomp(
+		&re_hc,
+		"^--hostcred=(.*)$",
 		REG_ICASE | REG_EXTENDED) == 0);
 	prne_assert(sigprocmask(SIG_BLOCK, &ss_all, NULL) == 0);
 	init_htbthost_param(&htbthost_param);
@@ -521,6 +540,7 @@ int main (const int argc, const char **args) {
 	free_htbthost_param(&htbthost_param);
 	regfree(&re_ns4);
 	regfree(&re_ns6);
+	prne_free(hostcred);
 
 	if (prne_nstrlen(m_nybin_path) > 0) {
 		do_run_ny_bin();

@@ -39,23 +39,6 @@ prne_pth_cv_t prm_cv = { &prm_lock, &prm_cond, false };
 
 prne_resolv_t *resolv = NULL;
 
-static void upperstr (char *str, const size_t n) {
-	for (size_t i = 0; i < n; i += 1) {
-		if ('a' <= str[i] && str[i] <= 'z') {
-			str[i] -= 'a' - 'A';
-		}
-	}
-}
-
-static bool printable_str (const char *str, const size_t n) {
-	for (size_t i = 0; i < n; i += 1) {
-		if (!isprint(str[i])) {
-			return false;
-		}
-	}
-	return true;
-}
-
 static void proc_prompt_line (char *line, const size_t line_len) {
 	static regmatch_t rm[3];
 
@@ -72,7 +55,7 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 
 		verb = line + rm[1].rm_so;
 		verb_len = rm[1].rm_eo - rm[1].rm_so;
-		upperstr(verb, verb_len);
+		prne_transcmem(verb, verb_len, prne_ctoupper);
 		obj = line + rm[2].rm_so;
 		obj_len = rm[2].rm_eo - rm[2].rm_so;
 		obj[obj_len] = 0;
@@ -255,9 +238,10 @@ static void *stdout_wkr_entry (void *ctx) {
 						break;
 					case PRNE_RESOLV_RTYPE_TXT:
 						if (isatty(STDOUT_FILENO) &&
-							!printable_str(
+							!prne_chkcmem(
 								(const char *)rr->rd_data + 1,
-								rr->rd_data[0]))
+								rr->rd_data[0],
+								prne_cisprint))
 						{
 							printf(
 								";\t\t* (binary data - "

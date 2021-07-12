@@ -82,8 +82,8 @@ static int do_parse_conf (FILE *file, prne_recon_param_t *param) {
 		ent_spec = line[1] + rm[2].rm_so;
 		ent_addr = line[1] + rm[4].rm_so;
 		ent_cidr = line[1] + rm[5].rm_so;
-		prne_transstr(ent_spec, toupper);
-		prne_transstr(ent_addr, tolower);
+		prne_transcstr(ent_spec, prne_ctoupper);
+		prne_transcstr(ent_addr, prne_ctolower);
 
 		if (inet_pton(AF_INET6, ent_addr, net.addr.addr)) {
 			net.addr.ver = PRNE_IPV_6;

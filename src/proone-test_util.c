@@ -4,15 +4,19 @@
 #include <assert.h>
 #include <string.h>
 #include <errno.h>
+#include <ctype.h>
+#include <locale.h>
 
 
 static void test_uuid (void);
 static void test_alloc (void);
 static void test_str (void);
+static void test_cc (void);
 
 int main (void) {
 	test_alloc();
 	test_str();
+	test_cc();
 	test_uuid();
 
 	return 0;
@@ -151,4 +155,15 @@ static void test_uuid (void) {
 		"f31605bb-5ec9046e7-918d-4810a39a858d",
 		out_arr));
 	assert(errno == EINVAL);
+}
+
+static void test_cc (void) {
+	for (int i = 1; i <= 127; i += 1) {
+		const char c = (char)i;
+
+		assert(prne_ctoupper(c) == toupper(c));
+		assert(prne_ctolower(c) == tolower(c));
+		assert(prne_cisspace(c) == (isspace(c) != 0));
+		assert(prne_cisprint(c) == (isprint(c) != 0));
+	}
 }

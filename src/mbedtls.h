@@ -39,3 +39,5 @@ bool prne_mbedtls_verify_alp (
 	const mbedtls_ssl_config *conf,
 	const mbedtls_ssl_context *ctx,
 	const char *alp);
+
+void prne_mbedtls_perror (const int err, const char *s);

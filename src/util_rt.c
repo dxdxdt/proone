@@ -161,6 +161,37 @@ bool prne_own_realloc (
 	return true;
 }
 
+char prne_ctoupper (const char c) {
+	if ('a' <= c && c <= 'z') {
+		return c - ('a' - 'A');
+	}
+	return c;
+}
+
+char prne_ctolower (const char c) {
+	if ('A' <= c && c <= 'Z') {
+		return c + ('a' - 'A');
+	}
+	return c;
+}
+
+bool prne_cisspace (const char c) {
+	switch (c) {
+	case ' ':
+	case '\f':
+	case '\n':
+	case '\r':
+	case '\t':
+	case '\v':
+		return true;
+	}
+	return false;
+}
+
+bool prne_cisprint (const char c) {
+	return 32 <= c && c < 127;
+}
+
 bool prne_nstreq (const char *a, const char *b) {
 	return strcmp(a == NULL ? "" : a, b == NULL ? "" : b) == 0;
 }
@@ -188,7 +219,7 @@ size_t prne_str_shift_spaces (char *str, const size_t len) {
 	size_t i, ret = len;
 
 	for (i = 0; i < ret; ) {
-		if (isspace(str[i])) {
+		if (prne_cisspace(str[i])) {
 			if (i + 1 >= ret) {
 				// last trailing whitespace
 				ret -= 1;
@@ -205,13 +236,43 @@ size_t prne_str_shift_spaces (char *str, const size_t len) {
 	return ret;
 }
 
+bool prne_chkcstr (const char *str, bool(*chk_f)(const char)) {
+	bool ret = true;
+
+	for (; *str != 0 && ret; str += 1) {
+		ret &= chk_f(*str);
+	}
+	return ret;
+}
+
+bool prne_chkcmem (const void *m, size_t len, bool(*chk_f)(const char)) {
+	bool ret = true;
+
+	for (size_t i = 0; i < len && ret; i += 1) {
+		ret &= chk_f(((uint8_t*)m)[i]);
+	}
+	return ret;
+}
+
 void prne_transstr (char *str,  int(*trans_f)(int)) {
 	for (; *str != 0; str += 1) {
 		*str = (char)trans_f(*str);
 	}
 }
 
+void prne_transcstr (char *str, char(*trans_f)(char)) {
+	for (; *str != 0; str += 1) {
+		*str = trans_f(*str);
+	}
+}
+
 void prne_transmem (void *m, size_t len, int(*trans_f)(int)) {
+	for (size_t i = 0; i < len; i += 1) {
+		((uint8_t*)m)[i] = (uint8_t)trans_f(((uint8_t*)m)[i]);
+	}
+}
+
+void prne_transcmem (void *m, size_t len, char(*trans_f)(char)) {
 	for (size_t i = 0; i < len; i += 1) {
 		((uint8_t*)m)[i] = (uint8_t)trans_f(((uint8_t*)m)[i]);
 	}

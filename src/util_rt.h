@@ -38,12 +38,23 @@ bool prne_own_realloc (
 	size_t *old,
 	const size_t req);
 
+/* Locale "C" character category functions
+*/
+char prne_ctoupper (const char c);
+char prne_ctolower (const char c);
+bool prne_cisspace (const char c);
+bool prne_cisprint (const char c);
+
 bool prne_nstreq (const char *a, const char *b);
 size_t prne_nstrlen (const char *s);
 char *prne_strnchr (const char *p, const char c, const size_t n);
 size_t prne_str_shift_spaces (char *str, const size_t len);
+bool prne_chkcstr (const char *str, bool(*chk_f)(const char));
+bool prne_chkcmem (const void *m, size_t len, bool(*chk_f)(const char));
 void prne_transstr (char *str,  int(*trans_f)(int));
+void prne_transcstr (char *str, char(*trans_f)(char));
 void prne_transmem (void *m, size_t len, int(*trans_f)(int));
+void prne_transcmem (void *m, size_t len, char(*trans_f)(char));
 void *prne_memrchr (
 	const void *haystack,
 	const int c,
@@ -64,7 +75,15 @@ char *prne_rebuild_str (void *prev, const char **const arr, const size_t cnt);
 bool prne_hex_fromstr (const char *str, uint_fast8_t *out);
 void prne_hex_tochar (const uint_fast8_t in, char *out, const bool upper);
 
+/*
+* \param str: at least 36 bytes
+* \param out: at least 16 bytes
+*/
 bool prne_uuid_fromstr (const char *str, uint8_t *out);
+/*
+* \param in: at least 16 bytes
+* \param out: at least 37 bytes (null-terminated)
+*/
 void prne_uuid_tostr (const uint8_t *in, char *out);
 
 struct timespec prne_add_timespec (

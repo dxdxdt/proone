@@ -171,7 +171,7 @@ typedef enum {
 	*	uint12_t len
 	*/
 	PRNE_HTBT_OP_STDIO,
-	/* Get Binary Operation
+	/* Binary Retrieval Operation
 	* TODO
 	*
 	*	uint8_t arch
@@ -296,7 +296,7 @@ typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(
 #define PRNE_HTBT_MSG_ID_MIN		1
 #define PRNE_HTBT_MSG_ID_MAX		INT16_MAX
 #define PRNE_HTBT_MSG_ID_DELTA		INT16_MAX
-#define PRNE_HTBT_PROTO_PORT		(uint16_t)64420
+#define PRNE_HTBT_PROTO_PORT		64420
 // _POSIX_ARG_MAX equiv
 #define PRNE_HTBT_ARGS_MAX			255
 #define PRNE_HTBT_ARG_MEM_MAX		1023
@@ -485,3 +485,7 @@ char **prne_htbt_parse_args (
 	char **add_args,
 	size_t *argc,
 	const size_t max_args);
+
+uint16_t prne_htbt_gen_msgid (void *ctx, uint16_t(*rnd_f)(void*));
+
+const char *prne_htbt_serrc_tostr (const prne_htbt_ser_rc_t x);

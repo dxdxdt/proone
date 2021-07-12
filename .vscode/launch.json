@@ -31,6 +31,20 @@
 			"miDebuggerPath": "/usr/bin/gdb"
 		},
 		{
+			"name": "htbtclient",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-htbtclient",
+			"args": [ "-t", "localhost", "hostinfo" ],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"preLaunchTask": "Build htbtclient",
+			"miDebuggerPath": "/usr/bin/gdb"
+		},
+		{
 			"name": "resolv",
 			"type": "cppdbg",
 			"request": "launch",

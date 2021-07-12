@@ -11,6 +11,7 @@
 
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy_poll.h>
+#include <mbedtls/error.h>
 
 
 int prne_mbedtls_x509_crt_verify_cb (
@@ -205,4 +206,13 @@ bool prne_mbedtls_verify_alp (
 	return prne_nstreq(
 		mbedtls_ssl_get_alpn_protocol(ctx),
 		alp);
+}
+
+void prne_mbedtls_perror (const int err, const char *s) {
+	char str[256];
+
+	str[0] = 0;
+	mbedtls_strerror(err, str, sizeof(str));
+
+	fprintf(stderr, "%s: %s\n", s, str);
 }

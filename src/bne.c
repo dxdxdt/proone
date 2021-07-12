@@ -945,7 +945,7 @@ typedef struct {
 static void bne_sh_cpuinfo_parse_f (void *ctx_p, char *line) {
 	bne_sh_cpuinfo_parse_ctx_t *ctx = (bne_sh_cpuinfo_parse_ctx_t*)ctx_p;
 
-	prne_transstr(line, tolower);
+	prne_transcstr(line, prne_ctolower);
 
 	if ((strstr(line, "processor") == line ||
 		strstr(line, "model name") == line) &&
@@ -1799,7 +1799,7 @@ static bool bne_do_vec_htbt (prne_bne_t *ctx) {
 
 	mbedtls_ssl_init(&ssl);
 	ep.addr = ctx->param.subject;
-	ep.port = PRNE_HTBT_PROTO_PORT;
+	ep.port = (uint16_t)PRNE_HTBT_PROTO_PORT;
 
 // TRY
 	if (ctx->param.htbt_ssl_conf == NULL) {
@@ -2337,7 +2337,7 @@ static int bne_vtn_try_cred (
 		if (f_ret <= 0) {
 			goto END;
 		}
-		prne_transmem(ib.m + ib.len, f_ret, tolower);
+		prne_transcmem(ib.m + ib.len, f_ret, prne_ctolower);
 		prne_iobuf_shift(&ib, f_ret);
 
 		if (t_ctx->prompt_line == NULL) {
@@ -2375,7 +2375,7 @@ static int bne_vtn_try_cred (
 			// trailing characters must be whitespaces
 			ib_end = (char*)ib.m + ib.len;
 			for (char *i = p_login + LOGIN_P_LEN; i < ib_end; i += 1) {
-				if (!isspace(*i)) {
+				if (!prne_cisspace(*i)) {
 					continue;
 				}
 			}
@@ -2423,7 +2423,7 @@ static int bne_vtn_try_cred (
 		if (f_ret <= 0) {
 			goto END;
 		}
-		prne_transmem(ib.m + ib.len, f_ret, tolower);
+		prne_transcmem(ib.m + ib.len, f_ret, prne_ctolower);
 		prne_iobuf_shift(&ib, f_ret);
 
 		if (prne_memmem(ib.m, ib.len, PWD_P, PWD_P_LEN) != NULL) {
@@ -2463,7 +2463,7 @@ static int bne_vtn_try_cred (
 		if (f_ret <= 0) {
 			goto END;
 		}
-		prne_transmem(ib.m + ib.len, f_ret, tolower);
+		prne_transcmem(ib.m + ib.len, f_ret, prne_ctolower);
 		prne_iobuf_shift(&ib, f_ret);
 
 		if (prne_memmem(ib.m, ib.len, INC_P, INC_P_LEN) != NULL ||
@@ -2799,7 +2799,7 @@ static bool bne_vssh_login (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {
 					break;
 				}
 				memcpy(vs->auth_list, tmp, len + 1);
-				prne_transstr(vs->auth_list, tolower);
+				prne_transcstr(vs->auth_list, prne_ctolower);
 			}
 			else if (pth_event_status(ev) == PTH_STATUS_OCCURRED) {
 				break;

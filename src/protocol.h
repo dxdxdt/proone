@@ -219,6 +219,8 @@ typedef enum {
 	PRNE_HTBT_SER_RC_MORE_BUF,
 	PRNE_HTBT_SER_RC_ERRNO,
 	PRNE_HTBT_SER_RC_FMT_ERR,
+
+	NB_PRNE_HTBT_SER_RC
 } prne_htbt_ser_rc_t; // serialise result code
 
 struct prne_htbt_msg_head {

@@ -13,6 +13,7 @@ static uint8_t proto_buf[PRNE_HTBT_PROTO_MIN_BUF];
 static size_t proto_buf_cnt_len;
 
 static void test_ser (void);
+static void test_enum (void);
 
 
 int main (void) {
@@ -22,6 +23,7 @@ int main (void) {
 	}
 
 	test_ser();
+	test_enum();
 
 	return 0;
 }
@@ -540,4 +542,16 @@ static void test_ser (void) {
 	assert(prne_htbt_eq_hover(&hv_a, &hv_b));
 	prne_htbt_free_hover(&hv_a);
 	prne_htbt_free_hover(&hv_b);
+}
+
+static void test_enum (void) {
+	for (prne_arch_t i = 0; i < NB_PRNE_ARCH; i += 1) {
+		assert(prne_arch_tostr(i) != NULL);
+	}
+	for (prne_htbt_ser_rc_t i = 0; i < NB_PRNE_HTBT_SER_RC; i += 1) {
+		assert(prne_htbt_serrc_tostr(i) != NULL);
+	}
+	for (prne_htbt_op_t i = 0; i < NB_PRNE_HTBT_OP; i += 1) {
+		assert(prne_htbt_op_tostr(i) != NULL);
+	}
 }

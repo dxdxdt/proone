@@ -14,6 +14,8 @@
 #include <regex.h>
 #include <termios.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 
 #include <mbedtls/ssl.h>
 #include <mbedtls/ctr_drbg.h>
@@ -32,6 +34,7 @@
 
 #define ROOT_TAG_NAME "htbtclient_run"
 #define PREEMBLE_TAG_NAME "preemble"
+#define PREEMBLE_OPT_TAG_NAME "options"
 #define BODY_TAG_NAME "body"
 
 #define MAIN_HELP_STR \
@@ -57,7 +60,7 @@
 "  --tls-key <FILE>     path to tls private key\n"\
 "  --tls-key-pw <PW>    password for tls private key\n"\
 "  -t, --host <REMOTE>  remote host to connect to\n"\
-"  -p, --port <PORT>    specify port (default port: " STRINGIFY_X(PRNE_HTBT_PROTO_PORT) ")\n"\
+"  -p, --port <PORT>    specify port (default: " STRINGIFY_X(PRNE_HTBT_PROTO_PORT) ")\n"\
 "\n"\
 "The server will not be verified if --tls-ca is not used. Rolled out htbt hosts \n"\
 "will verify clients by design/default so both --tls-cert and --tls-key should \n"\
@@ -66,8 +69,22 @@
 "Use \"%s -h COMMAND\" to get help on each command.\n"\
 "\n"
 #define HOSTINFO_HELP_STR \
-"Get host info from a Proone instance and ouput in YAML format.\n"\
+"Get host info from Proone instance and ouput in YAML format.\n"\
 "Usage: %s [common options] hostinfo\n"\
+"\n"
+#define HOVER_HELP_STR \
+"Send Handover request to Proone instance.\n"\
+"Usage: %s [common options] hover [options]\n"\
+"\n"\
+"Options:\n"\
+"  --v4-addr <ADDR>  IPv4 address\n"\
+"  --v6-addr <ADDR>  IPv6 address\n"\
+"  --port <PORT>     specify both v4 and v6 port (default: " STRINGIFY_X(PRNE_HTBT_PROTO_PORT) ")\n"\
+"  --v4-port <PORT>  specify v4 port\n"\
+"  --v6-port <PORT>  specify v6 port\n"\
+"\n"\
+"If only one of the IP addresses is specified, the other will be zero-filled,\n"\
+"disabling the use of that IP version(as per RFC1122 abnd RFC4291).\n"\
 "\n"
 
 enum sub_command {
@@ -94,6 +111,7 @@ struct {
 	bool version; // -V or --version used
 	bool tls_key_pw_arg; // true if tls_key_pw is passed via option
 	bool no_term; // true if terminal interaction is not permitted
+	prne_htbt_hover_t hover_param;
 } prog_conf;
 
 struct {
@@ -117,9 +135,11 @@ struct {
 
 static void print_help (const char *prog, const sub_command_t sc, FILE *out_f) {
 	switch (sc) {
-	// TODO
 	case SC_HOSTINFO:
 		fprintf(out_f, HOSTINFO_HELP_STR, prog);
+		break;
+	case SC_HOVER:
+		fprintf(out_f, HOVER_HELP_STR, prog);
 		break;
 	default: fprintf(out_f, MAIN_HELP_STR, prog, prog);
 	}
@@ -160,6 +180,8 @@ static void init_prog_conf (void) {
 	prne_memzero(&prog_conf, sizeof(prog_conf)); // so main() is recallable
 
 	prog_conf.remote_port = prne_dup_str(STRINGIFY_X(PRNE_HTBT_PROTO_PORT));
+	prog_conf.hover_param.v4.port = prog_conf.hover_param.v6.port =
+		PRNE_HTBT_PROTO_PORT;
 }
 
 static void deinit_prog_conf (void) {
@@ -215,11 +237,103 @@ static int parse_args_hostinfo (const int argc, char *const *args) {
 	return 2;
 }
 
+static bool parse_port (const char *str, uint16_t *out) {
+	return sscanf(str, "%"SCNu16, out) == 1;
+}
+
+static void ipton_perror (const char *s) {
+	if (errno != 0) {
+		perror(s);
+	}
+	else {
+		fprintf(stderr, "%s: invalid argument\n", s);
+	}
+}
+
+static void p_invarg (const char *s) {
+	fprintf(stderr, "%s: invalid argument\n", s);
+}
+
 static int parse_args_hover (const int argc, char *const *args) {
+	static const struct option lopts[] = {
+		{ "v4-addr", required_argument, 0, 0 },
+		{ "v6-addr", required_argument, 0, 0 },
+		{ "port", required_argument, 0, 0 },
+		{ "v4-port", required_argument, 0, 0 },
+		{ "v6-port", required_argument, 0, 0 },
+		{ 0, 0, 0, 0 }
+	};
+	int f_ret, li;
+	const struct option *cur_lo;
+	bool addr_passed = false;
+
 	if (!assert_host_arg()) {
 		return 2;
 	}
-	// TODO
+
+	while (true) {
+		f_ret = getopt_long(argc, args, "", lopts, &li);
+		if (f_ret == 0) {
+			cur_lo = lopts + li;
+
+			if (strcmp("v4-addr", cur_lo->name) == 0) {
+				errno = 0;
+				if (inet_pton(AF_INET,
+						optarg,
+						prog_conf.hover_param.v4.addr) == 0)
+				{
+					ipton_perror("--v4-addr");
+					return 2;
+				}
+				addr_passed = true;
+			}
+			else if (strcmp("v6-addr", cur_lo->name) == 0) {
+				errno = 0;
+				if (inet_pton(AF_INET6,
+						optarg,
+						prog_conf.hover_param.v6.addr) == 0)
+				{
+					ipton_perror("--v6-addr");
+					return 2;
+				}
+				addr_passed = true;
+			}
+			else if (strcmp("port", cur_lo->name) == 0) {
+				uint16_t port;
+
+				if (!parse_port(optarg, &port)) {
+					p_invarg("--port");
+					return 2;
+				}
+				prog_conf.hover_param.v4.port = prog_conf.hover_param.v6.port =
+					port;
+			}
+			else if (strcmp("v4-port", cur_lo->name) == 0) {
+				if (!parse_port(optarg, &prog_conf.hover_param.v4.port)) {
+					p_invarg("--v4-port");
+					return 2;
+				}
+			}
+			else if (strcmp("v6-port", cur_lo->name) == 0) {
+				if (!parse_port(optarg, &prog_conf.hover_param.v6.port)) {
+					p_invarg("--v6-port");
+					return 2;
+				}
+			}
+			else {
+				abort();
+			}
+		}
+		else {
+			break;
+		}
+	}
+
+	if (!addr_passed) {
+		fprintf(stderr, "No address given.\n");
+		return 2;
+	}
+
 	return 0;
 }
 
@@ -257,7 +371,7 @@ static int parse_args_getbin (const int argc, char *const *args) {
 
 static int parse_args (const int argc, char *const *args) {
 	int fr, li, ret = 0;
-	struct option lopts[] = {
+	static const struct option lopts[] = {
 		{ "help", no_argument, 0, 0 },
 		{ "version", no_argument, 0, 0 },
 		{ "verbose", no_argument, 0, 0 },
@@ -394,13 +508,6 @@ static bool interact_tls_key_pw (void) {
 	struct termios t;
 	tcflag_t saved_flags;
 	bool ret = true, flags_saved = false;
-	regex_t re_tnl;
-	regmatch_t rm[2];
-
-	f_ret = regcomp(&re_tnl, "([\\r\\n]+)$", REG_ICASE | REG_EXTENDED);
-	if (f_ret != 0) {
-		abort();
-	}
 
 // TRY
 	if (prog_conf.tls_key_pw_arg) {
@@ -444,14 +551,7 @@ static bool interact_tls_key_pw (void) {
 		ret = false;
 		goto END;
 	}
-
-	f_ret = regexec(&re_tnl, prog_conf.tls_key_pw, 2, rm, 0);
-	if (f_ret == 0 && rm[1].rm_eo >= 0) {
-		// trailing newline character(\r or \n) found.
-		// no need to dock the string if the input string does not end with
-		// newline.
-		prog_conf.tls_key_pw[rm[1].rm_eo] = 0;
-	}
+	prog_conf.tls_key_pw[strcspn(prog_conf.tls_key_pw, "\r\n")] = 0;
 
 END: // CATCH
 	if (flags_saved) {
@@ -745,8 +845,14 @@ static uint16_t htbt_msgid_rnd_f (void *ctx) {
 	return ret;
 }
 
-static void raise_proto_err (void) {
-	// TODO
+static void raise_proto_err (const char *fmt, ...) {
+	va_list vl;
+
+	fprintf(stderr, "Protocol error: ");
+	va_start(vl, fmt);
+	vfprintf(stderr, fmt, vl);
+	va_end(vl);
+	fprintf(stderr, "\n");
 }
 
 static bool send_frame (const void *frame, prne_htbt_ser_ft ser_f) {
@@ -777,8 +883,7 @@ static bool send_frame (const void *frame, prne_htbt_ser_ft ser_f) {
 			prog_g.net.ib[1].m,
 			prog_g.net.ib[1].len);
 		if (f_ret == 0) {
-			fprintf(stderr, "mbedtls_ssl_write(): EOF\n");
-			raise_proto_err();
+			raise_proto_err("remote end shutdown read");
 			return false;
 		}
 		if (f_ret < 0) {
@@ -810,7 +915,9 @@ static bool recv_frame (void *frame, prne_htbt_dser_ft dser_f) {
 			perror("dser_f()");
 			abort();
 		default:
-			raise_proto_err();
+			raise_proto_err(
+				"failed to deserialise frame (%s)",
+				prne_htbt_serrc_tostr(rc));
 			return false;
 		}
 
@@ -819,8 +926,7 @@ static bool recv_frame (void *frame, prne_htbt_dser_ft dser_f) {
 			prog_g.net.ib[0].m + prog_g.net.ib[0].len,
 			prog_g.net.ib[0].avail);
 		if (f_ret == 0) {
-			fprintf(stderr, "mbedtls_ssl_read(): EOF\n");
-			raise_proto_err();
+			raise_proto_err("remote end shutdown write");
 			return false;
 		}
 		if (f_ret < 0) {
@@ -837,13 +943,11 @@ static bool recv_mh (prne_htbt_msg_head_t *mh, const uint16_t *cor_id) {
 	}
 
 	if (!mh->is_rsp) {
-		raise_proto_err();
-		fprintf(stderr, "recv_mh(): received request frame\n");
+		raise_proto_err("received request frame for a response");
 		return false;
 	}
 	if (cor_id != NULL && *cor_id != mh->id) {
-		raise_proto_err();
-		fprintf(stderr, "recv_mh(): received request frame\n");
+		raise_proto_err("Uninitiated msg_id %"PRIx8, mh->id);
 		return false;
 	}
 
@@ -861,15 +965,76 @@ static void emit_status_frame (const prne_htbt_status_t *st) {
 	emit_mapping_end();
 }
 
-static void emit_preemble (const char *cmd, const char *result) {
-	// TODO: include -t -p and resolved hostname as well
+static void emit_preemble (
+	const char *cmd,
+	const char *result,
+	void (*opt_f)(void))
+{
+	int f_ret;
+	uint8_t sa_storage[
+		prne_op_max(sizeof(struct sockaddr_in6), sizeof(struct sockaddr_in))];
+	socklen_t sl = sizeof(sa_storage);
+	const struct sockaddr *sa = (const struct sockaddr*)sa_storage;
+
+	f_ret = getpeername(prog_g.net.ctx.fd, (struct sockaddr*)sa_storage, &sl);
+	if (f_ret != 0) {
+		perror("getpeername()");
+		abort();
+	}
+	assert(sizeof(sa_storage) >= sl);
+
 	emit_scalar(YAML_STR_TAG, PREEMBLE_TAG_NAME);
 
 	emit_mapping_start();
+	emit_scalar(YAML_STR_TAG, "remote");
+	emit_mapping_start();
+	emit_scalar(YAML_STR_TAG, "host");
+	emit_scalar(YAML_STR_TAG, prog_conf.remote_host);
+	if (sa->sa_family == AF_INET) {
+		const struct sockaddr_in *sa = (const struct sockaddr_in*)sa_storage;
+		char addr_str[INET_ADDRSTRLEN];
+
+		if (inet_ntop(AF_INET, &sa->sin_addr, addr_str, sizeof(addr_str)) ==
+			NULL)
+		{
+			perror("inet_ntop()");
+			abort();
+		}
+		emit_scalar(YAML_STR_TAG, "af");
+		emit_scalar(YAML_STR_TAG, "INET");
+		emit_scalar(YAML_STR_TAG, "addr");
+		emit_scalar(YAML_STR_TAG, addr_str);
+		emit_scalar(YAML_STR_TAG, "port");
+		emit_scalar_fmt(YAML_INT_TAG, "%u", ntohs(sa->sin_port));
+	}
+	else if (sa->sa_family == AF_INET6) {
+		const struct sockaddr_in6 *sa = (const struct sockaddr_in6*)sa_storage;
+		char addr_str[INET6_ADDRSTRLEN];
+
+		if (inet_ntop(AF_INET6, &sa->sin6_addr, addr_str, sizeof(addr_str)) ==
+			NULL)
+		{
+			perror("inet_ntop()");
+			abort();
+		}
+		emit_scalar(YAML_STR_TAG, "af");
+		emit_scalar(YAML_STR_TAG, "INET6");
+		emit_scalar(YAML_STR_TAG, "addr");
+		emit_scalar(YAML_STR_TAG, addr_str);
+		emit_scalar(YAML_STR_TAG, "port");
+		emit_scalar_fmt(YAML_INT_TAG, "%u", ntohs(sa->sin6_port));
+	}
+	else {
+		abort();
+	}
+	emit_mapping_end();
 	emit_scalar(YAML_STR_TAG, "command");
 	emit_scalar(YAML_STR_TAG, cmd);
 	emit_scalar(YAML_STR_TAG, "result");
 	emit_scalar(YAML_STR_TAG, result);
+	if (opt_f != NULL) {
+		opt_f();
+	}
 	emit_mapping_end();
 }
 
@@ -1043,19 +1208,19 @@ static int cmdmain_hostinfo (void) {
 			goto END;
 		}
 		start_yaml();
-		emit_preemble("hostinfo", "ok");
+		emit_preemble("hostinfo", "ok", NULL);
 		emit_hostinfo_frame(&hi);
 		break;
 	case PRNE_HTBT_OP_STATUS:
 		ret = 1;
 		if (recv_frame(&st, (prne_htbt_dser_ft)prne_htbt_dser_status)) {
 			start_yaml();
-			emit_preemble("hostinfo", "status");
+			emit_preemble("hostinfo", "status", NULL);
 			emit_status_frame(&st);
 		}
 		goto END;
 	default:
-		fprintf(stderr, "Invalid op code response: %"PRIx8"\n", mh.op);
+		raise_proto_err("invalid response op %"PRIx8"\n", mh.op);
 		ret = 1;
 		goto END;
 	}
@@ -1063,6 +1228,90 @@ static int cmdmain_hostinfo (void) {
 END:
 	prne_htbt_free_msg_head(&mh);
 	prne_htbt_free_host_info(&hi);
+	prne_htbt_free_status(&st);
+	return ret;
+}
+
+static void emit_hover_opts (void) {
+	char addr_str[prne_op_max(INET_ADDRSTRLEN, INET6_ADDRSTRLEN)];
+
+	emit_scalar(YAML_STR_TAG, PREEMBLE_OPT_TAG_NAME);
+	emit_mapping_start();
+	emit_scalar(YAML_STR_TAG, "v4_addr");
+	if (inet_ntop(
+			AF_INET,
+			prog_conf.hover_param.v4.addr,
+			addr_str,
+			sizeof(addr_str)) == NULL)
+	{
+		perror("inet_ntop()");
+		abort();
+	}
+	emit_scalar(YAML_STR_TAG, addr_str);
+	emit_scalar(YAML_STR_TAG, "v4_port");
+	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu16, prog_conf.hover_param.v4.port);
+	emit_scalar(YAML_STR_TAG, "v6_addr");
+	if (inet_ntop(
+			AF_INET6,
+			prog_conf.hover_param.v6.addr,
+			addr_str,
+			sizeof(addr_str)) == NULL)
+	{
+		perror("inet_ntop()");
+		abort();
+	}
+	emit_scalar(YAML_STR_TAG, addr_str);
+	emit_scalar(YAML_STR_TAG, "v6_port");
+	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu16, prog_conf.hover_param.v6.port);
+	emit_mapping_end();
+}
+
+static int cmdmain_hover (void) {
+	int ret = 0;
+	uint16_t msgid;
+	prne_htbt_msg_head_t mh;
+	prne_htbt_status_t st;
+
+	msgid = prne_htbt_gen_msgid(NULL, htbt_msgid_rnd_f);
+	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_status(&st);
+	mh.id = msgid;
+	mh.is_rsp = false;
+	mh.op = PRNE_HTBT_OP_HOVER;
+
+	if (!do_connect()) {
+		ret = 1;
+		goto END;
+	}
+
+	if (!send_frame(&mh, (prne_htbt_ser_ft)prne_htbt_ser_msg_head) ||
+		!send_frame(
+			&prog_conf.hover_param,
+			(prne_htbt_ser_ft)prne_htbt_ser_hover))
+	{
+		ret = 1;
+		goto END;
+	}
+	if (!recv_mh(&mh, &msgid)) {
+		ret = 1;
+		goto END;
+	}
+	if (mh.op != PRNE_HTBT_OP_STATUS) {
+		raise_proto_err("invalid response op %"PRIx8"\n", mh.op);
+		ret = 1;
+		goto END;
+	}
+
+	if (!recv_frame(&st, (prne_htbt_dser_ft)prne_htbt_dser_status)) {
+		ret = 1;
+		goto END;
+	}
+	start_yaml();
+	emit_preemble("hover", "ok", emit_hover_opts);
+	emit_status_frame(&st);
+
+END:
+	prne_htbt_free_msg_head(&mh);
 	prne_htbt_free_status(&st);
 	return ret;
 }
@@ -1098,6 +1347,7 @@ int main (const int argc, char *const *args) {
 	switch (prog_conf.cmd) {
 	// TODO
 	case SC_HOSTINFO: ec = cmdmain_hostinfo(); break;
+	case SC_HOVER: ec = cmdmain_hover(); break;
 	default:
 		ec = 1;
 		fprintf(stderr, "COMMAND not implemented.\n");

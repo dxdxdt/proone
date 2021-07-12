@@ -1419,6 +1419,10 @@ static bool htbt_slv_consume_inbuf (
 			htbt_slv_raise_protoerr(ctx, f_head.id, PRNE_HTBT_STATUS_UNIMPL);
 			goto END;
 		}
+
+		if (!ret) {
+			break;
+		}
 	}
 
 END:
@@ -1656,6 +1660,7 @@ ERR:
 		if (getsockopt(pfd[i].fd, SOL_SOCKET, SO_ERROR, &f_ret, &sl) != 0 ||
 			f_ret != 0)
 		{
+			errno = f_ret;
 			continue;
 		}
 

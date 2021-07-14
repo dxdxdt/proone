@@ -396,7 +396,7 @@ ERR:
 	return false;
 }
 
-bool prne_htbt_set_cmd (prne_htbt_cmd_t *cmd, char **const args) {
+bool prne_htbt_set_cmd (prne_htbt_cmd_t *cmd, const char **args) {
 	size_t *args_len = NULL;
 	size_t i, argc;
 	bool ret = true;
@@ -697,6 +697,10 @@ prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (
 	const prne_htbt_bin_meta_t *in)
 {
 	*actual = in->cmd.mem_len + 5;
+
+	if (in->bin_size > PRNE_HTBT_BIN_LEN_MAX) {
+		return PRNE_HTBT_SER_RC_FMT_ERR;
+	}
 
 	if (mem_len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;

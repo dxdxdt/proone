@@ -303,6 +303,7 @@ typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(
 #define PRNE_HTBT_ARGS_MAX			255
 #define PRNE_HTBT_ARG_MEM_MAX		1023
 #define PRNE_HTBT_STDIO_LEN_MAX		0x0FFF
+#define PRNE_HTBT_BIN_LEN_MAX		0xFFFFFF
 
 /* PRNE_HTBT_PROTO_MIN_BUF
 *
@@ -383,7 +384,7 @@ bool prne_htbt_alloc_cmd (
 	prne_htbt_cmd_t *cmd,
 	const size_t argc,
 	const size_t *args_len);
-bool prne_htbt_set_cmd (prne_htbt_cmd_t *cmd, char **const args);
+bool prne_htbt_set_cmd (prne_htbt_cmd_t *cmd, const char **args);
 void prne_htbt_free_cmd (prne_htbt_cmd_t *cmd);
 bool prne_htbt_eq_cmd (const prne_htbt_cmd_t *a, const prne_htbt_cmd_t *b);
 

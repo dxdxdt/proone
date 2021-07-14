@@ -38,7 +38,7 @@ static void test_ser (void) {
 	static size_t cred_data_len = 0;
 	static prne_htbt_host_info_t hi_a, hi_b;
 	static prne_htbt_cmd_t cmd_a, cmd_b;
-	static char *test_args[] = {
+	static const char *test_args[] = {
 		"sudo",
 		"systemctl",
 		"enable",
@@ -48,10 +48,10 @@ static void test_ser (void) {
 	};
 	static char test_args_mem[] =
 		"\x00\x2Bsudo\0systemctl\0enable\0--now\0NetworkManager";
-	static char *empty_args[] = {
+	static const char *empty_args[] = {
 		NULL
 	};
-	static char *long_args[] = {
+	static const char *long_args[] = {
 		"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
 		"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
 		"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
@@ -69,7 +69,7 @@ static void test_ser (void) {
 		"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
 		"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", NULL
 	};
-	static char *too_long_args[] = {
+	static const char *too_long_args[] = {
 		"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
 		"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
 		"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
@@ -88,7 +88,7 @@ static void test_ser (void) {
 		"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
 		NULL
 	};
-	static char *long_mem_args[] = {
+	static const char *long_mem_args[] = {
 		"123", "123", "123", "123", "123", "123", "123", "123",
 		"123", "123", "123", "123", "123", "123", "123", "123",
 		"123", "123", "123", "123", "123", "123", "123", "123",
@@ -122,7 +122,7 @@ static void test_ser (void) {
 		"123", "123", "123", "123", "123", "123", "123", "123",
 		"123", "123", "123", "123", "123", "123", "123456", NULL
 	};
-	static char *too_long_mem_args[] = {
+	static const char *too_long_mem_args[] = {
 		"123", "123", "123", "123", "123", "123", "123", "123",
 		"123", "123", "123", "123", "123", "123", "123", "123",
 		"123", "123", "123", "123", "123", "123", "123", "123",

@@ -1134,139 +1134,160 @@ static void resolv_proc_expired (prne_resolv_t *ctx) {
 	}
 }
 
+static bool resolv_proc_out (prne_resolv_t *ctx) {
+	int f_ret;
+	bool ret = false;
+
+	while (ctx->iobuf[1].len > 0) {
+		f_ret = mbedtls_ssl_write(
+			&ctx->ssl.ctx,
+			ctx->iobuf[1].m,
+			ctx->iobuf[1].len);
+		if (f_ret == MBEDTLS_ERR_SSL_WANT_READ ||
+			f_ret == MBEDTLS_ERR_SSL_WANT_WRITE)
+		{
+			break;
+		}
+		if (f_ret <= 0) {
+			// we don't renegotiate with terrorists.
+			resolv_close_sck(ctx, &RESOLV_CONN_ERR_PAUSE, true);
+			break;
+		}
+		prne_iobuf_shift(&ctx->iobuf[1], -f_ret);
+		ret = true;
+	}
+
+	return ret;
+}
+
+static bool resolv_proc_in (prne_resolv_t *ctx) {
+	size_t pos, msg_len;
+	bool err_flag = false, ret = false;
+
+	pos = 0;
+	while (true) {
+		if (pos + 1 >= ctx->iobuf[0].len) {
+			break;
+		}
+		msg_len = prne_recmb_msb16(
+			ctx->iobuf[0].m[pos],
+			ctx->iobuf[0].m[pos + 1]);
+		if (msg_len > 512) { // unimplemented.
+			prne_dbgpf(
+				"* [resolv_wkr] Protocol error: "
+				"received %zu bytes long msg.\n"
+				"* [resolv_wkr] Dropping connection!\n",
+				msg_len);
+			// try to get qid
+			if (ctx->iobuf[0].len > pos + 4) {
+				const uint16_t qid = prne_recmb_msb16(
+					ctx->iobuf[0].m[pos + 2],
+					ctx->iobuf[0].m[pos + 3]);
+				const prne_imap_tuple_t *tpl = prne_imap_lookup(
+					&ctx->qid_map,
+					qid);
+
+				if (tpl->val != (prne_imap_val_type_t)NULL) {
+					query_entry_t *qent = (query_entry_t*)tpl->val;
+					qent->fut.qr = PRNE_RESOLV_QR_IMPL;
+					resolv_disown_qent(qent);
+				}
+				prne_imap_erase(&ctx->qid_map, qid);
+			}
+			resolv_close_sck(ctx, &RESOLV_CONN_ERR_PAUSE, true);
+			break;
+		}
+		if (pos + 1 + msg_len >= ctx->iobuf[0].len) {
+			break;
+		}
+
+		ret |= resolv_proc_dns_msg(
+			ctx,
+			ctx->iobuf[0].m + pos + 2,
+			msg_len,
+			&err_flag);
+		if (err_flag) {
+			resolv_close_sck(ctx, &RESOLV_CONN_ERR_PAUSE, true);
+			return false;
+		}
+		pos += 2 + msg_len;
+	}
+
+	prne_iobuf_shift(&ctx->iobuf[0], -pos);
+	return ret;
+}
+
 static void resolv_proc_q (prne_resolv_t *ctx) {
-	int pollret, ret;
-	short pfd_events;
-	bool proc;
+	int ret;
+	bool proc = false;
 	/*
 	* The server could be sending gibberish response messages that look legit.
 	* Timeout the loop when we don't receive response we recognise in time.
 	*/
 	pth_event_t ev = NULL;
 
-LOOP:
-	proc = false;
-	while (ctx->qlist.size > 0 || ctx->qid_map.size > 0) {
+	while (true) {
 		resolv_proc_expired(ctx);
-
-		if (ctx->iobuf[1].len > 0 || ctx->qid_map.size < RESOLV_PIPELINE_SIZE) {
-			pfd_events = POLLIN | POLLOUT;
-		}
-		else {
-			pfd_events = POLLIN;
+		if (ctx->qlist.size == 0 && ctx->qid_map.size == 0) {
+			break;
 		}
 
+		// connect
+		if (ctx->act_sck_pfd.fd < 0) {
+			proc = false;
+		}
 		if (!resolv_ensure_conn(ctx)) {
-			goto LOOP;
+			continue;
 		}
 
-		if (proc || ev == NULL) {
-			pth_event_free(ev, FALSE);
-			ev = pth_event(
-				PTH_EVENT_TIME,
-				prne_pth_tstimeout(RESOLV_SCK_OP_TIMEOUT));
+		// write
+		if (resolv_send_dns_msgs(ctx)) {
+			proc |= resolv_proc_out(ctx);
 		}
-		proc = false;
-
-		ctx->act_sck_pfd.events = pfd_events;
-		prne_assert(ev != NULL); // fatal without timeout
-		pollret = prne_pth_poll(&ctx->act_sck_pfd, 1, -1, ev);
-
-		if (pth_event_status(ev) != PTH_STATUS_PENDING) {
-			resolv_close_sck(ctx, NULL, true);
+		if (ctx->act_sck_pfd.fd < 0) {
+			continue;
 		}
-		else if (pollret > 0) {
-			if (ctx->act_sck_pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-				resolv_close_sck(ctx, &RESOLV_CONN_ERR_PAUSE, true);
-				goto LOOP;
+
+		// read
+		ret = mbedtls_ssl_read(
+			&ctx->ssl.ctx,
+			ctx->iobuf[0].m + ctx->iobuf[0].len,
+			ctx->iobuf[0].avail);
+		if (ret == MBEDTLS_ERR_SSL_WANT_READ ||
+			ret == MBEDTLS_ERR_SSL_WANT_WRITE)
+		{
+			if (proc || ev == NULL) {
+				// timer reset
+				pth_event_free(ev, FALSE);
+				ev = pth_event(
+					PTH_EVENT_TIME,
+					prne_pth_tstimeout(RESOLV_SCK_OP_TIMEOUT));
 			}
-			if (ctx->act_sck_pfd.revents & POLLIN) {
-				size_t pos, msg_len;
-				bool err_flag = false;
-
-				ret = mbedtls_ssl_read(
-					&ctx->ssl.ctx,
-					ctx->iobuf[0].m + ctx->iobuf[0].len,
-					ctx->iobuf[0].avail);
-				if (ret <= 0) {
-					// we don't renegotiate with terrorists.
-					resolv_close_sck(ctx, &RESOLV_CONN_ERR_PAUSE, true);
-					goto LOOP;
-				}
-				prne_iobuf_shift(&ctx->iobuf[0], ret);
-
-				pos = 0;
-				while (true) {
-					if (pos + 1 >= ctx->iobuf[0].len) {
-						break;
-					}
-					msg_len = prne_recmb_msb16(
-						ctx->iobuf[0].m[pos],
-						ctx->iobuf[0].m[pos + 1]);
-					if (msg_len > 512) { // unimplemented.
-						prne_dbgpf(
-							"* [resolv_wkr] Protocol error: "
-							"received %zu bytes long msg.\n"
-							"* [resolv_wkr] Dropping connection!\n",
-							msg_len);
-						// try to get qid
-						if (ctx->iobuf[0].len > pos + 4) {
-							const uint16_t qid = prne_recmb_msb16(
-								ctx->iobuf[0].m[pos + 2],
-								ctx->iobuf[0].m[pos + 3]);
-							const prne_imap_tuple_t *tpl = prne_imap_lookup(
-								&ctx->qid_map,
-								qid);
-
-							if (tpl->val != (prne_imap_val_type_t)NULL) {
-								query_entry_t *qent = (query_entry_t*)tpl->val;
-								qent->fut.qr = PRNE_RESOLV_QR_IMPL;
-								resolv_disown_qent(qent);
-							}
-							prne_imap_erase(&ctx->qid_map, qid);
-						}
-						resolv_close_sck(ctx, &RESOLV_CONN_ERR_PAUSE, true);
-						goto LOOP;
-					}
-					if (pos + 1 + msg_len >= ctx->iobuf[0].len) {
-						break;
-					}
-
-					proc |= resolv_proc_dns_msg(
-						ctx,
-						ctx->iobuf[0].m + pos + 2,
-						msg_len,
-						&err_flag);
-					if (err_flag) {
-						resolv_close_sck(ctx, &RESOLV_CONN_ERR_PAUSE, true);
-						goto LOOP;
-					}
-					pos += 2 + msg_len;
-				}
-
-				prne_iobuf_shift(&ctx->iobuf[0], -pos);
+			if (ctx->iobuf[1].len > 0 || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+				ctx->act_sck_pfd.events = POLLIN | POLLOUT;
+			}
+			else {
+				ctx->act_sck_pfd.events = POLLIN;
 			}
 
-			if ((ctx->act_sck_pfd.revents & POLLOUT) && ctx->iobuf[1].len > 0) {
-				ret = mbedtls_ssl_write(
-					&ctx->ssl.ctx,
-					ctx->iobuf[1].m,
-					ctx->iobuf[1].len);
-				if (ret <= 0) {
-					// we don't renegotiate with terrorists.
-					resolv_close_sck(ctx, &RESOLV_CONN_ERR_PAUSE, true);
-					goto LOOP;
-				}
-				prne_iobuf_shift(&ctx->iobuf[1], -ret);
-			}
+			prne_assert(ev != NULL); // fatal without timeout
+			ret = prne_pth_poll(&ctx->act_sck_pfd, 1, -1, ev);
 
-			if (ctx->iobuf[1].len == 0) {
-				proc |= resolv_send_dns_msgs(ctx);
+			if (pth_event_status(ev) != PTH_STATUS_PENDING) {
+				resolv_close_sck(ctx, NULL, true);
 			}
+			else if (ret < 0) {
+				resolv_close_sck(ctx, &RESOLV_RSRC_ERR_PAUSE, true);
+			}
+			continue;
 		}
-		else {
-			resolv_close_sck(ctx, &RESOLV_RSRC_ERR_PAUSE, true);
+		else if (ret <= 0) {
+			resolv_close_sck(ctx, &RESOLV_CONN_ERR_PAUSE, true);
+			continue;
 		}
+		prne_iobuf_shift(&ctx->iobuf[0], ret);
+
+		proc |= resolv_proc_in(ctx);
 	}
 
 	pth_event_free(ev, FALSE);

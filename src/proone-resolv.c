@@ -38,6 +38,11 @@ pth_cond_t prm_cond = PTH_COND_INIT;
 prne_pth_cv_t prm_cv = { &prm_lock, &prm_cond, false };
 
 prne_resolv_t *resolv = NULL;
+struct {
+	bool parse_err;
+	bool query_err;
+	bool proc;
+} exec_result;
 
 static void proc_prompt_line (char *line, const size_t line_len) {
 	static regmatch_t rm[3];
@@ -93,6 +98,7 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 				(prne_llist_element_t)prm) != NULL);
 		}
 		else {
+			exec_result.query_err = true;
 			perror("* Queue failed");
 			prne_resolv_free_prm(prm);
 			prne_free(prm);
@@ -101,6 +107,7 @@ static void proc_prompt_line (char *line, const size_t line_len) {
 	else if (line_len > 0 &&
 		regexec(&empty_line_regex, line, 0, NULL, 0) != 0)
 	{
+		exec_result.parse_err = true;
 		fprintf(stderr, "* Line not recognised.\n");
 	}
 }
@@ -148,6 +155,7 @@ static void *stdin_wkr_entry (void *ctx) {
 			else {
 				line_buf_cnt = 0;
 				if (!missed_line) {
+					exec_result.parse_err = true;
 					fprintf(stderr, "* Line too long!\n");
 				}
 				missed_line = true;
@@ -194,7 +202,11 @@ static void *stdout_wkr_entry (void *ctx) {
 				if (prm->fut->qr == PRNE_RESOLV_QR_OK ||
 					prm->fut->qr == PRNE_RESOLV_QR_STATUS)
 				{
+					exec_result.proc = true;
 					status_str = prne_resolv_rcode_tostr(prm->fut->status);
+				}
+				else {
+					exec_result.query_err = true;
 				}
 				if (status_str == NULL) {
 					status_str = "";
@@ -299,10 +311,10 @@ int main (void) {
 		&prmpt_regex,
 		"(A|AAAA|TXT)\\s+([a-z0-9\\-\\.]+)",
 		REG_ICASE | REG_EXTENDED) == 0);
-	// org regex: ^\s+$
+	// org regex: (^[#;].*)|(^(\s+)?$)
 	prne_assert(regcomp(
 		&empty_line_regex,
-		"^\\s+$",
+		"(^[#;].*)|(^(\\s+)?$)",
 		REG_NOSUB | REG_EXTENDED) == 0);
 	prne_mbedtls_entropy_init(&entropy);
 	mbedtls_ctr_drbg_init(&rnd);
@@ -363,5 +375,14 @@ int main (void) {
 	}
 	prne_free_llist(&prm_list);
 
-	return 0;
+	if (exec_result.proc) {
+		if (exec_result.parse_err || exec_result.query_err) {
+			return 3;
+		}
+		return 0;
+	}
+	if (exec_result.parse_err) {
+		return 2;
+	}
+	return 1;
 }

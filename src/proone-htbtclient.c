@@ -49,8 +49,8 @@
 "  hover     send handover request\n"\
 "  runcmd    run command on host\n"\
 "  runbin    upload and run arbitrary binary on host\n"\
-"  nybin     perform binary upgrade on host\n"\
-"  getbin    download binary from host\n"\
+"  nybin     perform binary update\n"\
+"  getbin    download Proone binary\n"\
 "\n"\
 "Common options:\n"\
 "  -h, --help           print help for specified command and exit. Print this\n"\
@@ -95,6 +95,19 @@
 "\n"\
 "Options:\n"\
 "  -d, --detach  run detached(i.e., run as daemon)\n"\
+"\n"
+#define RUNBIN_HELP_STR \
+"Upload and run binary on host running Proone instance.\n"\
+"Usage: %s [common options] runbin [options] <FILE> [arg0] [arg1 ...]\n"\
+"\n"\
+"Options:\n"\
+"  -d, --detach  run detached(i.e., run as daemon)\n"\
+"\n"
+#define NYBIN_HELP_STR \
+"Perform binary update.\n"\
+"Usage: %s [common options] nybin <FILE> [arg0] [arg1 ...]\n"\
+"\n"\
+"<FILE>: NYBIN format binary\n"\
 "\n"
 
 enum sub_command {
@@ -172,6 +185,12 @@ static void print_help (const char *prog, const sub_command_t sc, FILE *out_f) {
 	case SC_RUNCMD:
 		fprintf(out_f, RUNCMD_HELP_STR, prog);
 		break;
+	case SC_RUNBIN:
+		fprintf(out_f, RUNBIN_HELP_STR, prog);
+		break;
+	case SC_NYBIN:
+		fprintf(out_f, NYBIN_HELP_STR, prog);
+		break;
 	// TODO
 	default: fprintf(out_f, MAIN_HELP_STR, prog, prog);
 	}
@@ -239,13 +258,13 @@ static void init_hover_conf (void) {
 	prog_conf.free_cmdparam_f = free_hover_conf;
 }
 
-static void free_run_cmd (void) {
+static void free_run_conf (void) {
 	prne_htbt_free_bin_meta(&prog_conf.cmd_param.run.bm);
 }
 
 static void init_run_conf (void) {
 	prne_htbt_init_bin_meta(&prog_conf.cmd_param.run.bm);
-	prog_conf.free_cmdparam_f = free_run_cmd;
+	prog_conf.free_cmdparam_f = free_run_conf;
 }
 
 static void deinit_prog_conf (void) {
@@ -442,7 +461,7 @@ static int parse_args_run (const int argc, char *const *args, const bool bin) {
 LOOP_END:
 	if (bin) {
 		if (argc <= optind) {
-			fprintf(stderr, "Path to BIN not specified.\n");
+			fprintf(stderr, "FILE not specified.\n");
 			return 2;
 		}
 
@@ -452,7 +471,6 @@ LOOP_END:
 			perror("prne_dup_str()");
 			abort();
 		}
-
 		optind += 1;
 	}
 
@@ -475,7 +493,30 @@ static int parse_args_nybin (const int argc, char *const *args) {
 	if (!assert_host_arg()) {
 		return 2;
 	}
-	// TODO
+	init_run_conf();
+	init_run_g();
+
+	if (argc <= optind) {
+		fprintf(stderr, "FILE not specified.\n");
+		return 2;
+	}
+
+	prne_free(prog_conf.cmd_param.run.bin_path);
+	prog_conf.cmd_param.run.bin_path = prne_dup_str(args[optind]);
+	if (prog_conf.cmd_param.run.bin_path == NULL) {
+		perror("prne_dup_str()");
+		abort();
+	}
+	optind += 1;
+
+	if (!prne_htbt_set_cmd(
+			&prog_conf.cmd_param.run.bm.cmd,
+			(const char**)args + optind))
+	{
+		perror("prne_htbt_set_cmd()");
+		abort();
+	}
+
 	return 0;
 }
 
@@ -824,6 +865,33 @@ static void emit_mapping_end (void) {
 	}
 }
 
+static void emit_seq_start (void) {
+	yaml_event_t e;
+
+	if (yaml_sequence_start_event_initialize(
+			&e,
+			NULL,
+			(yaml_char_t*)YAML_SEQ_TAG,
+			true,
+			YAML_ANY_SEQUENCE_STYLE) == 0 ||
+		yaml_emitter_emit(prog_g.yaml.emitter, &e) == 0)
+	{
+		yaml_perror("yaml_sequence_start_event_initialize()");
+		abort();
+	}
+}
+
+static void emit_seq_end (void) {
+	yaml_event_t e;
+
+	if (yaml_sequence_end_event_initialize(&e) == 0 ||
+		yaml_emitter_emit(prog_g.yaml.emitter, &e) == 0)
+	{
+		yaml_perror("yaml_sequence_end_event_initialize()");
+		abort();
+	}
+}
+
 static void emit_scalar (const char *type, const char *val) {
 	yaml_event_t e;
 
@@ -1084,7 +1152,7 @@ static void emit_status_frame (const prne_htbt_status_t *st) {
 	emit_scalar(YAML_STR_TAG, BODY_TAG_NAME);
 
 	emit_mapping_start();
-	emit_scalar(YAML_INT_TAG,"code");
+	emit_scalar(YAML_INT_TAG, "code");
 	emit_scalar_fmt(YAML_INT_TAG, "%d", st->code);
 	emit_scalar(YAML_STR_TAG, "err");
 	emit_scalar_fmt(YAML_INT_TAG, "%"PRId32, st->err);
@@ -1412,7 +1480,21 @@ static bool run_setup (const uint16_t msgid) {
 	mh.id = msgid;
 	mh.is_rsp = false;
 
-	if (prog_conf.cmd_param.run.bin_path != NULL) {
+	switch (prog_conf.cmd) {
+	case SC_RUNCMD: mh.op = PRNE_HTBT_OP_RUN_CMD; break;
+	case SC_RUNBIN: mh.op = PRNE_HTBT_OP_RUN_BIN; break;
+	case SC_NYBIN: mh.op = PRNE_HTBT_OP_NY_BIN; break;
+	default: abort();
+	}
+
+	switch (prog_conf.cmd) {
+	case SC_RUNCMD:
+		f = &prog_conf.cmd_param.run.bm.cmd;
+		ser_f = (prne_htbt_ser_ft)prne_htbt_ser_cmd;
+		fs.st_size = 0;
+		break;
+	case SC_RUNBIN:
+	case SC_NYBIN:
 		bin_fd = open(prog_conf.cmd_param.run.bin_path, O_RDONLY);
 		if (bin_fd < 0 || fstat(bin_fd, &fs) != 0) {
 			ret = false;
@@ -1427,15 +1509,9 @@ static bool run_setup (const uint16_t msgid) {
 		}
 
 		prog_conf.cmd_param.run.bm.bin_size = (uint32_t)fs.st_size;
-		mh.op = PRNE_HTBT_OP_RUN_BIN;
 		f = &prog_conf.cmd_param.run.bm;
 		ser_f = (prne_htbt_ser_ft)prne_htbt_ser_bin_meta;
-	}
-	else {
-		mh.op = PRNE_HTBT_OP_RUN_CMD;
-		f = &prog_conf.cmd_param.run.bm.cmd;
-		ser_f = (prne_htbt_ser_ft)prne_htbt_ser_cmd;
-		fs.st_size = 0;
+		break;
 	}
 
 	ret = send_mh(&mh) && send_frame(f, ser_f);
@@ -1479,7 +1555,7 @@ static bool run_setup (const uint16_t msgid) {
 			goto END;
 		}
 		if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
-			fprintf(stderr, "run bin upload %d bytes.\n", f_ret);
+			fprintf(stderr, "bin ul %d bytes.\n", f_ret);
 		}
 		prne_iobuf_shift(&prog_g.cmd_st.run.ib, -f_ret);
 	}
@@ -1728,6 +1804,40 @@ static int cmdmain_run (void) {
 	return 1;
 }
 
+static void emit_nybin_opts (void) {
+	emit_scalar(YAML_STR_TAG, PREEMBLE_OPT_TAG_NAME);
+
+	emit_mapping_start();
+	emit_scalar(YAML_STR_TAG, "bin_size");
+	emit_scalar_fmt(
+		YAML_INT_TAG,
+		"%"PRIu32,
+		prog_conf.cmd_param.run.bm.bin_size);
+	emit_scalar(YAML_STR_TAG, "args");
+	emit_seq_start();
+	for (size_t i = 0; i < prog_conf.cmd_param.run.bm.cmd.argc; i += 1) {
+		emit_scalar(YAML_STR_TAG, prog_conf.cmd_param.run.bm.cmd.args[i]);
+	}
+	emit_seq_end();
+	emit_mapping_end();
+}
+
+static int cmdmain_nybin (void) {
+	uint16_t msgid;
+
+	msgid = prne_htbt_gen_msgid(NULL, htbt_msgid_rnd_f);
+
+	if (!(do_connect() && run_setup(msgid) && run_recv_status(msgid))) {
+		return 1;
+	}
+
+	start_yaml();
+	emit_preemble("nybin", "ok", emit_nybin_opts);
+	emit_status_frame(&prog_g.cmd_st.run.st);
+
+	return 0;
+}
+
 static int cmdmain_hover (void) {
 	int ret = 0;
 	uint16_t msgid;
@@ -1813,6 +1923,7 @@ int main (const int argc, char *const *args) {
 	case SC_RUNBIN:
 		ec = cmdmain_run();
 		break;
+	case SC_NYBIN: ec = cmdmain_nybin(); break;
 	// TODO
 	default:
 		ec = 1;

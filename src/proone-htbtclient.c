@@ -1639,17 +1639,23 @@ static bool run_relay (const uint16_t msgid) {
 
 	pfd[0].fd = STDIN_FILENO;
 	pfd[1].fd = prog_g.net.ctx.fd;
+	pfd[0].events = pfd[1].events = POLLIN;
 
 	while (pfd[0].fd >= 0 || pfd[1].fd >= 0) {
-		pfd[0].events = pfd[1].events = POLLIN;
+		pfd[0].revents = pfd[1].revents = 0;
 
-		f_ret = poll(pfd, 2, -1);
-		if (f_ret < 0) {
-			ret = false;
-			perror("poll()");
-			break;
+		if (mbedtls_ssl_check_pending(&prog_g.ssl.ctx)) {
+			pfd[1].revents = POLLIN;
 		}
-		assert(f_ret != 0);
+		else {
+			f_ret = poll(pfd, 2, -1);
+			if (f_ret < 0) {
+				ret = false;
+				perror("poll()");
+				break;
+			}
+			assert(f_ret != 0);
+		}
 
 		if (pfd[0].revents != 0 && !run_sendstd(msgid, &pfd[0].fd)) {
 			ret = false;

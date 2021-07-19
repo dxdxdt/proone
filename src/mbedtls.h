@@ -11,6 +11,10 @@
 #include <mbedtls/entropy.h>
 #include <pthsem.h>
 
+#define prne_mbedtls_is_nberr(expr) \
+	((expr) == MBEDTLS_ERR_SSL_WANT_READ || \
+		(expr) == MBEDTLS_ERR_SSL_WANT_WRITE)
+
 
 // Callback that masks `MBEDTLS_X509_BADCERT_EXPIRED`
 int prne_mbedtls_x509_crt_verify_cb (

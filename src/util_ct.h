@@ -56,3 +56,6 @@
 	if ((l) != NULL) {\
 		*(l) = (r);\
 	}
+
+// include <errno.h> if you get compilation errors
+#define prne_is_nberr(expr) ((expr) == EAGAIN || (expr) == EWOULDBLOCK)

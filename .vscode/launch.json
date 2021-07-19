@@ -168,7 +168,13 @@
 			"environment": [],
 			"externalConsole": false,
 			"MIMode": "gdb",
-			"setupCommands": [],
+			"setupCommands": [
+				{
+					"description": "Ignore SIGPIPE",
+					"text": "handle SIGPIPE nostop print",
+					"ignoreFailures": false
+				}
+			],
 			"preLaunchTask": "Build hostinfod",
 			"miDebuggerPath": "/usr/bin/gdb"
 		},

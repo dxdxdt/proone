@@ -1453,7 +1453,7 @@ static int serve_client (
 		// consume out bufs
 		f_ret = mbedtls_ssl_write(&c->ssl, c->ib[1].m, c->ib[1].len);
 		if (f_ret < 0) {
-			if (errno != EAGAIN && errno != EWOULDBLOCK) {
+			if (prne_mbedtls_is_nberr(f_ret)) {
 				if (prog_conf.verbose >= PRNE_VL_DBG0) {
 					client_sync_perror(c, "mbedtls_ssl_write()");
 				}
@@ -1520,7 +1520,7 @@ static int serve_client (
 			c->ib[0].m + c->ib[0].len,
 			c->ib[0].avail);
 		if (f_ret < 0) {
-			if (errno != EAGAIN && errno != EWOULDBLOCK) {
+			if (!prne_mbedtls_is_nberr(f_ret)) {
 				if (prog_conf.verbose >= PRNE_VL_DBG0) {
 					client_sync_perror(c, "mbedtls_ssl_read()");
 				}
@@ -1573,6 +1573,7 @@ static void client_thread_tick (th_ctx_t *ctx) {
 	nfds_t pfd_ptr;
 	int f_ret;
 	long poll_to = -1;
+	bool pending = false;
 
 	// free expired clients
 	// calculate poll() timeout
@@ -1604,7 +1605,7 @@ static void client_thread_tick (th_ctx_t *ctx) {
 	pfd_ptr = 0;
 	for (prne_llist_entry_t *e = ctx->c_list.head; e != NULL;) {
 		client_ctx_t *c = (client_ctx_t*)e->element;
-		short events;
+		short events, revents = 0;
 
 		switch (c->con_state) {
 		case CS_HANDSHAKE:
@@ -1706,7 +1707,12 @@ static void client_thread_tick (th_ctx_t *ctx) {
 			e = e->next;
 			break;
 		case CS_PROC:
-			if (c->ib[1].len > 0) {
+			if (mbedtls_ssl_check_pending(&c->ssl)) {
+				events = POLLIN;
+				revents = POLLIN;
+				pending = true;
+			}
+			else if (c->ib[1].len > 0) {
 				events = POLLOUT;
 			}
 			else {
@@ -1719,22 +1725,25 @@ static void client_thread_tick (th_ctx_t *ctx) {
 
 		ctx->pfd[pfd_ptr].fd = c->sck;
 		ctx->pfd[pfd_ptr].events = events;
+		ctx->pfd[pfd_ptr].revents = revents;
 		pfd_ptr += 1;
 	}
 	ctx->pfd[pfd_ptr].fd = ctx->ihcp[0];
 	ctx->pfd[pfd_ptr].events = POLLIN;
 	pfd_ptr += 1;
 
-	// do poll
-	f_ret = poll(ctx->pfd, pfd_ptr, (int)poll_to);
-	if (f_ret < 0) {
-		if (errno != EINTR) {
-			if (prog_conf.verbose >= PRNE_VL_FATAL) {
-				sync_perror("*** poll()@client_thread_tick()");
+	if (!pending) {
+		// do poll
+		f_ret = poll(ctx->pfd, pfd_ptr, (int)poll_to);
+		if (f_ret < 0) {
+			if (errno != EINTR) {
+				if (prog_conf.verbose >= PRNE_VL_FATAL) {
+					sync_perror("*** poll()@client_thread_tick()");
+				}
+				abort();
 			}
-			abort();
+			return;
 		}
-		return;
 	}
 
 	// serve
@@ -2092,7 +2101,7 @@ int main (const int argc, const char **args) {
 	if ((ret = setup_conf(args[1])) != 0 ||
 		(ret = init_global()) != 0)
 	{
-		goto END;
+		return 1;
 	}
 	init_signals();
 
@@ -2103,7 +2112,7 @@ int main (const int argc, const char **args) {
 			perror("*** prep_socket()");
 		}
 		ret = 1;
-		goto END;
+		return 1;
 	}
 
 	if ((ret = init_threads(prog_conf.nb_thread, &th_arr)) != 0) {
@@ -2156,7 +2165,6 @@ int main (const int argc, const char **args) {
 		}
 	}
 
-END: // CATCH
 	if (prog_conf.verbose >= PRNE_VL_DBG0) {
 		pthread_mutex_lock(&prog_g.stdio_lock);
 		fprintf(stderr, "Loop end. Joining threads ...\n");

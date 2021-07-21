@@ -43,9 +43,9 @@ typedef struct {
 
 static htbthost_param_t htbthost_param;
 static regex_t re_ns4, re_ns6, re_hc;
-static char m_nybin_path[256];
-static char m_nybin_args[1024];
-static size_t m_nybin_args_size;
+static char m_upbin_path[256];
+static char m_upbin_args[1024];
+static size_t m_upbin_args_size;
 static sigset_t ss_all, ss_exit;
 static struct timespec proc_start;
 static uint8_t instance_id[16];
@@ -114,7 +114,7 @@ static bool cb_hostinfo (void *ctx, prne_htbt_host_info_t *out) {
 	return true;
 }
 
-static bool cb_ny_bin (
+static bool cb_upbin (
 	void *ctx,
 	const char *path,
 	const prne_htbt_cmd_t *cmd)
@@ -122,16 +122,16 @@ static bool cb_ny_bin (
 	const size_t path_len = prne_nstrlen(path);
 
 	prne_dbgast(path_len > 0);
-	if (path_len + 1 > sizeof(m_nybin_path) ||
-		cmd->mem_len > sizeof(m_nybin_args))
+	if (path_len + 1 > sizeof(m_upbin_path) ||
+		cmd->mem_len > sizeof(m_upbin_args))
 	{
 		errno = ENOMEM;
 		return false;
 	}
 
-	memcpy(m_nybin_path, path, path_len + 1);
-	memcpy(m_nybin_args, cmd->mem, cmd->mem_len);
-	m_nybin_args_size = cmd->mem_len;
+	memcpy(m_upbin_path, path, path_len + 1);
+	memcpy(m_upbin_args, cmd->mem, cmd->mem_len);
+	m_upbin_args_size = cmd->mem_len;
 
 	return pth_raise(main_pth, SIGTERM) != 0;
 }
@@ -332,18 +332,18 @@ END:
 	return ret;
 }
 
-static void do_run_ny_bin (void) {
-	for (size_t i = 0; i < m_nybin_args_size; i += 1) {
-		if (m_nybin_args[i] == 0) {
-			m_nybin_args[i] = ' ';
+static void do_run_upbin (void) {
+	for (size_t i = 0; i < m_upbin_args_size; i += 1) {
+		if (m_upbin_args[i] == 0) {
+			m_upbin_args[i] = ' ';
 		}
 	}
-	m_nybin_args[m_nybin_args_size - 1] = 0;
+	m_upbin_args[m_upbin_args_size - 1] = 0;
 
 	printf(
-		"ny bin received:\n%s %s\n",
-		m_nybin_path,
-		m_nybin_args);
+		"upbin received:\n%s %s\n",
+		m_upbin_path,
+		m_upbin_args);
 }
 
 
@@ -495,7 +495,7 @@ int main (const int argc, const char **args) {
 		param.cb_f.cnc_txtrec = cb_txtrec;
 		param.cb_f.hostinfo = cb_hostinfo;
 		param.cb_f.tmpfile = mktmpfile;
-		param.cb_f.ny_bin = cb_ny_bin;
+		param.cb_f.upbin = cb_upbin;
 		param.blackhole = open("/dev/null", O_WRONLY);
 
 		w = wkr_arr + 1;
@@ -542,8 +542,8 @@ int main (const int argc, const char **args) {
 	regfree(&re_ns6);
 	prne_free(hostcred);
 
-	if (prne_nstrlen(m_nybin_path) > 0) {
-		do_run_ny_bin();
+	if (prne_nstrlen(m_upbin_path) > 0) {
+		do_run_upbin();
 		return 3;
 	}
 

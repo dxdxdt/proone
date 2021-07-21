@@ -25,7 +25,7 @@ struct prne_htbt_cbset {
 	prne_htbt_cnc_txtrec_ft cnc_txtrec;
 	prne_htbt_hostinfo_ft hostinfo; // optional
 	prne_htbt_tmpfile_ft tmpfile; // optional
-	prne_htbt_bin_ft ny_bin; // optional
+	prne_htbt_bin_ft upbin; // optional
 };
 
 struct prne_htbt_param {

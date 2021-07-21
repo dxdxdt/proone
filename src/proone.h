@@ -71,8 +71,8 @@ struct prne_shared_global {
 	// Number of successful infections.
 	uint64_t infect_cnt;
 	// null-terminated path to the new binary image
-	char ny_bin_path[256];
-	char ny_bin_args[1024];
+	char upbin_path[256];
+	char upbin_args[1024];
 	size_t host_cred_len;
 	uint8_t host_cred_data[255];
 };

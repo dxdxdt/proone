@@ -2,6 +2,7 @@
 #include "util_rt.h"
 #include "config.h"
 #include "dvault.h"
+#include "pack.h"
 
 #include <string.h>
 #include <assert.h>
@@ -17,11 +18,6 @@ static void test_enum (void);
 
 
 int main (void) {
-	// prne_arch_t string functions
-	for (prne_arch_t i = PRNE_ARCH_NONE + 1; i < NB_PRNE_ARCH; i += 1) {
-		assert(i == prne_arch_fstr(prne_arch_tostr(i)));
-	}
-
 	test_ser();
 	test_enum();
 
@@ -545,6 +541,10 @@ static void test_ser (void) {
 }
 
 static void test_enum (void) {
+	for (prne_arch_t i = PRNE_ARCH_NONE + 1; i < NB_PRNE_ARCH; i += 1) {
+		assert(i == prne_arch_fstr(prne_arch_tostr(i)));
+	}
+
 	for (prne_arch_t i = 0; i < NB_PRNE_ARCH; i += 1) {
 		assert(prne_arch_tostr(i) != NULL);
 	}
@@ -553,5 +553,8 @@ static void test_enum (void) {
 	}
 	for (prne_htbt_op_t i = 0; i < NB_PRNE_HTBT_OP; i += 1) {
 		assert(prne_htbt_op_tostr(i) != NULL);
+	}
+	for (prne_pack_rc_t i = PRNE_PACK_RC_OK; i < NB_PRNE_PACK_RC; i += 1) {
+		assert(prne_pack_rc_tostr(i) != NULL);
 	}
 }

@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <assert.h>
 
+#include <sys/mman.h>
 #include <getopt.h>
 #include <regex.h>
 #include <termios.h>
@@ -49,8 +50,8 @@
 "  hover     send handover request\n"\
 "  runcmd    run command on host\n"\
 "  runbin    upload and run arbitrary binary on host\n"\
-"  nybin     perform binary update\n"\
-"  getbin    download Proone binary\n"\
+"  upbin     perform binary update\n"\
+"  rcb       download binary from instance\n"\
 "\n"\
 "Common options:\n"\
 "  -h, --help           print help for specified command and exit. Print this\n"\
@@ -103,11 +104,17 @@
 "Options:\n"\
 "  -d, --detach  run detached(i.e., run as daemon)\n"\
 "\n"
-#define NYBIN_HELP_STR \
+#define UPBIN_HELP_STR \
 "Perform binary update.\n"\
-"Usage: %s [common options] nybin <FILE> [arg0] [arg1 ...]\n"\
+"Usage: %s [common options] upbin [options] <FILE> [arg0] [arg1 ...]\n"\
 "\n"\
-"<FILE>: NYBIN format binary\n"\
+"Options:\n"\
+"  --nybin      do binary recombination. <FILE> must be nybin format binary\n"\
+"  --exec       upload <FILE> as is\n"\
+"  --no-compat  do not retry recombination with compatible arch\n"\
+"\n"\
+"Note that an instance will continue to run with original binary if it fails to\n"\
+"exec() to the new binary.\n"\
 "\n"
 
 enum sub_command {
@@ -116,10 +123,21 @@ enum sub_command {
 	SC_HOVER,
 	SC_RUNCMD,
 	SC_RUNBIN,
-	SC_NYBIN,
-	SC_GETBIN
+	SC_UPBIN,
+	SC_RCB,
+
+	NB_SC
 };
 typedef enum sub_command sub_command_t;
+
+enum bin_type {
+	BT_NONE,
+	BT_NYBIN,
+	BT_EXEC,
+
+	NB_BT
+};
+typedef enum bin_type bin_type_t;
 
 struct {
 	char *tls_ca;
@@ -140,8 +158,10 @@ struct {
 		} hover;
 		struct {
 			char *bin_path;
+			bin_type_t bin_type;
 			prne_htbt_bin_meta_t bm;
 			bool detached;
+			bool compat;
 		} run;
 	} cmd_param;
 	void (*free_cmdparam_f)(void);
@@ -166,9 +186,12 @@ struct {
 	} yaml;
 	union {
 		struct {
+			int fd;
+			prne_arch_t arch_host;
+			prne_arch_t arch_rcb;
+			bool has_status;
 			prne_iobuf_t ib;
 			prne_htbt_status_t st;
-			bool has_status;
 		} run;
 	} cmd_st;
 	void (*free_cmdst_f)(void);
@@ -188,8 +211,8 @@ static void print_help (const char *prog, const sub_command_t sc, FILE *out_f) {
 	case SC_RUNBIN:
 		fprintf(out_f, RUNBIN_HELP_STR, prog);
 		break;
-	case SC_NYBIN:
-		fprintf(out_f, NYBIN_HELP_STR, prog);
+	case SC_UPBIN:
+		fprintf(out_f, UPBIN_HELP_STR, prog);
 		break;
 	// TODO
 	default: fprintf(out_f, MAIN_HELP_STR, prog, prog);
@@ -219,12 +242,17 @@ static void init_prog_g (void) {
 }
 
 static void free_run_g (void) {
+	prne_close(prog_g.cmd_st.run.fd);
 	prne_free_iobuf(&prog_g.cmd_st.run.ib);
 	prne_htbt_free_status(&prog_g.cmd_st.run.st);
 }
 
 static void init_run_g (void) {
 	assert(prog_g.free_cmdst_f == NULL);
+
+	prog_g.cmd_st.run.arch_host = PRNE_ARCH_NONE;
+	prog_g.cmd_st.run.arch_rcb = PRNE_ARCH_NONE;
+	prog_g.cmd_st.run.fd = -1;
 	prne_init_iobuf(&prog_g.cmd_st.run.ib);
 	prne_htbt_init_status(&prog_g.cmd_st.run.st);
 	assert(prne_alloc_iobuf(&prog_g.cmd_st.run.ib, prne_getpagesize()));
@@ -260,10 +288,12 @@ static void init_hover_conf (void) {
 
 static void free_run_conf (void) {
 	prne_htbt_free_bin_meta(&prog_conf.cmd_param.run.bm);
+	prne_free(prog_conf.cmd_param.run.bin_path);
 }
 
 static void init_run_conf (void) {
 	prne_htbt_init_bin_meta(&prog_conf.cmd_param.run.bm);
+	prog_conf.cmd_param.run.compat = true;
 	prog_conf.free_cmdparam_f = free_run_conf;
 }
 
@@ -489,12 +519,47 @@ LOOP_END:
 	return 0;
 }
 
-static int parse_args_nybin (const int argc, char *const *args) {
+static int parse_args_upbin (const int argc, char *const *args) {
+	static const struct option lopts[] = {
+		{ "nybin", no_argument, 0, 0 },
+		{ "exec", no_argument, 0, 0 },
+		{ "no-compat", no_argument, 0, 0 },
+		{ 0, 0, 0, 0 }
+	};
+	int li, f_ret;
+	const struct option *co;
+
 	if (!assert_host_arg()) {
 		return 2;
 	}
 	init_run_conf();
 	init_run_g();
+
+	while (true) {
+		f_ret = getopt_long(argc, args, "", lopts, &li);
+		if (f_ret != 0) {
+			break;
+		}
+
+		co = (const struct option*)lopts + li;
+		if (strcmp("nybin", co->name) == 0) {
+			prog_conf.cmd_param.run.bin_type = BT_NYBIN;
+		}
+		else if (strcmp("exec", co->name) == 0) {
+			prog_conf.cmd_param.run.bin_type = BT_EXEC;
+		}
+		else if (strcmp("no-compat", co->name) == 0) {
+			prog_conf.cmd_param.run.compat = false;
+		}
+		else {
+			abort();
+		}
+	}
+
+	if (prog_conf.cmd_param.run.bin_type == BT_NONE) {
+		fprintf(stderr, "Use --nybin or --exec to specify binary type.\n");
+		return 2;
+	}
 
 	if (argc <= optind) {
 		fprintf(stderr, "FILE not specified.\n");
@@ -520,7 +585,7 @@ static int parse_args_nybin (const int argc, char *const *args) {
 	return 0;
 }
 
-static int parse_args_getbin (const int argc, char *const *args) {
+static int parse_args_rcb (const int argc, char *const *args) {
 	if (!assert_host_arg()) {
 		return 2;
 	}
@@ -633,11 +698,11 @@ END_LOOP:
 		else if (strcmp("runbin", cmd_str) == 0) {
 			prog_conf.cmd = SC_RUNBIN;
 		}
-		else if (strcmp("nybin", cmd_str) == 0) {
-			prog_conf.cmd = SC_NYBIN;
+		else if (strcmp("upbin", cmd_str) == 0) {
+			prog_conf.cmd = SC_UPBIN;
 		}
-		else if (strcmp("getbin", cmd_str) == 0) {
-			prog_conf.cmd = SC_GETBIN;
+		else if (strcmp("rcb", cmd_str) == 0) {
+			prog_conf.cmd = SC_RCB;
 		}
 		else {
 			fprintf(stderr, "Invalid COMMAND \"%s\".\n", cmd_str);
@@ -653,9 +718,11 @@ END_LOOP:
 	case SC_HOVER: ret = parse_args_hover(argc, args); break;
 	case SC_RUNCMD: ret = parse_args_run(argc, args, false); break;
 	case SC_RUNBIN: ret = parse_args_run(argc, args, true); break;
-	case SC_NYBIN: ret = parse_args_nybin(argc, args); break;
-	case SC_GETBIN: ret = parse_args_getbin(argc, args); break;
-	default: fprintf(stderr, "COMMAND not specified.\n");
+	case SC_UPBIN: ret = parse_args_upbin(argc, args); break;
+	case SC_RCB: ret = parse_args_rcb(argc, args); break;
+	default:
+		ret = 2;
+		fprintf(stderr, "COMMAND not specified.\n");
 	}
 
 	return ret;
@@ -815,6 +882,32 @@ static int init_tls (void) {
 	}
 
 	return 0;
+}
+
+static void pstatus (const prne_htbt_status_t *st, const char *s) {
+	fprintf(stderr, "%s: code=%d, err=%"PRId32"\n", s, st->code, st->err);
+}
+
+static void pprc (const prne_pack_rc_t prc, const char *s, int *err) {
+	switch (prc) {
+	case PRNE_PACK_RC_Z_ERR:
+		if (err != NULL) {
+			fprintf(stderr, "%s: %s(%d)\n", s, prne_pack_rc_tostr(prc), *err);
+			break;
+		}
+		/* fall-through */
+	case PRNE_PACK_RC_OK:
+	case PRNE_PACK_RC_EOF:
+	case PRNE_PACK_RC_INVAL:
+	case PRNE_PACK_RC_FMT_ERR:
+	case PRNE_PACK_RC_NO_ARCH:
+		fprintf(stderr, "%s: %s\n", s, prne_pack_rc_tostr(prc));
+		break;
+	case PRNE_PACK_RC_ERRNO:
+		perror(s);
+		break;
+	default: abort();
+	}
 }
 
 static int yaml_output_handler(void *data, unsigned char *buffer, size_t size) {
@@ -991,6 +1084,10 @@ static void end_yaml (void) {
 static bool do_connect (void) {
 	int f_ret;
 
+	if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
+		fprintf(stderr, "do_connect()\n");
+	}
+
 	f_ret = mbedtls_net_connect(
 		&prog_g.net.ctx,
 		prog_conf.remote_host,
@@ -1013,7 +1110,32 @@ static bool do_connect (void) {
 		mbedtls_net_recv,
 		mbedtls_net_recv_timeout);
 
+	f_ret = mbedtls_ssl_handshake(&prog_g.ssl.ctx);
+	if (f_ret != 0) {
+		prne_mbedtls_perror(f_ret, "mbedtls_ssl_handshake()");
+		return false;
+	}
+	if (!prne_mbedtls_verify_alp(
+			&prog_g.ssl.conf,
+			&prog_g.ssl.ctx,
+			PRNE_HTBT_TLS_ALP))
+	{
+		fprintf(stderr, "ALPN not negotiated.\n");
+		return false;
+	}
+
 	return true;
+}
+
+static void do_disconnect (void) {
+	if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
+		fprintf(stderr, "do_disconnect()\n");
+	}
+	mbedtls_ssl_close_notify(&prog_g.ssl.ctx);
+	mbedtls_ssl_free(&prog_g.ssl.ctx);
+
+	mbedtls_net_free(&prog_g.net.ctx);
+	prne_iobuf_reset(&prog_g.net.ib);
 }
 
 static uint16_t htbt_msgid_rnd_f (void *ctx) {
@@ -1142,6 +1264,28 @@ static bool recv_mh (prne_htbt_msg_head_t *mh, const uint16_t *cor_id) {
 	}
 
 	return true;
+}
+
+static bool do_ayt (void) {
+	prne_htbt_msg_head_t mh;
+	bool ret = false;
+
+	if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
+		fprintf(stderr, "do_ayt()\n");
+	}
+
+	prne_htbt_init_msg_head(&mh);
+	do {
+		if (!send_frame(&mh, (prne_htbt_ser_ft)prne_htbt_ser_msg_head) ||
+			!recv_frame(&mh, (prne_htbt_dser_ft)prne_htbt_dser_msg_head))
+		{
+			break;
+		}
+		ret = mh.op == PRNE_HTBT_OP_NOOP && mh.is_rsp;
+	} while (false);
+
+	prne_htbt_free_msg_head(&mh);
+	return ret;
 }
 
 static bool recv_status (prne_htbt_status_t *st) {
@@ -1367,60 +1511,81 @@ static void emit_hostinfo_frame (const prne_htbt_host_info_t *hi) {
 	prne_free_host_cred(&hc);
 }
 
-static int cmdmain_hostinfo (void) {
-	int ret = 0;
-	uint16_t msgid;
+static bool do_hostinfo (
+	prne_htbt_host_info_t *hi,
+	prne_htbt_status_t *st,
+	bool *status)
+{
+	bool ret = false;
+	const uint16_t msgid = prne_htbt_gen_msgid(NULL, htbt_msgid_rnd_f);
 	prne_htbt_msg_head_t mh;
-	prne_htbt_host_info_t hi;
-	prne_htbt_status_t st;
 
-	msgid = prne_htbt_gen_msgid(NULL, htbt_msgid_rnd_f);
 	prne_htbt_init_msg_head(&mh);
-	prne_htbt_init_host_info(&hi);
-	prne_htbt_init_status(&st);
 	mh.id = msgid;
 	mh.is_rsp = false;
 	mh.op = PRNE_HTBT_OP_HOST_INFO;
+
+	if (!send_mh(&mh)) {
+		goto END;
+	}
+	if (!recv_mh(&mh, &msgid)) {
+		goto END;
+	}
+	switch (mh.op) {
+	case PRNE_HTBT_OP_HOST_INFO:
+		if (!recv_frame(hi, (prne_htbt_dser_ft)prne_htbt_dser_host_info)) {
+			goto END;
+		}
+		*status = false;
+		break;
+	case PRNE_HTBT_OP_STATUS:
+		if (!recv_status(st)) {
+			goto END;
+		}
+		*status = true;
+		break;
+	default:
+		raise_proto_err("invalid response op %"PRIx8"\n", mh.op);
+		goto END;
+	}
+	ret = true;
+
+END:
+	prne_htbt_free_msg_head(&mh);
+	return ret;
+}
+
+static int cmdmain_hostinfo (void) {
+	int ret = 0;
+	bool status;
+	prne_htbt_host_info_t hi;
+	prne_htbt_status_t st;
+
+	prne_htbt_init_host_info(&hi);
+	prne_htbt_init_status(&st);
 
 	if (!do_connect()) {
 		ret = 1;
 		goto END;
 	}
+	if (!do_hostinfo(&hi, &st, &status)) {
+		ret = 1;
+		goto END;
+	}
 
-	if (!send_mh(&mh)) {
-		ret = 1;
-		goto END;
+	if (status) {
+		start_yaml();
+		emit_preemble("hostinfo", "status", NULL);
+		emit_status_frame(&st);
 	}
-	if (!recv_mh(&mh, &msgid)) {
-		ret = 1;
-		goto END;
-	}
-	switch (mh.op) {
-	case PRNE_HTBT_OP_HOST_INFO:
-		if (!recv_frame(&hi, (prne_htbt_dser_ft)prne_htbt_dser_host_info)) {
-			ret = 1;
-			goto END;
-		}
+	else {
 		start_yaml();
 		emit_preemble("hostinfo", "ok", NULL);
 		emit_hostinfo_frame(&hi);
-		break;
-	case PRNE_HTBT_OP_STATUS:
-		ret = 1;
-		if (recv_status(&st)) {
-			start_yaml();
-			emit_preemble("hostinfo", "status", NULL);
-			emit_status_frame(&st);
-		}
-		goto END;
-	default:
-		raise_proto_err("invalid response op %"PRIx8"\n", mh.op);
-		ret = 1;
-		goto END;
 	}
+	ret = 0;
 
 END:
-	prne_htbt_free_msg_head(&mh);
 	prne_htbt_free_host_info(&hi);
 	prne_htbt_free_status(&st);
 	return ret;
@@ -1468,7 +1633,6 @@ static void emit_hover_opts (void) {
 
 static bool run_setup (const uint16_t msgid) {
 	bool ret = true;
-	int bin_fd = -1;
 	int f_ret;
 	struct stat fs;
 	void *f;
@@ -1483,7 +1647,7 @@ static bool run_setup (const uint16_t msgid) {
 	switch (prog_conf.cmd) {
 	case SC_RUNCMD: mh.op = PRNE_HTBT_OP_RUN_CMD; break;
 	case SC_RUNBIN: mh.op = PRNE_HTBT_OP_RUN_BIN; break;
-	case SC_NYBIN: mh.op = PRNE_HTBT_OP_NY_BIN; break;
+	case SC_UPBIN: mh.op = PRNE_HTBT_OP_UP_BIN; break;
 	default: abort();
 	}
 
@@ -1494,11 +1658,10 @@ static bool run_setup (const uint16_t msgid) {
 		fs.st_size = 0;
 		break;
 	case SC_RUNBIN:
-	case SC_NYBIN:
-		bin_fd = open(prog_conf.cmd_param.run.bin_path, O_RDONLY);
-		if (bin_fd < 0 || fstat(bin_fd, &fs) != 0) {
+	case SC_UPBIN:
+		if (fstat(prog_g.cmd_st.run.fd, &fs) != 0) {
 			ret = false;
-			perror(prog_conf.cmd_param.run.bin_path);
+			perror("fstat()");
 			goto END;
 		}
 		if (fs.st_size > PRNE_HTBT_BIN_LEN_MAX) {
@@ -1522,7 +1685,7 @@ static bool run_setup (const uint16_t msgid) {
 	while (fs.st_size > 0 || prog_g.cmd_st.run.ib.len > 0) {
 		if (fs.st_size > 0 && prog_g.cmd_st.run.ib.avail > 0) {
 			io_ret = read(
-				bin_fd,
+				prog_g.cmd_st.run.fd,
 				prog_g.cmd_st.run.ib.m + prog_g.cmd_st.run.ib.len,
 				prne_op_min((size_t)fs.st_size, prog_g.cmd_st.run.ib.avail));
 			if (io_ret == 0) {
@@ -1561,7 +1724,6 @@ static bool run_setup (const uint16_t msgid) {
 	}
 
 END:
-	prne_close(bin_fd);
 	prne_htbt_free_msg_head(&mh);
 	return ret;
 }
@@ -1765,6 +1927,16 @@ static bool run_recv_status (const uint16_t msgid) {
 	return prog_g.cmd_st.run.has_status;
 }
 
+static bool do_open_bin (void) {
+	prne_assert(prog_g.cmd_st.run.fd < 0);
+	prog_g.cmd_st.run.fd = open(prog_conf.cmd_param.run.bin_path, O_RDONLY);
+	if (prog_g.cmd_st.run.fd < 0) {
+		perror(prog_conf.cmd_param.run.bin_path);
+		return false;
+	}
+	return true;
+}
+
 static int cmdmain_run (void) {
 	uint16_t msgid;
 
@@ -1772,6 +1944,9 @@ static int cmdmain_run (void) {
 
 	do { // fake
 		if (!do_connect()) {
+			break;
+		}
+		if (prog_conf.cmd == SC_RUNBIN && !do_open_bin()) {
 			break;
 		}
 		if (!run_setup(msgid)) {
@@ -1804,10 +1979,22 @@ static int cmdmain_run (void) {
 	return 1;
 }
 
-static void emit_nybin_opts (void) {
+static void emit_upbin_opts (void) {
 	emit_scalar(YAML_STR_TAG, PREEMBLE_OPT_TAG_NAME);
 
 	emit_mapping_start();
+	emit_scalar(YAML_STR_TAG, "bin_type");
+	if (prog_conf.cmd_param.run.bin_type == BT_NYBIN) {
+		emit_scalar(YAML_STR_TAG, "nybin");
+		emit_scalar(YAML_STR_TAG, "arch_host");
+		emit_scalar(YAML_STR_TAG, prne_arch_tostr(prog_g.cmd_st.run.arch_host));
+		emit_scalar(YAML_STR_TAG, "arch_rcb");
+		emit_scalar(YAML_STR_TAG, prne_arch_tostr(prog_g.cmd_st.run.arch_rcb));
+	}
+	else {
+		emit_scalar(YAML_STR_TAG, "exec");
+	}
+
 	emit_scalar(YAML_STR_TAG, "bin_size");
 	emit_scalar_fmt(
 		YAML_INT_TAG,
@@ -1822,17 +2009,228 @@ static void emit_nybin_opts (void) {
 	emit_mapping_end();
 }
 
-static int cmdmain_nybin (void) {
+static bool do_mktmpfile (void) {
+	static const char *FMT_STR = "/tmp/proone-htbtclient.%"PRIdMAX;
+	bool ret = false;
+	int f_ret;
+	char *tmpf = NULL;
+	const pid_t pid = getpid();
+
+	f_ret = snprintf(NULL, 0, FMT_STR, (intmax_t)pid);
+	if (f_ret < 0) {
+		perror("snprintf()");
+		goto END;
+	}
+	tmpf = prne_alloc_str((size_t)f_ret);
+	tmpf[0] = 0;
+	snprintf(tmpf, (size_t)f_ret + 1, FMT_STR, (intmax_t)pid);
+
+	prog_g.cmd_st.run.fd = open(tmpf, O_CREAT | O_RDWR | O_TRUNC | O_EXCL);
+	if (prog_g.cmd_st.run.fd < 0) {
+		goto END;
+	}
+	unlink(tmpf);
+	ret = true;
+
+END:
+	prne_free(tmpf);
+	return ret;
+}
+
+static bool upbin_do_rcb (void) {
+	bool ret = false;
+	prne_bin_archive_t ba;
+	prne_bin_rcb_ctx_t rcb;
+	const uint8_t *m_nybin = MAP_FAILED, *m_dv, *m_ba;
+	size_t dv_len, ba_len;
+	struct stat st;
+	int fd = -1, err;
+	prne_pack_rc_t prc;
+	ssize_t io_ret;
+
+	prne_init_bin_archive(&ba);
+	prne_init_bin_rcb_ctx(&rcb);
+
+	fd = open(prog_conf.cmd_param.run.bin_path, O_RDONLY);
+	if (fd < 0 || fstat(fd, &st) < 0) {
+		perror(prog_conf.cmd_param.run.bin_path);
+		goto END;
+	}
+	m_nybin = (const uint8_t*)mmap(
+		NULL,
+		st.st_size,
+		PROT_READ,
+		MAP_PRIVATE,
+		fd,
+		0);
+	if (m_nybin == MAP_FAILED) {
+		perror("mmap()");
+		goto END;
+	}
+
+	if (!prne_index_nybin(
+		m_nybin,
+		st.st_size,
+		&m_dv,
+		&dv_len,
+		&m_ba,
+		&ba_len))
+	{
+		perror("prne_index_nybin");
+		goto END;
+	}
+	prc = prne_index_bin_archive(m_ba, ba_len, &ba);
+	if (prc != PRNE_PACK_RC_OK) {
+		pprc(prc, "prne_index_bin_archive()", NULL);
+		goto END;
+	}
+	prc = prne_start_bin_rcb_compat(
+		&rcb,
+		prog_g.cmd_st.run.arch_host,
+		PRNE_ARCH_NONE,
+		NULL,
+		0,
+		0,
+		m_dv,
+		dv_len,
+		&ba,
+		&prog_g.cmd_st.run.arch_rcb);
+	if (prc != PRNE_PACK_RC_OK) {
+		pprc(prc, "prne_start_bin_rcb()", NULL);
+		goto END;
+	}
+	if (prog_g.cmd_st.run.arch_host != prog_g.cmd_st.run.arch_rcb) {
+		if (!prog_conf.cmd_param.run.compat) {
+			fprintf(
+				stderr,
+				"Compatible arch %s for target %s: not allowed\n",
+				prne_arch_tostr(prog_g.cmd_st.run.arch_rcb),
+				prne_arch_tostr(prog_g.cmd_st.run.arch_host));
+			goto END;
+		}
+		if (prog_conf.prne_vl >= PRNE_VL_WARN) {
+			fprintf(
+				stderr,
+				"Using compatible arch %s for target %s.\n",
+				prne_arch_tostr(prog_g.cmd_st.run.arch_rcb),
+				prne_arch_tostr(prog_g.cmd_st.run.arch_host));
+		}
+	}
+
+	if (!do_mktmpfile()) {
+		goto END;
+	}
+
+	prne_iobuf_reset(&prog_g.cmd_st.run.ib);
+	while (true) {
+		if (prog_g.cmd_st.run.ib.avail > 0 && prc != PRNE_PACK_RC_EOF) {
+			io_ret = prne_bin_rcb_read(
+				&rcb,
+				prog_g.cmd_st.run.ib.m + prog_g.cmd_st.run.ib.len,
+				prog_g.cmd_st.run.ib.avail,
+				&prc,
+				&err);
+			if (io_ret < 0) {
+				pprc(prc, "prne_bin_rcb_read()", &err);
+				goto END;
+			}
+			prne_iobuf_shift(&prog_g.cmd_st.run.ib, io_ret);
+		}
+
+		if (prog_g.cmd_st.run.ib.len > 0) {
+			io_ret = write(
+				prog_g.cmd_st.run.fd,
+				prog_g.cmd_st.run.ib.m,
+				prog_g.cmd_st.run.ib.len);
+			if (io_ret < 0) {
+				perror("write()");
+				goto END;
+			}
+			if (io_ret == 0) {
+				abort();
+			}
+
+			prne_iobuf_shift(&prog_g.cmd_st.run.ib, -io_ret);
+		}
+		else if (prc == PRNE_PACK_RC_EOF) {
+			break;
+		}
+	}
+
+	if (lseek(prog_g.cmd_st.run.fd, 0, SEEK_SET) < 0) {
+		perror("lseek()");
+		goto END;
+	}
+	ret = true;
+
+END:
+	prne_close(fd);
+	prne_free_bin_archive(&ba);
+	prne_free_bin_rcb_ctx(&rcb);
+	if (m_nybin != MAP_FAILED) {
+		munmap((void*)m_nybin, st.st_size);
+	}
+	return ret;
+}
+
+static bool query_arch (void) {
+	bool ret = false, status;
+	prne_htbt_host_info_t hi;
+
+	prne_htbt_init_host_info(&hi);
+
+	if (!do_hostinfo(&hi, &prog_g.cmd_st.run.st, &status)) {
+		goto END;
+	}
+	if (status) {
+		prog_g.cmd_st.run.has_status = true;
+		pstatus(&prog_g.cmd_st.run.st, "Querying hostinfo");
+		goto END;
+	}
+	if (!prne_arch_inrange(hi.arch)) {
+		fprintf(stderr, "Arch out of range: %d\n", hi.arch);
+		goto END;
+	}
+	prog_g.cmd_st.run.arch_host = hi.arch;
+	ret = true;
+
+END:
+	prne_htbt_free_host_info(&hi);
+	return ret;
+}
+
+static int cmdmain_upbin (void) {
 	uint16_t msgid;
 
 	msgid = prne_htbt_gen_msgid(NULL, htbt_msgid_rnd_f);
 
-	if (!(do_connect() && run_setup(msgid) && run_recv_status(msgid))) {
+	if (!do_connect()) {
+		return 1;
+	}
+	switch (prog_conf.cmd_param.run.bin_type) {
+	case BT_NYBIN:
+		if (!query_arch() || !upbin_do_rcb()) {
+			return 1;
+		}
+		break;
+	case BT_EXEC: do_open_bin(); break;
+	default: abort();
+	}
+	if (!do_ayt()) {
+		if (prog_conf.prne_vl >= PRNE_VL_WARN) {
+			fprintf(stderr, "Reconnecting ...\n");
+		}
+		do_disconnect();
+		if (!do_connect()) {
+			return 1;
+		}
+	}
+	if (!(run_setup(msgid) && run_recv_status(msgid))) {
 		return 1;
 	}
 
 	start_yaml();
-	emit_preemble("nybin", "ok", emit_nybin_opts);
+	emit_preemble("upbin", "ok", emit_upbin_opts);
 	emit_status_frame(&prog_g.cmd_st.run.st);
 
 	return 0;
@@ -1920,10 +2318,8 @@ int main (const int argc, char *const *args) {
 	case SC_HOSTINFO: ec = cmdmain_hostinfo(); break;
 	case SC_HOVER: ec = cmdmain_hover(); break;
 	case SC_RUNCMD:
-	case SC_RUNBIN:
-		ec = cmdmain_run();
-		break;
-	case SC_NYBIN: ec = cmdmain_nybin(); break;
+	case SC_RUNBIN: ec = cmdmain_run(); break;
+	case SC_UPBIN: ec = cmdmain_upbin(); break;
 	// TODO
 	default:
 		ec = 1;

@@ -18,7 +18,9 @@ typedef enum {
 	PRNE_PACK_RC_FMT_ERR,
 	PRNE_PACK_RC_ERRNO,
 	PRNE_PACK_RC_Z_ERR,
-	PRNE_PACK_RC_NO_ARCH
+	PRNE_PACK_RC_NO_ARCH,
+
+	NB_PRNE_PACK_RC
 } prne_pack_rc_t;
 
 struct prne_bin_tuple {
@@ -64,6 +66,17 @@ prne_pack_rc_t prne_start_bin_rcb (
 	const uint8_t *m_dvault,
 	const size_t dvault_len,
 	const prne_bin_archive_t *ba);
+prne_pack_rc_t prne_start_bin_rcb_compat (
+	prne_bin_rcb_ctx_t *ctx,
+	const prne_arch_t target,
+	const prne_arch_t self,
+	const uint8_t *m_self,
+	const size_t self_len,
+	const size_t exec_len,
+	const uint8_t *m_dvault,
+	const size_t dvault_len,
+	const prne_bin_archive_t *ba,
+	prne_arch_t *actual);
 ssize_t prne_bin_rcb_read (
 	prne_bin_rcb_ctx_t *ctx,
 	uint8_t *buf,
@@ -78,3 +91,7 @@ bool prne_index_nybin (
 	size_t *dv_len,
 	const uint8_t **m_ba,
 	size_t *ba_len);
+
+const prne_arch_t *prne_compat_arch (const prne_arch_t arch);
+
+const char *prne_pack_rc_tostr (const prne_pack_rc_t prc);

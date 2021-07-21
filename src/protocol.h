@@ -149,7 +149,7 @@ typedef enum {
 	* 	char args[args_len]
 	* 	uint8_t bin[bin_len]
 	*/
-	PRNE_HTBT_OP_NY_BIN,
+	PRNE_HTBT_OP_UP_BIN,
 	/* Run Binary Operation
 	* TODO
 	*
@@ -171,21 +171,14 @@ typedef enum {
 	*	uint12_t len
 	*/
 	PRNE_HTBT_OP_STDIO,
-	/* Binary Retrieval Operation
+	/* Binary Recombination Operation
 	* TODO
 	*
 	*	uint8_t arch
-	*	uint8_t rsv
+	*	uint1_t compat	: allow fallback to compatible arch
+	*	uint7_t rsv
 	*/
-	PRNE_HTBT_OP_GET_BIN,
-	/* Binary Frame
-	* TODO
-	*
-	*	uint1_t fin
-	*	uint3_t rsv
-	*	uint12_t len
-	*/
-	PRNE_HTBT_OP_BIN,
+	PRNE_HTBT_OP_RCB,
 
 	NB_PRNE_HTBT_OP
 } prne_htbt_op_t;
@@ -202,11 +195,7 @@ typedef enum {
 	* Followed by int32_t which represents the errno set during the operation.
 	*/
 	PRNE_HTBT_STATUS_ERRNO,
-	/* Operation temporary unavailable. Try again later.
-	* When another authority is holding the resource.
-	* An int32_t that follows is not used.
-	*/
-	PRNE_HTBT_STATUS_AGAIN,
+	PRNE_HTBT_STATUS_SUB,
 	PRNE_HTBT_STATUS_TIMEDOUT,
 	PRNE_HTBT_STATUS_LIMIT,
 
@@ -307,8 +296,8 @@ typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(
 
 /* PRNE_HTBT_PROTO_MIN_BUF
 *
-* Minimum size of buffer required to implement parsing of stream. Set to size
-* required to deserialise PRNE_HTBT_OP_NY_BIN and PRNE_HTBT_OP_RUN_BIN.
+* Minimum size of buffer required to implement parsing of stream. This is the
+* size required to deserialise PRNE_HTBT_OP_UP_BIN and PRNE_HTBT_OP_RUN_BIN.
 */
 #define PRNE_HTBT_PROTO_MIN_BUF ((size_t)3 + 5 + PRNE_HTBT_ARG_MEM_MAX)
 /* PRNE_HTBT_PROTO_SUB_MIN_BUF

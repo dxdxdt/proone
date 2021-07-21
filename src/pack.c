@@ -498,6 +498,66 @@ prne_pack_rc_t prne_start_bin_rcb (
 	return PRNE_PACK_RC_OK;
 }
 
+prne_pack_rc_t prne_start_bin_rcb_compat (
+	prne_bin_rcb_ctx_t *ctx,
+	const prne_arch_t target,
+	const prne_arch_t self,
+	const uint8_t *m_self,
+	const size_t self_len,
+	const size_t exec_len,
+	const uint8_t *m_dvault,
+	const size_t dvault_len,
+	const prne_bin_archive_t *ba,
+	prne_arch_t *actual)
+{
+	prne_arch_t a = target;
+	prne_pack_rc_t ret = prne_start_bin_rcb(
+		ctx,
+		target,
+		self,
+		m_self,
+		self_len,
+		exec_len,
+		m_dvault,
+		dvault_len,
+		ba);
+	const prne_arch_t *f;
+
+	if (ret != PRNE_PACK_RC_NO_ARCH) {
+		goto END;
+	}
+	f = prne_compat_arch(target);
+	if (f == NULL) {
+		goto END;
+	}
+
+	for (; *f != PRNE_ARCH_NONE; f += 1) {
+		if (*f == target) {
+			continue;
+		}
+		a = *f;
+		ret = prne_start_bin_rcb(
+			ctx,
+			*f,
+			self,
+			m_self,
+			self_len,
+			exec_len,
+			m_dvault,
+			dvault_len,
+			ba);
+		if (ret != PRNE_PACK_RC_NO_ARCH) {
+			break;
+		}
+	}
+
+END:
+	if (actual != NULL) {
+		*actual = a;
+	}
+	return ret;
+}
+
 ssize_t prne_bin_rcb_read (
 	prne_bin_rcb_ctx_t *ctx,
 	uint8_t *buf,
@@ -528,4 +588,40 @@ bool prne_index_nybin (
 	*ba_len = nybin_len - (*m_ba - m_nybin);
 
 	return true;
+}
+
+const prne_arch_t *prne_compat_arch (const prne_arch_t target) {
+	static const prne_arch_t F_X86[] = {
+		PRNE_ARCH_X86_64,
+		PRNE_ARCH_I686,
+		PRNE_ARCH_NONE
+	};
+	static const prne_arch_t F_ARM[] = {
+		PRNE_ARCH_AARCH64,
+		PRNE_ARCH_ARMV7,
+		PRNE_ARCH_ARMV4T,
+		PRNE_ARCH_NONE
+	};
+
+	switch (target) {
+	case PRNE_ARCH_X86_64: return F_X86;
+	case PRNE_ARCH_I686: return F_X86 + 1;
+	case PRNE_ARCH_AARCH64: return F_ARM;
+	case PRNE_ARCH_ARMV7: return F_ARM + 1;
+	case PRNE_ARCH_ARMV4T: return F_ARM + 2;
+	}
+	return NULL;
+}
+
+const char *prne_pack_rc_tostr (const prne_pack_rc_t prc) {
+	switch (prc) {
+	case PRNE_PACK_RC_OK: return "ok";
+	case PRNE_PACK_RC_EOF: return "eof";
+	case PRNE_PACK_RC_INVAL: return "invalid";
+	case PRNE_PACK_RC_FMT_ERR: return "format error";
+	case PRNE_PACK_RC_ERRNO: return "errno";
+	case PRNE_PACK_RC_Z_ERR: return "zlib error";
+	case PRNE_PACK_RC_NO_ARCH: return "no arch";
+	}
+	return NULL;
 }

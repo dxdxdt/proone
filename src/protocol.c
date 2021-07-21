@@ -120,11 +120,10 @@ const char *prne_htbt_op_tostr (const prne_htbt_op_t x) {
 	case PRNE_HTBT_OP_HOVER: return "hover";
 	case PRNE_HTBT_OP_SOLICIT: return "solicit";
 	case PRNE_HTBT_OP_RUN_CMD: return "runcmd";
-	case PRNE_HTBT_OP_NY_BIN: return "nybin";
+	case PRNE_HTBT_OP_UP_BIN: return "upbin";
 	case PRNE_HTBT_OP_RUN_BIN: return "runbin";
 	case PRNE_HTBT_OP_STDIO: return "stdio";
-	case PRNE_HTBT_OP_GET_BIN: return "getbin";
-	case PRNE_HTBT_OP_BIN: return "bin";
+	case PRNE_HTBT_OP_RCB: return "rcb";
 	}
 	return NULL;
 }

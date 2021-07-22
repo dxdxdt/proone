@@ -254,8 +254,8 @@ static void init_prog_g (void) {
 	mbedtls_x509_crt_init(&prog_g.ssl.ca);
 	mbedtls_x509_crt_init(&prog_g.ssl.crt);
 	mbedtls_pk_init(&prog_g.ssl.pk);
-	mbedtls_entropy_init(&prog_g.ssl.ent);
 	mbedtls_ctr_drbg_init(&prog_g.ssl.rnd);
+	mbedtls_entropy_init(&prog_g.ssl.ent);
 	mbedtls_ssl_init(&prog_g.ssl.ctx);
 
 	mbedtls_net_init(&prog_g.net.ctx);
@@ -281,8 +281,6 @@ static void free_run_g (void) {
 static void init_run_g (void) {
 	assert(prog_g.free_cmdst_f == NULL);
 
-	prog_g.cmd_st.run.arch_host = PRNE_ARCH_NONE;
-	prog_g.cmd_st.run.arch_rcb = PRNE_ARCH_NONE;
 	prog_g.cmd_st.run.fd = -1;
 	prne_init_iobuf(&prog_g.cmd_st.run.ib);
 	prne_htbt_init_status(&prog_g.cmd_st.run.st);
@@ -309,10 +307,20 @@ static void init_rcb_g (void) {
 }
 
 static void deinit_prog_g (void) {
-	// TODO
 	if (prog_g.free_cmdst_f != NULL) {
 		prog_g.free_cmdst_f();
 	}
+
+	mbedtls_ssl_config_free(&prog_g.ssl.conf);
+	mbedtls_x509_crt_free(&prog_g.ssl.ca);
+	mbedtls_x509_crt_free(&prog_g.ssl.crt);
+	mbedtls_pk_free(&prog_g.ssl.pk);
+	mbedtls_ctr_drbg_free(&prog_g.ssl.rnd);
+	mbedtls_entropy_free(&prog_g.ssl.ent);
+	mbedtls_ssl_free(&prog_g.ssl.ctx);
+
+	mbedtls_net_free(&prog_g.net.ctx);
+	prne_free_iobuf(&prog_g.net.ib);
 }
 
 static void init_prog_conf (void) {
@@ -402,7 +410,7 @@ static void load_optarg (char **out) {
 
 	prne_free(*out);
 	*out = prne_alloc_str(l);
-	strncpy(*out, optarg, l);
+	strncpy(*out, optarg, l + 1);
 }
 
 static bool assert_host_arg (void) {
@@ -751,7 +759,7 @@ static int parse_args (const int argc, char *const *args) {
 				strncpy(
 					prog_conf.tls_key_pw,
 					optarg,
-					sizeof(prog_conf.tls_key_pw) - 1);
+					sizeof(prog_conf.tls_key_pw));
 				prog_conf.tls_key_pw_arg = true;
 			}
 			else if (strcmp("host", cur_lo->name) == 0) {
@@ -1197,6 +1205,7 @@ static void end_yaml (void) {
 	}
 
 	yaml_emitter_delete(prog_g.yaml.emitter);
+	prne_free(prog_g.yaml.emitter);
 	prog_g.yaml.emitter = NULL;
 	if (prog_g.yaml.our_fd) {
 		prne_close(prog_g.yaml.fd);

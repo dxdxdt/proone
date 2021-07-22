@@ -116,6 +116,20 @@
 "Note that an instance will continue to run with original binary if it fails to\n"\
 "exec() to the new binary.\n"\
 "\n"
+#define RCB_HELP_STR \
+"Order instance to do binary recombination and download the binary.\n"\
+"Usage: %s [common options] rcb [options] [OUTFILE]\n"\
+"\n"\
+"Options:\n"\
+"  --arch <ARCH>  target CPU ARCH\n"\
+"  --no-compat    do not allow recombination of compatible arch\n"\
+"  -f             overwrite OUTFILE\n"\
+"\n"\
+"The program will write to stdout if OUTFILE is \"-\"(default).\n"\
+"If --arch option is not used, binary recombination will not take place and the\n"\
+"running executable will be copied(i.e., \"self copy\").\n"\
+"Run proone-list-arch for possible values for --arch option.\n"\
+"\n"
 
 enum sub_command {
 	SC_NONE,
@@ -163,6 +177,11 @@ struct {
 			bool detached;
 			bool compat;
 		} run;
+		struct {
+			char *out_path;
+			bool f;
+			prne_htbt_rcb_t rcb;
+		} rcb;
 	} cmd_param;
 	void (*free_cmdparam_f)(void);
 } prog_conf;
@@ -183,6 +202,8 @@ struct {
 	} net;
 	struct {
 		yaml_emitter_t *emitter;
+		int fd;
+		bool our_fd;
 	} yaml;
 	union {
 		struct {
@@ -193,6 +214,11 @@ struct {
 			prne_iobuf_t ib;
 			prne_htbt_status_t st;
 		} run;
+		struct {
+			int fd;
+			bool our_file;
+			prne_iobuf_t ib;
+		} rcb;
 	} cmd_st;
 	void (*free_cmdst_f)(void);
 } prog_g;
@@ -214,7 +240,9 @@ static void print_help (const char *prog, const sub_command_t sc, FILE *out_f) {
 	case SC_UPBIN:
 		fprintf(out_f, UPBIN_HELP_STR, prog);
 		break;
-	// TODO
+	case SC_RCB:
+		fprintf(out_f, RCB_HELP_STR, prog);
+		break;
 	default: fprintf(out_f, MAIN_HELP_STR, prog, prog);
 	}
 }
@@ -239,10 +267,13 @@ static void init_prog_g (void) {
 		perror("prne_alloc_iobuf()");
 		abort();
 	}
+
+	prog_g.yaml.fd = -1;
 }
 
 static void free_run_g (void) {
 	prne_close(prog_g.cmd_st.run.fd);
+	prog_g.cmd_st.run.fd = -1;
 	prne_free_iobuf(&prog_g.cmd_st.run.ib);
 	prne_htbt_free_status(&prog_g.cmd_st.run.st);
 }
@@ -257,6 +288,24 @@ static void init_run_g (void) {
 	prne_htbt_init_status(&prog_g.cmd_st.run.st);
 	assert(prne_alloc_iobuf(&prog_g.cmd_st.run.ib, prne_getpagesize()));
 	prog_g.free_cmdst_f = free_run_g;
+}
+
+static void free_rcb_g (void) {
+	prne_close(prog_g.cmd_st.rcb.fd);
+	prog_g.cmd_st.rcb.fd = -1;
+	prne_free_iobuf(&prog_g.cmd_st.rcb.ib);
+}
+
+static void init_rcb_g (void) {
+	assert(prog_g.free_cmdst_f == NULL);
+
+	prog_g.cmd_st.rcb.fd = -1;
+	prne_init_iobuf(&prog_g.cmd_st.rcb.ib);
+	if (!prne_alloc_iobuf(&prog_g.cmd_st.rcb.ib, PRNE_HTBT_STDIO_LEN_MAX)) {
+		perror("prne_alloc_iobuf()");
+		abort();
+	}
+	prog_g.free_cmdst_f = free_rcb_g;
 }
 
 static void deinit_prog_g (void) {
@@ -289,12 +338,30 @@ static void init_hover_conf (void) {
 static void free_run_conf (void) {
 	prne_htbt_free_bin_meta(&prog_conf.cmd_param.run.bm);
 	prne_free(prog_conf.cmd_param.run.bin_path);
+	prog_conf.cmd_param.run.bin_path = NULL;
 }
 
 static void init_run_conf (void) {
+	assert(prog_conf.free_cmdparam_f == NULL);
 	prne_htbt_init_bin_meta(&prog_conf.cmd_param.run.bm);
 	prog_conf.cmd_param.run.compat = true;
+
 	prog_conf.free_cmdparam_f = free_run_conf;
+}
+
+static void free_rcb_conf (void) {
+	prne_free(prog_conf.cmd_param.rcb.out_path);
+	prog_conf.cmd_param.rcb.out_path = NULL;
+	prne_htbt_free_rcb(&prog_conf.cmd_param.rcb.rcb);
+}
+
+static void init_rcb_conf (void) {
+	assert(prog_conf.free_cmdparam_f == NULL);
+	prne_htbt_init_rcb(&prog_conf.cmd_param.rcb.rcb);
+	prog_conf.cmd_param.rcb.out_path = prne_dup_str("-");
+	prog_conf.cmd_param.rcb.rcb.compat = true;
+
+	prog_conf.free_cmdparam_f = free_rcb_conf;
 }
 
 static void deinit_prog_conf (void) {
@@ -586,10 +653,56 @@ static int parse_args_upbin (const int argc, char *const *args) {
 }
 
 static int parse_args_rcb (const int argc, char *const *args) {
+	static const struct option lopts[] = {
+		{ "arch", required_argument, 0, 0 },
+		{ "no-compat", no_argument, 0, 0 },
+		{ 0, 0, 0, 0 }
+	};
+	int li, f_ret;
+	const struct option *co;
+
 	if (!assert_host_arg()) {
 		return 2;
 	}
-	// TODO
+	init_rcb_conf();
+	init_rcb_g();
+
+	while (true) {
+		f_ret = getopt_long(argc, args, "f", lopts, &li);
+		if (f_ret == 'f') {
+			prog_conf.cmd_param.rcb.f = true;
+			continue;
+		}
+		else if (f_ret != 0) {
+			break;
+		}
+
+		co = (const struct option*)lopts + li;
+		if (strcmp("arch", co->name) == 0) {
+			prog_conf.cmd_param.rcb.rcb.arch = prne_arch_fstr(optarg);
+			if (prog_conf.cmd_param.rcb.rcb.arch == PRNE_ARCH_NONE) {
+				perror(optarg);
+				return 2;
+			}
+		}
+		else if (strcmp("no-compat", co->name) == 0) {
+			prog_conf.cmd_param.rcb.rcb.compat = false;
+		}
+		else {
+			abort();
+		}
+	}
+
+	if (argc > optind) {
+		prne_free(prog_conf.cmd_param.rcb.out_path);
+		prog_conf.cmd_param.rcb.out_path = prne_dup_str(args[optind]);
+		if (prog_conf.cmd_param.rcb.out_path == NULL) {
+			perror("prne_dup_str()");
+			abort();
+		}
+		optind += 1;
+	}
+
 	return 0;
 }
 
@@ -914,7 +1027,7 @@ static int yaml_output_handler(void *data, unsigned char *buffer, size_t size) {
 	ssize_t io_ret;
 
 	while (size > 0) {
-		io_ret = write(STDOUT_FILENO, buffer, size);
+		io_ret = write(prog_g.yaml.fd, buffer, size);
 		if (io_ret <= 0) {
 			if (io_ret < 0) {
 				perror("write()");
@@ -1004,6 +1117,10 @@ static void emit_scalar (const char *type, const char *val) {
 	}
 }
 
+static void emit_bool_scalar (const bool val) {
+	emit_scalar(YAML_BOOL_TAG, val ? "true" : "false");
+}
+
 static void emit_scalar_fmt (const char *type, const char *fmt, ...) {
 	char *str;
 	int f_ret;
@@ -1026,14 +1143,13 @@ static void emit_scalar_fmt (const char *type, const char *fmt, ...) {
 	prne_free(str);
 }
 
-static void start_yaml (void) {
+static void start_yaml (const int fd, const bool ours) {
 	yaml_event_t e;
 
-	if (prog_g.yaml.emitter != NULL) {
-		fprintf(stderr, "start_yaml() called twice!\n");
-		abort();
-	}
+	assert(prog_g.yaml.emitter == NULL);
 
+	prog_g.yaml.fd = fd;
+	prog_g.yaml.our_fd = ours;
 	prog_g.yaml.emitter = prne_malloc(sizeof(yaml_emitter_t), 1);
 	if (yaml_emitter_initialize(prog_g.yaml.emitter) == 0) {
 		yaml_perror("yaml_emitter_initialize()");
@@ -1078,6 +1194,13 @@ static void end_yaml (void) {
 	{
 		yaml_perror("yaml_stream_end_event_initialize()");
 		abort();
+	}
+
+	yaml_emitter_delete(prog_g.yaml.emitter);
+	prog_g.yaml.emitter = NULL;
+	if (prog_g.yaml.our_fd) {
+		prne_close(prog_g.yaml.fd);
+		prog_g.yaml.fd = -1;
 	}
 }
 
@@ -1161,6 +1284,17 @@ static void raise_proto_err (const char *fmt, ...) {
 	vfprintf(stderr, fmt, vl);
 	va_end(vl);
 	fprintf(stderr, "\n");
+}
+
+static void raise_invalid_op (const prne_htbt_op_t op) {
+	raise_proto_err("invalid response op %"PRIx8"", op);
+}
+
+static void raise_invalid_status (const prne_htbt_status_t *st) {
+	raise_proto_err(
+		"Invalid status response: code=%"PRIx8", err=%"PRId32,
+		st->code,
+		st->err);
 }
 
 static bool send_frame (const void *frame, prne_htbt_ser_ft ser_f) {
@@ -1300,6 +1434,10 @@ static void emit_status_frame (const prne_htbt_status_t *st) {
 	emit_scalar_fmt(YAML_INT_TAG, "%d", st->code);
 	emit_scalar(YAML_STR_TAG, "err");
 	emit_scalar_fmt(YAML_INT_TAG, "%"PRId32, st->err);
+	if (st->code == PRNE_HTBT_STATUS_ERRNO) {
+		emit_scalar(YAML_STR_TAG, "err_str");
+		emit_scalar(YAML_STR_TAG, strerror(st->err));
+	}
 	emit_mapping_end();
 }
 
@@ -1545,7 +1683,7 @@ static bool do_hostinfo (
 		*status = true;
 		break;
 	default:
-		raise_proto_err("invalid response op %"PRIx8"\n", mh.op);
+		raise_invalid_op(mh.op);
 		goto END;
 	}
 	ret = true;
@@ -1573,13 +1711,12 @@ static int cmdmain_hostinfo (void) {
 		goto END;
 	}
 
+	start_yaml(STDOUT_FILENO, false);
 	if (status) {
-		start_yaml();
 		emit_preemble("hostinfo", "status", NULL);
 		emit_status_frame(&st);
 	}
 	else {
-		start_yaml();
 		emit_preemble("hostinfo", "ok", NULL);
 		emit_hostinfo_frame(&hi);
 	}
@@ -1860,7 +1997,7 @@ static bool run_recvstd (const uint16_t msgid, int *fd) {
 		break;
 	default:
 		ret = false;
-		raise_proto_err("invalid response op %"PRIx8"\n", mh.op);
+		raise_invalid_op(mh.op);
 		goto END;
 	}
 
@@ -1968,10 +2105,7 @@ static int cmdmain_run (void) {
 			perror("Error status");
 			return 1;
 		default:
-			raise_proto_err(
-				"Invalid response: code=%"PRIx8", err=%"PRId32,
-				prog_g.cmd_st.run.st.code,
-				prog_g.cmd_st.run.st.err);
+			raise_invalid_status(&prog_g.cmd_st.run.st);
 			return 1;
 		}
 	} while (false);
@@ -1986,6 +2120,8 @@ static void emit_upbin_opts (void) {
 	emit_scalar(YAML_STR_TAG, "bin_type");
 	if (prog_conf.cmd_param.run.bin_type == BT_NYBIN) {
 		emit_scalar(YAML_STR_TAG, "nybin");
+		emit_scalar(YAML_STR_TAG, "compat");
+		emit_bool_scalar(prog_conf.cmd_param.run.compat);
 		emit_scalar(YAML_STR_TAG, "arch_host");
 		emit_scalar(YAML_STR_TAG, prne_arch_tostr(prog_g.cmd_st.run.arch_host));
 		emit_scalar(YAML_STR_TAG, "arch_rcb");
@@ -2229,7 +2365,7 @@ static int cmdmain_upbin (void) {
 		return 1;
 	}
 
-	start_yaml();
+	start_yaml(STDOUT_FILENO, false);
 	emit_preemble("upbin", "ok", emit_upbin_opts);
 	emit_status_frame(&prog_g.cmd_st.run.st);
 
@@ -2267,7 +2403,7 @@ static int cmdmain_hover (void) {
 		goto END;
 	}
 	if (mh.op != PRNE_HTBT_OP_STATUS) {
-		raise_proto_err("invalid response op %"PRIx8"\n", mh.op);
+		raise_invalid_op(mh.op);
 		ret = 1;
 		goto END;
 	}
@@ -2276,13 +2412,176 @@ static int cmdmain_hover (void) {
 		ret = 1;
 		goto END;
 	}
-	start_yaml();
+	start_yaml(STDOUT_FILENO, false);
 	emit_preemble("hover", "ok", emit_hover_opts);
 	emit_status_frame(&st);
 
 END:
 	prne_htbt_free_msg_head(&mh);
 	prne_htbt_free_status(&st);
+	return ret;
+}
+
+static void emit_rcb_opts (void) {
+	emit_scalar(YAML_STR_TAG, PREEMBLE_OPT_TAG_NAME);
+	emit_mapping_start();
+	if (prog_conf.cmd_param.rcb.rcb.arch != PRNE_ARCH_NONE) {
+		emit_scalar(YAML_STR_TAG, "arch");
+		emit_scalar(
+			YAML_STR_TAG,
+			prne_arch_tostr(prog_conf.cmd_param.rcb.rcb.arch));
+	}
+	emit_scalar(YAML_STR_TAG, "compat");
+	emit_bool_scalar(prog_conf.cmd_param.rcb.rcb.compat);
+	emit_mapping_end();
+}
+
+static bool rcb_open_outfile (void) {
+	assert(prog_g.cmd_st.rcb.fd < 0);
+	assert(prog_conf.cmd_param.rcb.out_path != NULL);
+	if (strcmp(prog_conf.cmd_param.rcb.out_path, "-") == 0) {
+		prog_g.cmd_st.rcb.fd = STDOUT_FILENO;
+		prog_g.cmd_st.rcb.our_file = false;
+	}
+	else {
+		if (!prog_conf.cmd_param.rcb.f) {
+			if (access(prog_conf.cmd_param.rcb.out_path, F_OK) == 0) {
+				errno = EEXIST;
+				perror(prog_conf.cmd_param.rcb.out_path);
+				return false;
+			}
+		}
+
+		prog_g.cmd_st.rcb.fd = open(
+			prog_conf.cmd_param.rcb.out_path,
+			O_CREAT | O_TRUNC | O_WRONLY,
+			0755);
+		if (prog_g.cmd_st.rcb.fd < 0) {
+			perror(prog_conf.cmd_param.rcb.out_path);
+			return false;
+		}
+		prog_g.cmd_st.rcb.our_file = true;
+	}
+
+	return true;
+}
+
+static int cmdmain_rcb (void) {
+	int ret = 0;
+	prne_htbt_msg_head_t mh;
+	prne_htbt_status_t st;
+	prne_htbt_stdio_t df;
+	uint16_t msgid = prne_htbt_gen_msgid(NULL, htbt_msgid_rnd_f);
+	ssize_t io_ret;
+	size_t sum = 0;
+
+	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_status(&st);
+	prne_htbt_init_stdio(&df);
+
+	if (!rcb_open_outfile()) {
+		ret = 1;
+		goto END;
+	}
+	if (isatty(prog_g.cmd_st.rcb.fd)) {
+		ret = 1;
+		fprintf(stderr, "Cannot write binary data to terminal.\n");
+		goto END;
+	}
+	if (!do_connect()) {
+		ret = 1;
+		goto END;
+	}
+	mh.id = msgid;
+	mh.op = PRNE_HTBT_OP_RCB;
+	if (!(send_mh(&mh) &&
+		send_frame(
+			&prog_conf.cmd_param.rcb.rcb,
+			(prne_htbt_ser_ft)prne_htbt_ser_rcb)))
+	{
+		ret = 1;
+		goto END;
+	}
+
+	do {
+		if (!recv_mh(&mh, &msgid)) {
+			ret = 1;
+			goto END;
+		}
+		switch (mh.op) {
+		case PRNE_HTBT_OP_STDIO: break;
+		case PRNE_HTBT_OP_STATUS:
+			if (!recv_status(&st)) {
+				ret = 1;
+				goto END;
+			}
+			start_yaml(STDERR_FILENO, false);
+			emit_preemble("rcb", "status", emit_rcb_opts);
+			emit_status_frame(&st);
+			goto END;
+		default:
+			ret = 1;
+			raise_invalid_op(mh.op);
+			goto END;
+		}
+
+		if (!recv_frame(&df, (prne_htbt_dser_ft)prne_htbt_dser_stdio)) {
+			ret = 1;
+			goto END;
+		}
+		while (df.len > 0) {
+			io_ret = mbedtls_ssl_read(
+				&prog_g.ssl.ctx,
+				prog_g.cmd_st.rcb.ib.m,
+				df.len);
+			if (io_ret == 0) {
+				ret = 1;
+				raise_proto_err("remote end shutdown write");
+				goto END;
+			}
+			if (io_ret < 0) {
+				ret = 1;
+				prne_mbedtls_perror(io_ret, "mbedtls_ssl_read()");
+				goto END;
+			}
+			prne_iobuf_shift(&prog_g.cmd_st.rcb.ib, io_ret);
+			df.len -= io_ret;
+			sum += io_ret;
+
+			while (prog_g.cmd_st.rcb.ib.len > 0) {
+				io_ret = write(
+					prog_g.cmd_st.rcb.fd,
+					prog_g.cmd_st.rcb.ib.m,
+					prog_g.cmd_st.rcb.ib.len);
+				if (io_ret < 0) {
+					ret = 1;
+					perror("write()");
+					goto END;
+				}
+				if (io_ret == 0) {
+					ret = 1;
+					fprintf(stderr, "write() EOF\n");
+					goto END;
+				}
+				prne_iobuf_shift(&prog_g.cmd_st.rcb.ib, -io_ret);
+			}
+		}
+	} while (!df.fin);
+	start_yaml(STDERR_FILENO, false);
+	emit_preemble("rcb", "ok", emit_rcb_opts);
+	emit_scalar(YAML_STR_TAG, BODY_TAG_NAME);
+	emit_mapping_start();
+	emit_scalar(YAML_STR_TAG, "size");
+	emit_scalar_fmt(YAML_INT_TAG, "%zu", sum);
+	emit_mapping_end();
+
+END:
+	prne_htbt_free_msg_head(&mh);
+	prne_htbt_free_status(&st);
+	prne_htbt_free_stdio(&df);
+	if (ret != 0 && prog_g.cmd_st.rcb.our_file) {
+		unlink(prog_conf.cmd_param.rcb.out_path);
+	}
 	return ret;
 }
 
@@ -2320,7 +2619,7 @@ int main (const int argc, char *const *args) {
 	case SC_RUNCMD:
 	case SC_RUNBIN: ec = cmdmain_run(); break;
 	case SC_UPBIN: ec = cmdmain_upbin(); break;
-	// TODO
+	case SC_RCB: ec = cmdmain_rcb(); break;
 	default:
 		ec = 1;
 		fprintf(stderr, "COMMAND not implemented.\n");

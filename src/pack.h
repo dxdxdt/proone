@@ -10,6 +10,7 @@
 typedef struct prne_bin_tuple prne_bin_tuple_t;
 typedef struct prne_bin_archive prne_bin_archive_t;
 typedef struct prne_bin_rcb_ctx prne_bin_rcb_ctx_t;
+typedef struct prne_rcb_param prne_rcb_param_t;
 
 typedef enum {
 	PRNE_PACK_RC_OK,
@@ -45,6 +46,16 @@ struct prne_bin_rcb_ctx {
 		size_t len,
 		prne_pack_rc_t *prc,
 		int *err);
+};
+
+struct prne_rcb_param {
+	const uint8_t *m_self;
+	size_t self_len;
+	size_t exec_len;
+	const uint8_t *m_dv;
+	size_t dv_len;
+	const prne_bin_archive_t *ba;
+	prne_arch_t self;
 };
 
 void prne_init_bin_archive (prne_bin_archive_t *a);
@@ -91,6 +102,9 @@ bool prne_index_nybin (
 	size_t *dv_len,
 	const uint8_t **m_ba,
 	size_t *ba_len);
+
+void prne_init_rcb_param (prne_rcb_param_t *rp);
+void prne_free_rcb_param (prne_rcb_param_t *rp);
 
 const prne_arch_t *prne_compat_arch (const prne_arch_t arch);
 

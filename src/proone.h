@@ -28,14 +28,10 @@ struct prne_global { // TODO: tidy init code when finalised
 	prne_resolv_t *resolv;
 	pid_t parent_pid;
 	pid_t child_pid;
-	uint8_t *m_dvault;
-	const uint8_t *m_exec;
-	size_t exec_size;
-	size_t self_size;
-	const uint8_t *m_exec_dvault;
 	int blackhole[2];
 	int shm_fd;
-	uint16_t dvault_size;
+	prne_rcb_param_t rcb_param;
+	uint8_t *m_dvault;
 	bool is_child;
 
 	prne_bin_archive_t bin_archive;

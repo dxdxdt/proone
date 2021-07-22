@@ -43,6 +43,7 @@ const char *prne_data_type_tostr (const prne_data_type_t t) {
 	case PRNE_DATA_TYPE_CSTR: return "cstr";
 	case PRNE_DATA_TYPE_BIN: return "bin";
 	}
+	errno = EINVAL;
 	return NULL;
 }
 
@@ -53,7 +54,7 @@ prne_data_type_t prne_data_type_fstr (const char *str) {
 	if (prne_nstreq(str, prne_data_type_tostr(PRNE_DATA_TYPE_BIN))) {
 		return PRNE_DATA_TYPE_BIN;
 	}
-
+	errno = EINVAL;
 	return PRNE_DATA_TYPE_NONE;
 }
 
@@ -128,6 +129,7 @@ const char *prne_dvault_mask_result_tostr (
 	case PRNE_DVAULT_MASK_TOO_LARGE: return "data too large";
 	case PRNE_DVAULT_MASK_INVALID_TYPE: return "invalid type";
 	}
+	errno = EINVAL;
 	return NULL;
 }
 

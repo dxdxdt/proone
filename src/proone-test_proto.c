@@ -545,7 +545,7 @@ static void test_enum (void) {
 		assert(i == prne_arch_fstr(prne_arch_tostr(i)));
 	}
 
-	for (prne_arch_t i = 0; i < NB_PRNE_ARCH; i += 1) {
+	for (prne_arch_t i = PRNE_ARCH_NONE + 1; i < NB_PRNE_ARCH; i += 1) {
 		assert(prne_arch_tostr(i) != NULL);
 	}
 	for (prne_htbt_ser_rc_t i = 0; i < NB_PRNE_HTBT_SER_RC; i += 1) {

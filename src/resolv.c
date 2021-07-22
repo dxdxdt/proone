@@ -1609,6 +1609,7 @@ const char *prne_resolv_qr_tostr (const prne_resolv_qr_t qr) {
 	case PRNE_RESOLV_QR_TIMEOUT: return "TIMEOUT";
 	case PRNE_RESOLV_QR_STATUS: return "STATUS";
 	}
+	errno = EINVAL;
 	return NULL;
 }
 
@@ -1621,6 +1622,7 @@ const char *prne_resolv_rcode_tostr (const prne_resolv_rcode_t rc) {
 	case PRNE_RESOLV_RCODE_NOTIMP: return "NOTIMP";
 	case PRNE_RESOLV_RCODE_REFUSED: return "REFUSED";
 	}
+	errno = EINVAL;
 	return NULL;
 }
 
@@ -1635,5 +1637,6 @@ const char *prne_resolv_rrtype_tostr (const uint16_t rrt) {
 	case PRNE_RESOLV_RTYPE_TXT: return "TXT";
 	case PRNE_RESOLV_RTYPE_AAAA: return "AAAA";
 	}
+	errno = EINVAL;
 	return NULL;
 }

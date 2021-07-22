@@ -2,6 +2,7 @@
 #include "pth.h"
 #include "resolv.h"
 #include "protocol.h"
+#include "pack.h"
 
 #include <mbedtls/ssl.h>
 
@@ -35,6 +36,7 @@ struct prne_htbt_param {
 	prne_resolv_t *resolv;
 	prne_htbt_cbset_t cb_f;
 	void *cb_ctx;
+	const prne_rcb_param_t *rcb;
 	int blackhole;
 };
 

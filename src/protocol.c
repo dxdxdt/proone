@@ -42,6 +42,7 @@ const char *prne_arch_tostr (const prne_arch_t x) {
 		return "arceb";
 	}
 
+	errno = EINVAL;
 	return NULL;
 }
 
@@ -52,6 +53,7 @@ prne_arch_t prne_arch_fstr (const char *str) {
 		}
 	}
 
+	errno = EINVAL;
 	return PRNE_ARCH_NONE;
 }
 
@@ -125,6 +127,7 @@ const char *prne_htbt_op_tostr (const prne_htbt_op_t x) {
 	case PRNE_HTBT_OP_STDIO: return "stdio";
 	case PRNE_HTBT_OP_RCB: return "rcb";
 	}
+	errno = EINVAL;
 	return NULL;
 }
 
@@ -523,6 +526,17 @@ bool prne_htbt_eq_stdio (
 		a->fin == b->fin;
 }
 
+void prne_htbt_init_rcb (prne_htbt_rcb_t *r) {
+	r->arch = PRNE_ARCH_NONE;
+	r->compat = false;
+}
+
+void prne_htbt_free_rcb (prne_htbt_rcb_t *r) {}
+
+bool prne_htbt_eq_rcb (const prne_htbt_rcb_t *a, const prne_htbt_rcb_t *b) {
+	return a->arch == b->arch && a->compat == b->compat;
+}
+
 prne_htbt_ser_rc_t prne_htbt_ser_msg_head (
 	uint8_t *mem,
 	const size_t mem_len,
@@ -738,6 +752,22 @@ prne_htbt_ser_rc_t prne_htbt_ser_stdio (
 	return PRNE_HTBT_SER_RC_OK;
 }
 
+prne_htbt_ser_rc_t prne_htbt_ser_rcb (
+	uint8_t *mem,
+	const size_t mem_len,
+	size_t *actual,
+	const prne_htbt_rcb_t *in)
+{
+	*actual = 2;
+	if (mem_len < *actual) {
+		return PRNE_HTBT_SER_RC_MORE_BUF;
+	}
+
+	mem[0] = (uint8_t)in->arch;
+	mem[1] = (uint8_t)(in->compat ? 0x80 : 0x00);
+
+	return PRNE_HTBT_SER_RC_OK;
+}
 
 prne_htbt_ser_rc_t prne_htbt_dser_msg_head (
 	const uint8_t *data,
@@ -989,6 +1019,23 @@ prne_htbt_ser_rc_t prne_htbt_dser_stdio (
 	return PRNE_HTBT_SER_RC_OK;
 }
 
+prne_htbt_ser_rc_t prne_htbt_dser_rcb (
+	const uint8_t *data,
+	const size_t len,
+	size_t *actual,
+	prne_htbt_rcb_t *out)
+{
+	*actual = 2;
+	if (len < *actual) {
+		return PRNE_HTBT_SER_RC_MORE_BUF;
+	}
+
+	out->arch = (prne_arch_t)data[0];
+	out->compat = (data[1] & 0x80) != 0;
+
+	return PRNE_HTBT_SER_RC_OK;
+}
+
 char **prne_htbt_parse_args (
 	char *m_args,
 	const size_t args_size,
@@ -1056,5 +1103,6 @@ const char *prne_htbt_serrc_tostr (const prne_htbt_ser_rc_t x) {
 	case PRNE_HTBT_SER_RC_ERRNO: return "errno";
 	case PRNE_HTBT_SER_RC_FMT_ERR: return "format error";
 	}
+	errno = EINVAL;
 	return NULL;
 }

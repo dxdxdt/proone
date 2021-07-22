@@ -71,6 +71,7 @@ void *prne_memmem (
 	const size_t n_len);
 char *prne_build_str (const char **const arr, const size_t cnt);
 char *prne_rebuild_str (void *prev, const char **const arr, const size_t cnt);
+void prne_strzero (char *str);
 
 bool prne_hex_fromstr (const char *str, uint_fast8_t *out);
 void prne_hex_tochar (const uint_fast8_t in, char *out, const bool upper);

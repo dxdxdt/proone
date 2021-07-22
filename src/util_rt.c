@@ -367,6 +367,12 @@ char *prne_rebuild_str (void *prev, const char **const arr, const size_t cnt) {
 	return ret;
 }
 
+void prne_strzero (char *str) {
+	for (; *str != 0; str += 1) {
+		*str = 0;
+	}
+}
+
 bool prne_hex_fromstr (const char *str, uint_fast8_t *out) {
 	static const uint_fast8_t shift[2] = { 4, 0 };
 	size_t i;

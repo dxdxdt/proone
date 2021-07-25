@@ -471,6 +471,13 @@ void prne_uuid_tostr (const uint8_t *in, char *out) {
 	out[ptr] = 0;
 }
 
+int prne_cmp_uuid_asc (const void *a, const void *b) {
+	return memcmp(a, b, 16);
+}
+int prne_cmp_uuid_desc (const void *a, const void *b) {
+	return prne_cmp_uuid_asc(a, b) * -1;
+}
+
 struct timespec prne_add_timespec (
 	const struct timespec a,
 	const struct timespec b)

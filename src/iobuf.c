@@ -44,6 +44,15 @@ bool prne_alloc_iobuf (prne_iobuf_t *ib, const size_t ny_size) {
 	return true;
 }
 
+bool prne_try_alloc_iobuf (prne_iobuf_t *ib, const size_t *ny_size) {
+	for (; *ny_size != 0; ny_size += 1) {
+		if (prne_alloc_iobuf(ib, *ny_size)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void prne_iobuf_setextbuf (
 	prne_iobuf_t *ib,
 	uint8_t *m,

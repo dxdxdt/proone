@@ -38,6 +38,21 @@ struct prne_bne_param {
 		char *(*exec_name)(void *ctx);
 		bool (*enter_dd)(void *ctx);
 		void (*exit_dd)(void *ctx);
+		uint64_t (*uptime)(void *ctx);
+		/**
+		* \brief  called by bne instance to compare versions of Proone to
+		*         determine if binary update has to be performed.
+		* \return negative value if \p uuid is newer, 0 if \p uuid is identical
+		          to the current version or positive value if \p uuid is older
+		*/
+		int (*vercmp)(void *ctx, const uint8_t *uuid);
+		int (*tmpfile)(
+			void *ctx,
+			const int flags,
+			const mode_t mode,
+			size_t req_size,
+			char **path);
+		bool (*upbin)(void *ctx, const char *path, const prne_htbt_cmd_t *cmd);
 	} cb;
 	void *cb_ctx;
 	const prne_rcb_param_t *rcb;

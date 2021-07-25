@@ -51,7 +51,8 @@ endif
 
 proone_tests =\
 	proone-test_proto\
-	proone-test_util
+	proone-test_util\
+	proone-test_iobuf
 bin_PROGRAMS += $(proone_tests)
 
 libproone_a_SOURCES =\
@@ -139,6 +140,9 @@ proone_test_proto_SOURCES = proone-test_proto.c
 
 proone_test_util_LDADD = libproone.a
 proone_test_util_SOURCES = proone-test_util.c
+
+proone_test_iobuf_LDADD = libproone.a
+proone_test_iobuf_SOURCES = proone-test_iobuf.c
 
 testlist: $(proone_tests)
 	echo $(proone_tests) > testlist

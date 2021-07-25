@@ -13,20 +13,23 @@ typedef struct prne_htbt_param prne_htbt_param_t;
 typedef struct prne_htbt_cbset prne_htbt_cbset_t;
 typedef bool(*prne_htbt_cnc_txtrec_ft)(void *ctx, char *out);
 typedef bool(*prne_htbt_hostinfo_ft)(void *ctx, prne_htbt_host_info_t *out);
-typedef char*(*prne_htbt_tmpfile_ft)(
+typedef int(*prne_htbt_tmpfile_ft)(
 	void *ctx,
+	const int flags,
+	const mode_t mode,
 	size_t req_size,
-	const mode_t mode);
+	char **path);
 typedef bool(*prne_htbt_bin_ft)(
 	void *ctx,
 	const char *path,
 	const prne_htbt_cmd_t *cmd);
 
 struct prne_htbt_cbset {
+	// All callback functions are optional.
 	prne_htbt_cnc_txtrec_ft cnc_txtrec;
-	prne_htbt_hostinfo_ft hostinfo; // optional
-	prne_htbt_tmpfile_ft tmpfile; // optional
-	prne_htbt_bin_ft upbin; // optional
+	prne_htbt_hostinfo_ft hostinfo;
+	prne_htbt_tmpfile_ft tmpfile;
+	prne_htbt_bin_ft upbin;
 };
 
 struct prne_htbt_param {

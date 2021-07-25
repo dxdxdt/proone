@@ -506,10 +506,10 @@ static bool resolv_ensure_act_dns_fd (prne_resolv_t *ctx) {
 	}
 
 END:
-	pth_event_free(ev, FALSE);
 	prne_close(pfs[0].fd);
 	prne_close(pfs[1].fd);
 	if (!ret && err_sleep != NULL) {
+		pth_event_free(ev, FALSE);
 		ev = pth_event(
 			PTH_EVENT_TIME,
 			pth_timeout(err_sleep->tv_sec, err_sleep->tv_nsec / 1000));
@@ -518,6 +518,7 @@ END:
 			pth_wait(ev);
 		} while (pth_event_status(ev) == PTH_STATUS_PENDING);
 	}
+	pth_event_free(ev, FALSE);
 
 	return ret;
 }

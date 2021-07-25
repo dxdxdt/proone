@@ -2059,17 +2059,14 @@ static bool run_relay (const uint16_t msgid) {
 
 static bool run_recv_status (const uint16_t msgid) {
 	prne_htbt_msg_head_t mh;
-	prne_htbt_status_t st;
 
 	prne_htbt_init_msg_head(&mh);
-	prne_htbt_init_status(&st);
 
 	prog_g.cmd_st.run.has_status =
 		recv_mh(&mh, &msgid) &&
-		recv_status(&st);
+		recv_status(&prog_g.cmd_st.run.st);
 
 	prne_htbt_free_msg_head(&mh);
-	prne_htbt_free_status(&st);
 	return prog_g.cmd_st.run.has_status;
 }
 
@@ -2370,7 +2367,10 @@ static int cmdmain_upbin (void) {
 			return 1;
 		}
 	}
-	if (!(run_setup(msgid) && run_recv_status(msgid))) {
+	if (!run_setup(msgid)) {
+		return 1;
+	}
+	if (!prog_g.cmd_st.run.has_status && !run_recv_status(msgid)) {
 		return 1;
 	}
 

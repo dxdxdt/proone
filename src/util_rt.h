@@ -87,6 +87,9 @@ bool prne_uuid_fromstr (const char *str, uint8_t *out);
 */
 void prne_uuid_tostr (const uint8_t *in, char *out);
 
+int prne_cmp_uuid_asc (const void *a, const void *b);
+int prne_cmp_uuid_desc (const void *a, const void *b);
+
 struct timespec prne_add_timespec (
 	const struct timespec a,
 	const struct timespec b);

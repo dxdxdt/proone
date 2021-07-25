@@ -20,6 +20,7 @@ struct prne_iobuf {
 void prne_init_iobuf (prne_iobuf_t *ib);
 void prne_free_iobuf (prne_iobuf_t *ib);
 bool prne_alloc_iobuf (prne_iobuf_t *ib, const size_t ny_size);
+bool prne_try_alloc_iobuf (prne_iobuf_t *ib, const size_t *ny_size);
 void prne_iobuf_setextbuf (
 	prne_iobuf_t *ib,
 	uint8_t *m,

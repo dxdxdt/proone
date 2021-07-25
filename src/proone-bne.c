@@ -18,6 +18,10 @@
 #include "proone_conf/x509.h"
 
 
+static char m_upbin_path[256];
+static char m_upbin_args[1024];
+static size_t m_upbin_args_size;
+
 static void print_help (FILE *o, const char *prog) {
 	fprintf(
 		o,
@@ -157,6 +161,100 @@ static char *cb_exec_name (void *ctx) {
 
 	return ret;
 }
+
+static uint64_t cb_uptime (void *ctx) {
+	return UINT64_MAX;
+}
+
+static int cb_vercmp (void *ctx, const uint8_t *uuid) {
+	return -1;
+}
+
+static int cb_tmpfile (
+	void *ctx,
+	const int flags,
+	const mode_t mode,
+	size_t req_size,
+	char **opath)
+{
+	static int ctr = 0;
+	char *path = NULL;
+	int fd = -1, len;
+	bool ret = false;
+
+	len = snprintf(NULL, 0, "bne-tmp.%d", ctr);
+	if (len < 0) {
+		goto END;
+	}
+	path = prne_alloc_str(len);
+	if (path == NULL) {
+		goto END;
+	}
+	prne_memzero(path, len + 1);
+	if (len != snprintf(path, len + 1, "bne-tmp.%d", ctr)) {
+		goto END;
+	}
+	ctr += 1;
+
+	fd = open(path, flags, mode);
+	if (fd < 0) {
+		goto END;
+	}
+	if (ftruncate(fd, (off_t)req_size) != 0) {
+		goto END;
+	}
+	ret = true;
+
+END:
+	if (ret) {
+		if (opath != NULL) {
+			*opath = path;
+			path = NULL;
+		}
+	}
+	else {
+		if (fd >= 0) {
+			unlink(path);
+		}
+		prne_close(fd);
+		fd = -1;
+	}
+	prne_free(path);
+	return fd;
+}
+
+static bool cb_upbin (void *ctx, const char *path, const prne_htbt_cmd_t *cmd) {
+	const size_t path_len = prne_nstrlen(path);
+
+	prne_dbgast(path_len > 0);
+	if (path_len + 1 > sizeof(m_upbin_path) ||
+		cmd->mem_len > sizeof(m_upbin_args))
+	{
+		errno = ENOMEM;
+		return false;
+	}
+
+	memcpy(m_upbin_path, path, path_len + 1);
+	memcpy(m_upbin_args, cmd->mem, cmd->mem_len);
+	m_upbin_args_size = cmd->mem_len;
+
+	return true;
+}
+
+static void do_run_upbin (void) {
+	for (size_t i = 0; i < m_upbin_args_size; i += 1) {
+		if (m_upbin_args[i] == 0) {
+			m_upbin_args[i] = ' ';
+		}
+	}
+	m_upbin_args[m_upbin_args_size - 1] = 0;
+
+	printf(
+		"upbin received:\n%s %s\n",
+		m_upbin_path,
+		m_upbin_args);
+}
+
 
 int main (const int argc, const char **args) {
 	static prne_bne_vector_t ARR_VEC[] = {
@@ -307,6 +405,10 @@ int main (const int argc, const char **args) {
 	param.vector.cnt = sizeof(ARR_VEC)/sizeof(prne_bne_vector_t);
 	param.rcb = &rcb;
 	param.cb.exec_name = cb_exec_name;
+	param.cb.uptime = cb_uptime;
+	param.cb.vercmp = cb_vercmp;
+	param.cb.tmpfile = cb_tmpfile;
+	param.cb.upbin = cb_upbin;
 
 	for (size_t i = 0; i < cnt; i += 1) {
 		prne_worker_t *w = prne_malloc(sizeof(prne_worker_t), 1);
@@ -393,6 +495,10 @@ END: // CATCH
 	prne_free(m_nybin);
 
 	pth_kill();
+
+	if (prne_nstrlen(m_upbin_path) > 0) {
+		do_run_upbin();
+	}
 
 	return ret;
 }

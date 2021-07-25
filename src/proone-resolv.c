@@ -375,6 +375,8 @@ int main (void) {
 	}
 	prne_free_llist(&prm_list);
 
+	pth_kill();
+
 	if (exec_result.proc) {
 		if (exec_result.parse_err || exec_result.query_err) {
 			return 3;

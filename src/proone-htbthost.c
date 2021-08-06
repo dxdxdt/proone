@@ -136,6 +136,15 @@ static bool cb_upbin (
 	return pth_raise(main_pth, SIGTERM) != 0;
 }
 
+static bool cb_fork (void *ctx) {
+	sigset_t ss;
+
+	sigfillset(&ss);
+	pth_sigmask(SIG_UNBLOCK, &ss, NULL);
+
+	return true;
+}
+
 static void load_ssl_conf (
 	mbedtls_x509_crt *ca,
 	mbedtls_ssl_config *s_conf,
@@ -509,6 +518,7 @@ int main (const int argc, const char **args) {
 		param.cb_f.hostinfo = cb_hostinfo;
 		param.cb_f.tmpfile = mktmpfile;
 		param.cb_f.upbin = cb_upbin;
+		param.cb_f.fork = cb_fork;
 		param.blackhole = open("/dev/null", O_WRONLY);
 
 		w = wkr_arr + 1;

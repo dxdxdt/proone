@@ -219,6 +219,17 @@ static bool cb_upbin (
 	return true;
 }
 
+static bool cb_fork (void *ctx) {
+	sigset_t ss;
+
+	sigfillset(&ss);
+	pth_sigmask(SIG_UNBLOCK, &ss, NULL);
+
+	libssh2_exit();
+
+	return true;
+}
+
 
 static void alloc_htbt (void) {
 	prne_htbt_t *htbt;
@@ -238,6 +249,7 @@ static void alloc_htbt (void) {
 	param.cb_f.hostinfo = cb_htbt_hostinfo;
 	param.cb_f.tmpfile = cb_tmpfile;
 	param.cb_f.upbin = cb_upbin;
+	param.cb_f.fork = cb_fork;
 	param.rcb = &prne_g.rcb_param;
 	param.blackhole = prne_g.blackhole[1];
 
@@ -1393,6 +1405,7 @@ int main (const int argc, const char **args) {
 		}
 		else if (f_ret == 0) {
 			prne_g.parent_pid = getpid();
+			setsid();
 		}
 		else {
 			goto END;

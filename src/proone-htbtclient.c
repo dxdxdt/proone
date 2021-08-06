@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <assert.h>
+#include <errno.h>
 
 #include <sys/mman.h>
 #include <getopt.h>
@@ -172,9 +173,9 @@ struct {
 		} hover;
 		struct {
 			char *bin_path;
+			size_t bin_len;
 			bin_type_t bin_type;
 			prne_htbt_bin_meta_t bm;
-			bool detached;
 			bool compat;
 		} run;
 		struct {
@@ -550,14 +551,14 @@ static int parse_args_run (const int argc, char *const *args, const bool bin) {
 		case 0:
 			co = (const struct option*)lopts + li;
 			if (strcmp("detach", co->name) == 0) {
-				prog_conf.cmd_param.run.detached = true;
+				prog_conf.cmd_param.run.bm.cmd.detach = true;
 			}
 			else {
 				abort();
 			}
 			break;
 		case 'd':
-			prog_conf.cmd_param.run.detached = true;
+			prog_conf.cmd_param.run.bm.cmd.detach = true;
 			break;
 		default:
 			goto LOOP_END;
@@ -1777,16 +1778,78 @@ static void emit_hover_opts (void) {
 	emit_mapping_end();
 }
 
+static bool upload_bin (
+	prne_htbt_msg_head_t *mh,
+	prne_htbt_stdio_t *sh,
+	size_t l)
+{
+	ssize_t io_ret;
+
+	mh->op = PRNE_HTBT_OP_STDIO;
+	prne_iobuf_reset(&prog_g.cmd_st.run.ib);
+
+	while (l > 0) {
+		io_ret = read(
+			prog_g.cmd_st.run.fd,
+			prog_g.cmd_st.run.ib.m,
+			prne_op_min(
+				prne_op_min(l, prog_g.cmd_st.run.ib.avail),
+				PRNE_HTBT_STDIO_LEN_MAX));
+		if (io_ret == 0) {
+			fprintf(stderr, "Unexpected EOF whilst reading binary!\n");
+			return false;
+		}
+		if (io_ret < 0) {
+			perror("read()");
+			return false;
+		}
+		prne_iobuf_shift(&prog_g.cmd_st.run.ib, io_ret);
+		l -= io_ret;
+
+		sh->len = io_ret;
+		if (!(send_mh(mh) &&
+			send_frame(sh, (prne_htbt_ser_ft)prne_htbt_ser_stdio)))
+		{
+			return false;
+		}
+
+		while (prog_g.cmd_st.run.ib.len > 0) {
+			io_ret = mbedtls_ssl_write(
+				&prog_g.ssl.ctx,
+				prog_g.cmd_st.run.ib.m,
+				prog_g.cmd_st.run.ib.len);
+			if (io_ret == 0) {
+				raise_proto_err("remote end shutdown read");
+				return false;
+			}
+			if (io_ret < 0) {
+				prne_mbedtls_perror((int)io_ret, "mbedtls_ssl_write()");
+				return false;
+			}
+			if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
+				fprintf(stderr, "bin ul %zd bytes.\n", io_ret);
+			}
+			prne_iobuf_shift(&prog_g.cmd_st.run.ib, -io_ret);
+		}
+	}
+
+	sh->len = 0;
+	sh->fin = true;
+	return
+		send_mh(mh) &&
+		send_frame(sh, (prne_htbt_ser_ft)prne_htbt_ser_stdio);
+}
+
 static bool run_setup (const uint16_t msgid) {
 	bool ret = true;
-	int f_ret;
 	struct stat fs;
 	void *f;
 	prne_htbt_ser_ft ser_f;
-	ssize_t io_ret;
 	prne_htbt_msg_head_t mh;
+	prne_htbt_stdio_t sh;
 
 	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_stdio(&sh);
 	mh.id = msgid;
 	mh.is_rsp = false;
 
@@ -1810,14 +1873,13 @@ static bool run_setup (const uint16_t msgid) {
 			perror("fstat()");
 			goto END;
 		}
-		if (fs.st_size > PRNE_HTBT_BIN_LEN_MAX) {
-			errno = EFBIG;
-			ret = false;
-			perror(prog_conf.cmd_param.run.bin_path);
-			goto END;
-		}
 
-		prog_conf.cmd_param.run.bm.bin_size = (uint32_t)fs.st_size;
+		if (fs.st_size < PRNE_HTBT_BIN_ALLOC_LEN_MAX) {
+			prog_conf.cmd_param.run.bm.alloc_len = (uint32_t)fs.st_size;
+		}
+		else {
+			prog_conf.cmd_param.run.bm.alloc_len = PRNE_HTBT_BIN_ALLOC_LEN_MAX;
+		}
 		f = &prog_conf.cmd_param.run.bm;
 		ser_f = (prne_htbt_ser_ft)prne_htbt_ser_bin_meta;
 		break;
@@ -1827,50 +1889,15 @@ static bool run_setup (const uint16_t msgid) {
 	if (!ret) {
 		goto END;
 	}
-	prne_iobuf_reset(&prog_g.cmd_st.run.ib);
-	while (fs.st_size > 0 || prog_g.cmd_st.run.ib.len > 0) {
-		if (fs.st_size > 0 && prog_g.cmd_st.run.ib.avail > 0) {
-			io_ret = read(
-				prog_g.cmd_st.run.fd,
-				prog_g.cmd_st.run.ib.m + prog_g.cmd_st.run.ib.len,
-				prne_op_min((size_t)fs.st_size, prog_g.cmd_st.run.ib.avail));
-			if (io_ret == 0) {
-				ret = false;
-				fprintf(stderr, "Unexpected EOF whilst reading binary!\n");
-				goto END;
-			}
-			if (io_ret < 0) {
-				ret = false;
-				perror("read()");
-				goto END;
-			}
 
-			prne_iobuf_shift(&prog_g.cmd_st.run.ib, io_ret);
-			fs.st_size -= io_ret;
-		}
-
-		f_ret = mbedtls_ssl_write(
-			&prog_g.ssl.ctx,
-			prog_g.cmd_st.run.ib.m,
-			prog_g.cmd_st.run.ib.len);
-		if (f_ret == 0) {
-			ret = false;
-			raise_proto_err("remote end shutdown read");
-			goto END;
-		}
-		if (f_ret < 0) {
-			ret = false;
-			prne_mbedtls_perror(f_ret, "mbedtls_ssl_write()");
-			goto END;
-		}
-		if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
-			fprintf(stderr, "bin ul %d bytes.\n", f_ret);
-		}
-		prne_iobuf_shift(&prog_g.cmd_st.run.ib, -f_ret);
+	if (fs.st_size > 0) {
+		prog_conf.cmd_param.run.bin_len = (size_t)fs.st_size;
+		ret = upload_bin(&mh, &sh, fs.st_size);
 	}
 
 END:
 	prne_htbt_free_msg_head(&mh);
+	prne_htbt_free_stdio(&sh);
 	return ret;
 }
 
@@ -2095,7 +2122,7 @@ static int cmdmain_run (void) {
 		if (!run_setup(msgid)) {
 			break;
 		}
-		if (!prog_conf.cmd_param.run.detached && !run_relay(msgid)) {
+		if (!prog_conf.cmd_param.run.bm.cmd.detach && !run_relay(msgid)) {
 			break;
 		}
 
@@ -2137,11 +2164,16 @@ static void emit_upbin_opts (void) {
 		emit_scalar(YAML_STR_TAG, "exec");
 	}
 
-	emit_scalar(YAML_STR_TAG, "bin_size");
+	emit_scalar(YAML_STR_TAG, "alloc_len");
 	emit_scalar_fmt(
 		YAML_INT_TAG,
 		"%"PRIu32,
-		prog_conf.cmd_param.run.bm.bin_size);
+		prog_conf.cmd_param.run.bm.alloc_len);
+	emit_scalar(YAML_STR_TAG, "bin_len");
+	emit_scalar_fmt(
+		YAML_INT_TAG,
+		"%"PRIu32,
+		prog_conf.cmd_param.run.bin_len);
 	emit_scalar(YAML_STR_TAG, "args");
 	emit_seq_start();
 	for (size_t i = 0; i < prog_conf.cmd_param.run.bm.cmd.argc; i += 1) {

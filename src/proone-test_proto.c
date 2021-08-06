@@ -487,7 +487,7 @@ static void test_ser (void) {
 	prne_htbt_init_bin_meta(&bm_a);
 	prne_htbt_init_bin_meta(&bm_b);
 	assert(prne_htbt_set_cmd(&bm_a.cmd, test_args));
-	bm_a.bin_size = 0xBBAAEE;
+	bm_a.alloc_len = 0xBBAAEE;
 	assert(prne_htbt_ser_bin_meta(
 		proto_buf,
 		PRNE_HTBT_PROTO_MIN_BUF,
@@ -503,6 +503,14 @@ static void test_ser (void) {
 		&actual,
 		&bm_b) == PRNE_HTBT_SER_RC_OK);
 	assert(prne_htbt_eq_bin_meta(&bm_a, &bm_b));
+
+	bm_a.alloc_len = PRNE_HTBT_BIN_ALLOC_LEN_MAX + 1;
+	assert(prne_htbt_ser_bin_meta(
+		proto_buf,
+		PRNE_HTBT_PROTO_MIN_BUF,
+		&proto_buf_cnt_len,
+		&bm_a) == PRNE_HTBT_SER_RC_FMT_ERR);
+
 	prne_htbt_free_bin_meta(&bm_a);
 	prne_htbt_free_bin_meta(&bm_b);
 

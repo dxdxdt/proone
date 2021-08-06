@@ -143,24 +143,22 @@ typedef enum {
 	* TODO
 	*
 	* Followed by:
-	* 	uint24_t bin_len
+	* 	uint24_t alloc_len
 	*	uint5_t rsv
 	*	uint1_t detach
 	* 	uint10_t args_len
 	* 	char args[args_len]
-	* 	uint8_t bin[bin_len]
 	*/
 	PRNE_HTBT_OP_UP_BIN,
 	/* Run Binary Operation
 	* TODO
 	*
 	* Followed by:
-	* 	uint24_t bin_len
+	* 	uint24_t alloc_len
 	*	uint5_t rsv
 	*	uint1_t detach
 	* 	uint10_t args_len
 	* 	char args[args_len]
-	* 	uint8_t bin[bin_len]
 	*/
 	PRNE_HTBT_OP_RUN_BIN,
 	/* STDIO Frame
@@ -197,7 +195,6 @@ typedef enum {
 	*/
 	PRNE_HTBT_STATUS_ERRNO,
 	PRNE_HTBT_STATUS_SUB,
-	PRNE_HTBT_STATUS_TIMEDOUT,
 	PRNE_HTBT_STATUS_LIMIT,
 
 	NB_PRNE_HTBT_STATUS
@@ -249,7 +246,7 @@ struct prne_htbt_cmd {
 };
 
 struct prne_htbt_bin_meta {
-	uint32_t bin_size;
+	uint32_t alloc_len;
 	prne_htbt_cmd_t cmd;
 };
 
@@ -298,7 +295,7 @@ typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(
 #define PRNE_HTBT_ARGS_MAX			255
 #define PRNE_HTBT_ARG_MEM_MAX		1023
 #define PRNE_HTBT_STDIO_LEN_MAX		0x0FFF
-#define PRNE_HTBT_BIN_LEN_MAX		0xFFFFFF
+#define PRNE_HTBT_BIN_ALLOC_LEN_MAX	0xFFFFFF
 
 /* PRNE_HTBT_PROTO_MIN_BUF
 *

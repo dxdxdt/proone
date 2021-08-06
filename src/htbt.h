@@ -23,6 +23,7 @@ typedef bool(*prne_htbt_bin_ft)(
 	void *ctx,
 	const char *path,
 	const prne_htbt_cmd_t *cmd);
+typedef bool(*prne_htbt_fork_ft)(void *ctx);
 
 struct prne_htbt_cbset {
 	// All callback functions are optional.
@@ -30,6 +31,7 @@ struct prne_htbt_cbset {
 	prne_htbt_hostinfo_ft hostinfo;
 	prne_htbt_tmpfile_ft tmpfile;
 	prne_htbt_bin_ft upbin;
+	prne_htbt_fork_ft fork;
 };
 
 struct prne_htbt_param {

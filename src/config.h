@@ -1,4 +1,8 @@
 #pragma once
+#ifndef CONFIG_GEN_H
+#include "config_gen.h"
+#define CONFIG_GEN_H
+#endif
 #include "protocol.h"
 
 #include <stdint.h>
@@ -6,7 +10,6 @@
 #include <stdbool.h>
 
 #include <zlib.h>
-
 
 #if INTPTR_MAX == INT32_MAX
 	#define PRNE_HOST_WORDSIZE 32
@@ -38,4 +41,54 @@
 
 #define PRNE_PACK_Z_LEVEL Z_DEFAULT_COMPRESSION
 
-extern const prne_arch_t prne_host_arch;
+// PRNE_HOST_ARCH
+#ifdef __GNUC__
+	#if defined(__i386__)
+		#define PRNE_HOST_ARCH PRNE_ARCH_I686
+	#elif defined(__x86_64__)
+		#define PRNE_HOST_ARCH PRNE_ARCH_X86_64
+	#elif defined(__ARM_ARCH_4T__)
+		#define PRNE_HOST_ARCH PRNE_ARCH_ARMV4T
+	#elif defined(__ARM_ARCH_7A__)
+		#define PRNE_HOST_ARCH PRNE_ARCH_ARMV7
+	#elif defined(__aarch64__)
+		#define PRNE_HOST_ARCH PRNE_ARCH_AARCH64
+	#elif defined(__mips__)
+		#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+			#define PRNE_HOST_ARCH PRNE_ARCH_MIPS
+		#elif __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+			#define PRNE_HOST_ARCH PRNE_ARCH_MPSL
+		#else
+			#error "FIXME!"
+		#endif
+	#elif defined(__powerpc__)
+		#define PRNE_HOST_ARCH PRNE_ARCH_PPC
+	#elif defined(__SH4__)
+		#define PRNE_HOST_ARCH PRNE_ARCH_SH4
+	#elif defined(__m68k__)
+		#define PRNE_HOST_ARCH PRNE_ARCH_M68K
+	#elif defined(__arc__)
+		#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+			#define PRNE_HOST_ARCH PRNE_ARCH_ARCEB
+		#elif __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+			#define PRNE_HOST_ARCH PRNE_ARCH_ARC
+		#else
+			#error "FIXME!"
+		#endif
+	#else
+		#error "FIXME!"
+	#endif
+#else
+	#error "FIXME!"
+#endif
+
+// PRNE_HOST_OS
+#ifdef __GNUC__
+	#if defined(__linux__)
+		#define PRNE_HOST_OS PRNE_OS_LINUX
+	#else
+		#error "FIXME!"
+	#endif
+#else
+	#error "FIXME!"
+#endif

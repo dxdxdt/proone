@@ -3,7 +3,9 @@ AC_INIT([proone], [0.0.0], [])
 : ${CFLAGS=""}
 : ${CXXFLAGS=""}
 : ${PRNE_VERBOSE=2}
+: ${BIN_ALIGNMENT=8}
 
+AC_CONFIG_HEADERS([src/config_gen.h])
 AM_INIT_AUTOMAKE([1.0 subdir-objects])
 AC_CANONICAL_HOST
 AC_LANG([C])
@@ -14,12 +16,14 @@ AC_ARG_ENABLE(debug,
 AS_HELP_STRING([--enable-debug],
 			   [build with debug flags. Default: no]),
 [case "${enableval}" in
-			 yes) debug=true ;;
-			 no)  debug=false ;;
+			 yes) debug=1 ;;
+			 no)  debug=0 ;;
 			 *)	  AC_MSG_ERROR([bad value ${enableval} for --enable-debug]) ;;
 esac],
-[debug=false])
-AM_CONDITIONAL(DEBUG, test x"$debug" = x"true")
+[debug=0])
+AM_CONDITIONAL(DEBUG, test x"$debug" = x"1")
+AH_TEMPLATE([PRNE_DEBUG], [non-zero for debug build])
+AC_DEFINE_UNQUOTED([PRNE_DEBUG], [$debug])
 
 AC_ARG_ENABLE(static,
 AS_HELP_STRING([--enable-static],
@@ -43,10 +47,34 @@ esac],
 [mttools=false])
 AM_CONDITIONAL(BUILD_MTTOOLS, test x"$mttools" = x"true")
 
+AC_ARG_ENABLE(minmem,
+	AS_HELP_STRING(
+		[--enable-minmem],
+		[use only minimum amount of memory required to function. Default: no]),
+	[case "${enableval}" in
+		yes) minmem=1 ;;
+		no)  minmem=0 ;;
+		*)   AC_MSG_ERROR([bad value ${enableval} for --enable-minmem]) ;;
+	esac],
+	[minmem=0])
+AH_TEMPLATE(
+	[PRNE_USE_MIN_MEM],
+	[use only minimum amount of memory required to function])
+AC_DEFINE_UNQUOTED([PRNE_USE_MIN_MEM], [$minmem])
 
+AH_TEMPLATE([PRNE_VERBOSE], [Hardcoded compile-time verbose level])
 AC_ARG_VAR(
 	[PRNE_VERBOSE],
 	[Debug verbose level. Must be used with --enable-debug. Defaults to 2])
+AC_DEFINE_UNQUOTED([PRNE_VERBOSE], [$PRNE_VERBOSE])
+AH_TEMPLATE([PRNE_BIN_ALIGNMENT], [Binary alignment size])
+AC_DEFINE_UNQUOTED([PRNE_BIN_ALIGNMENT], [$BIN_ALIGNMENT])
+AC_SUBST([BIN_ALIGNMENT])
+AH_TEMPLATE([PRNE_BUILD_ENTROPY], [Generated build entropy on configuration])
+AC_DEFINE_UNQUOTED(
+	[PRNE_BUILD_ENTROPY],
+	[{ $(xxd -l16 -ps /dev/urandom |\
+		sed -E s/\(\\S{2}\)/0x\&,\ /g | sed -E s/,\ \$//) }])
 
 AC_CHECK_LIB(
 	[pthread],
@@ -115,11 +143,6 @@ AC_CHECK_PROG(TOOL_XXD, [xxd], [yes])
 AS_IF([test x"$TOOL_XXD" != x"yes"], [AC_MSG_ERROR([xxd not found])])
 AC_CHECK_PROG(TOOL_SED, [sed], [yes])
 AS_IF([test x"$TOOL_SED" != x"yes"], [AC_MSG_ERROR([sed not found])])
-
-
-AC_DEFINE_UNQUOTED(
-	[PRNE_BUILD_ENTROPY],
-	[{ $(xxd -l16 -ps /dev/urandom | sed -E s/\(\\S{2}\)/0x\&,\ /g | sed -E s/,\ \$//) }])
 
 AC_CONFIG_FILES([Makefile src/Makefile])
 AC_OUTPUT

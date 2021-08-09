@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "config.h"
 #include "cred_dict.h"
 #include "util_rt.h"
 #include "llist.h"

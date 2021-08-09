@@ -192,6 +192,10 @@ bool prne_cisprint (const char c) {
 	return 32 <= c && c < 127;
 }
 
+bool prne_ciszero (const char c) {
+	return c == 0;
+}
+
 bool prne_nstreq (const char *a, const char *b) {
 	return strcmp(a == NULL ? "" : a, b == NULL ? "" : b) == 0;
 }

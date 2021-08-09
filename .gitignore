@@ -24,4 +24,8 @@ Makefile.in
 /src/cred_dict.bin
 /src/dvault.bin
 /src/testlist
+/src/config_gen.h
+/src/config_gen.h.in
+/src/config_gen.h.in~
+/src/stamp-h1
 /builds/*

@@ -689,7 +689,7 @@ static int build_hostinfo_query_str (
 	const struct sockaddr_in6 *sa,
 	const char *cred_id,
 	const char *cred_pw,
-	const char *arch,
+	const char *flags,
 	char *const buf,
 	const size_t size)
 {
@@ -698,6 +698,8 @@ static int build_hostinfo_query_str (
 		size,
 		"SET\n"
 		"\t@`instance_id` = UNHEX('"
+		"%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X'),\n"
+		"\t@`org_id` = UNHEX('"
 		"%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X'),\n"
 		"\t@`parent_uptime` = %"PRIu64",\n"
 		"\t@`child_uptime` = %"PRIu64",\n"
@@ -712,12 +714,15 @@ static int build_hostinfo_query_str (
 		"\t@`cred_id` = %s,\n"
 		"\t@`cred_pw` = %s,\n"
 		"\t@`crash_cnt` = %"PRIu32",\n"
-		"\t@`arch` = %s,\n"
+		"\t@`arch` = %d,\n"
+		"\t@`os` = %d,\n"
+		"\t@`flags` = %s,\n"
 		"\t@`ipaddr` = UNHEX('"
 		"%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X');\n"
 		"INSERT INTO `%shi`\n"
 		"SET\n"
 		"\t`instance_id` = @`instance_id`,\n"
+		"\t`org_id` = @`org_id`,\n"
 		"\t`inserted` = UTC_TIMESTAMP,\n"
 		"\t`updated` = UTC_TIMESTAMP,\n"
 		"\t`parent_uptime` = @`parent_uptime`,\n"
@@ -732,6 +737,8 @@ static int build_hostinfo_query_str (
 		"\t`cred_pw` = @`cred_pw`,\n"
 		"\t`crash_cnt` = @`crash_cnt`,\n"
 		"\t`arch` = @`arch`,\n"
+		"\t`os` = @`os`,\n"
+		"\t`flags` = @`flags`,\n"
 		"\t`ipaddr` = @`ipaddr`\n"
 		"ON DUPLICATE KEY UPDATE\n"
 		"\t`updated` = UTC_TIMESTAMP,\n"
@@ -759,6 +766,22 @@ static int build_hostinfo_query_str (
 		hi->instance_id[13],
 		hi->instance_id[14],
 		hi->instance_id[15],
+		hi->org_id[0],
+		hi->org_id[1],
+		hi->org_id[2],
+		hi->org_id[3],
+		hi->org_id[4],
+		hi->org_id[5],
+		hi->org_id[6],
+		hi->org_id[7],
+		hi->org_id[8],
+		hi->org_id[9],
+		hi->org_id[10],
+		hi->org_id[11],
+		hi->org_id[12],
+		hi->org_id[13],
+		hi->org_id[14],
+		hi->org_id[15],
 		hi->parent_uptime,
 		hi->child_uptime,
 		hi->bne_cnt,
@@ -800,7 +823,9 @@ static int build_hostinfo_query_str (
 		cred_id,
 		cred_pw,
 		hi->crash_cnt,
-		arch,
+		hi->arch,
+		hi->os,
+		flags,
 		((const uint8_t*)&sa->sin6_addr)[0],
 		((const uint8_t*)&sa->sin6_addr)[1],
 		((const uint8_t*)&sa->sin6_addr)[2],
@@ -833,12 +858,11 @@ static bool handle_db_qe (
 	struct {
 		char *cred_id;
 		char *cred_pw;
-		char *arch;
+		char *flags;
 	} qv;
 	char *q_str = NULL;
 	size_t q_len = 0;
 	prne_host_cred_t hc;
-	const char *arch_str;
 	int f_ret;
 	bool ret = false, sql_err = true;
 
@@ -893,15 +917,27 @@ static bool handle_db_qe (
 		}
 	}
 
-	arch_str = prne_arch_tostr(e->hi.arch);
-	if (arch_str != NULL) {
-		const char *sb[] = { "'", arch_str, "'" };
-		qv.arch = prne_build_str(sb, sizeof(sb)/sizeof(const char*));
+	if (e->hi.bf_len > 0) {
+		char *hex, *p;
+		const char *sb[] = { "UNHEX('", NULL, "')" };
+
+		p = hex = prne_alloc_str(e->hi.bf_len * 2);
+		if (hex == NULL) {
+			goto END;
+		}
+		for (size_t i = 0; i < e->hi.bf_len; i += 1) {
+			prne_hex_tochar(e->hi.bf[i], p, false);
+			p += 2;
+		}
+		*p = 0;
+
+		sb[1] = hex;
+		qv.flags = prne_build_str(sb, sizeof(sb)/sizeof(const char*));
 	}
 	else {
-		qv.arch = prne_dup_str("NULL");
+		qv.flags = prne_dup_str("NULL");
 	}
-	if (qv.arch == NULL) {
+	if (qv.flags == NULL) {
 		goto END;
 	}
 
@@ -934,10 +970,12 @@ static bool handle_db_qe (
 			"prog_ver = %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X, "
 			"boot_id = %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X, "
 			"instance_id = %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X, "
+			"org_id = %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X, "
 			"host_cred.id = %s, "
 			"host_cred.pw = %s, "
 			"crash_cnt = %"PRIu32", "
-			"arch = '%s')\n",
+			"arch = %d, "
+			"os = %d)\n",
 			(uintptr_t)ctx,
 			e->hi.parent_uptime,
 			e->hi.child_uptime,
@@ -993,10 +1031,27 @@ static bool handle_db_qe (
 			e->hi.instance_id[13],
 			e->hi.instance_id[14],
 			e->hi.instance_id[15],
+			e->hi.org_id[0],
+			e->hi.org_id[1],
+			e->hi.org_id[2],
+			e->hi.org_id[3],
+			e->hi.org_id[4],
+			e->hi.org_id[5],
+			e->hi.org_id[6],
+			e->hi.org_id[7],
+			e->hi.org_id[8],
+			e->hi.org_id[9],
+			e->hi.org_id[10],
+			e->hi.org_id[11],
+			e->hi.org_id[12],
+			e->hi.org_id[13],
+			e->hi.org_id[14],
+			e->hi.org_id[15],
 			pr[0],
 			pr[1],
 			e->hi.crash_cnt,
-			qv.arch);
+			e->hi.arch,
+			e->hi.os);
 		pthread_mutex_unlock(&prog_g.stdio_lock);
 	}
 
@@ -1005,7 +1060,7 @@ static bool handle_db_qe (
 		&e->sa,
 		qv.cred_id,
 		qv.cred_pw,
-		qv.arch,
+		qv.flags,
 		NULL,
 		0);
 	if (f_ret < 0) {
@@ -1021,7 +1076,7 @@ static bool handle_db_qe (
 		&e->sa,
 		qv.cred_id,
 		qv.cred_pw,
-		qv.arch,
+		qv.flags,
 		q_str,
 		q_len + 1);
 	if (prog_conf.verbose >= PRNE_VL_DBG0 + 2) {
@@ -1054,7 +1109,7 @@ END: // CATCH
 	prne_free_host_cred(&hc);
 	prne_free(qv.cred_id);
 	prne_free(qv.cred_pw);
-	prne_free(qv.arch);
+	prne_free(qv.flags);
 	prne_free(q_str);
 
 	return ret;

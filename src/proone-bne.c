@@ -134,7 +134,7 @@ static void report_result (const prne_bne_result_t *r) {
 		vec_str,
 		r->ny_instance ? "true" : "false");
 	if (r->vec >= 0) {
-		const char *arch_str = prne_arch_tostr(r->arch);
+		const char *arch_str;
 
 		if (r->cred.id != NULL) {
 			printf(
@@ -145,8 +145,13 @@ static void report_result (const prne_bne_result_t *r) {
 				r->cred.pw);
 		}
 		printf("\tprc: %d\n", r->prc);
+		arch_str = prne_arch_tostr(r->bin_host.arch);
 		if (arch_str != NULL) {
-			printf("\tarch: %s\n", arch_str);
+			printf("\thost arch: %s\n", arch_str);
+		}
+		arch_str = prne_arch_tostr(r->bin_used.arch);
+		if (arch_str != NULL) {
+			printf("\tbin arch: %s\n", arch_str);
 		}
 	}
 }

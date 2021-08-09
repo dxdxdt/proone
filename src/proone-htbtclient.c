@@ -33,6 +33,7 @@
 #include "mbedtls.h"
 #include "config.h"
 #include "iobuf.h"
+#include "bitfield.h"
 
 #define STRINGIFY(x) #x
 #define STRINGIFY_X(x) STRINGIFY(x)
@@ -209,8 +210,8 @@ struct {
 	union {
 		struct {
 			int fd;
-			prne_arch_t arch_host;
-			prne_arch_t arch_rcb;
+			prne_bin_host_t target;
+			prne_bin_host_t actual;
 			bool has_status;
 			prne_iobuf_t ib;
 			prne_htbt_status_t st;
@@ -369,6 +370,8 @@ static void init_rcb_conf (void) {
 	prne_htbt_init_rcb(&prog_conf.cmd_param.rcb.rcb);
 	prog_conf.cmd_param.rcb.out_path = prne_dup_str("-");
 	prog_conf.cmd_param.rcb.rcb.compat = true;
+	prog_conf.cmd_param.rcb.rcb.self = true;
+	prog_conf.cmd_param.rcb.rcb.os = PRNE_OS_LINUX;
 
 	prog_conf.free_cmdparam_f = free_rcb_conf;
 }
@@ -689,6 +692,7 @@ static int parse_args_rcb (const int argc, char *const *args) {
 		co = (const struct option*)lopts + li;
 		if (strcmp("arch", co->name) == 0) {
 			prog_conf.cmd_param.rcb.rcb.arch = prne_arch_fstr(optarg);
+			prog_conf.cmd_param.rcb.rcb.self = false;
 			if (prog_conf.cmd_param.rcb.rcb.arch == PRNE_ARCH_NONE) {
 				perror(optarg);
 				return 2;
@@ -1524,10 +1528,52 @@ static void emit_preemble (
 	emit_mapping_end();
 }
 
+static void emit_hostinfo_iflags (
+	void *ctx,
+	const unsigned int bit,
+	const bool v)
+{
+	const char *enumstr;
+
+	if (!v) {
+		return;
+	}
+
+	enumstr = prne_iflag_tostr(bit);
+	if (enumstr) {
+		emit_scalar(YAML_STR_TAG, enumstr);
+	}
+	else {
+		emit_scalar_fmt(YAML_STR_TAG, "#%u", bit);
+	}
+}
+
+static void emit_uuid (const uint8_t *uuid) {
+	emit_scalar_fmt(
+		YAML_STR_TAG,
+		"%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+		uuid[0],
+		uuid[1],
+		uuid[2],
+		uuid[3],
+		uuid[4],
+		uuid[5],
+		uuid[6],
+		uuid[7],
+		uuid[8],
+		uuid[9],
+		uuid[10],
+		uuid[11],
+		uuid[12],
+		uuid[13],
+		uuid[14],
+		uuid[15]);
+}
+
 static void emit_hostinfo_frame (const prne_htbt_host_info_t *hi) {
 	prne_host_cred_t hc;
 	prne_htbt_ser_rc_t rc;
-	const char *archstr;
+	const char *enumstr;
 
 	prne_init_host_cred(&hc);
 	emit_scalar(YAML_STR_TAG, BODY_TAG_NAME);
@@ -1546,65 +1592,13 @@ static void emit_hostinfo_frame (const prne_htbt_host_info_t *hi) {
 	emit_scalar(YAML_STR_TAG, "child_pid");
 	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu32, hi->child_pid);
 	emit_scalar(YAML_STR_TAG, "prog_ver");
-	emit_scalar_fmt(
-		YAML_STR_TAG,
-		"%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
-		hi->prog_ver[0],
-		hi->prog_ver[1],
-		hi->prog_ver[2],
-		hi->prog_ver[3],
-		hi->prog_ver[4],
-		hi->prog_ver[5],
-		hi->prog_ver[6],
-		hi->prog_ver[7],
-		hi->prog_ver[8],
-		hi->prog_ver[9],
-		hi->prog_ver[10],
-		hi->prog_ver[11],
-		hi->prog_ver[12],
-		hi->prog_ver[13],
-		hi->prog_ver[14],
-		hi->prog_ver[15]);
+	emit_uuid(hi->prog_ver);
 	emit_scalar(YAML_STR_TAG, "boot_id");
-	emit_scalar_fmt(
-		YAML_STR_TAG,
-		"%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
-		hi->boot_id[0],
-		hi->boot_id[1],
-		hi->boot_id[2],
-		hi->boot_id[3],
-		hi->boot_id[4],
-		hi->boot_id[5],
-		hi->boot_id[6],
-		hi->boot_id[7],
-		hi->boot_id[8],
-		hi->boot_id[9],
-		hi->boot_id[10],
-		hi->boot_id[11],
-		hi->boot_id[12],
-		hi->boot_id[13],
-		hi->boot_id[14],
-		hi->boot_id[15]);
+	emit_uuid(hi->boot_id);
 	emit_scalar(YAML_STR_TAG, "instance_id");
-	emit_scalar_fmt(
-		YAML_STR_TAG,
-		"%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
-		hi->instance_id[0],
-		hi->instance_id[1],
-		hi->instance_id[2],
-		hi->instance_id[3],
-		hi->instance_id[4],
-		hi->instance_id[5],
-		hi->instance_id[6],
-		hi->instance_id[7],
-		hi->instance_id[8],
-		hi->instance_id[9],
-		hi->instance_id[10],
-		hi->instance_id[11],
-		hi->instance_id[12],
-		hi->instance_id[13],
-		hi->instance_id[14],
-		hi->instance_id[15]);
+	emit_uuid(hi->instance_id);
+	emit_scalar(YAML_STR_TAG, "org_id");
+	emit_uuid(hi->org_id);
 
 	if (hi->host_cred_len > 0) {
 		rc = prne_dec_host_cred(hi->host_cred, hi->host_cred_len, &hc);
@@ -1647,13 +1641,26 @@ static void emit_hostinfo_frame (const prne_htbt_host_info_t *hi) {
 
 	emit_scalar(YAML_STR_TAG, "crash_cnt");
 	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu32, hi->crash_cnt);
+	emit_scalar(YAML_STR_TAG, "os");
+	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu32, hi->os);
+	enumstr = prne_os_tostr(hi->os);
+	if (enumstr != NULL) {
+		emit_scalar(YAML_STR_TAG, "osstr");
+		emit_scalar(YAML_STR_TAG, enumstr);
+	}
 	emit_scalar(YAML_STR_TAG, "arch");
 	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu32, hi->arch);
-	archstr = prne_arch_tostr(hi->arch);
-	if (archstr != NULL) {
+	enumstr = prne_arch_tostr(hi->arch);
+	if (enumstr != NULL) {
 		emit_scalar(YAML_STR_TAG, "archstr");
-		emit_scalar(YAML_STR_TAG, archstr);
+		emit_scalar(YAML_STR_TAG, enumstr);
 	}
+
+	emit_scalar(YAML_STR_TAG, "flags");
+	emit_seq_start();
+	prne_bf_foreach(NULL, hi->bf, hi->bf_len, emit_hostinfo_iflags);
+	emit_seq_end();
+
 	emit_mapping_end();
 
 	prne_free_host_cred(&hc);
@@ -2146,6 +2153,15 @@ static int cmdmain_run (void) {
 	return 1;
 }
 
+static void emit_bin_host (const prne_bin_host_t *bh) {
+	emit_mapping_start();
+	emit_scalar(YAML_STR_TAG, "os");
+	emit_scalar(YAML_STR_TAG, prne_os_tostr(bh->os));
+	emit_scalar(YAML_STR_TAG, "arch");
+	emit_scalar(YAML_STR_TAG, prne_arch_tostr(bh->arch));
+	emit_mapping_end();
+}
+
 static void emit_upbin_opts (void) {
 	emit_scalar(YAML_STR_TAG, PREEMBLE_OPT_TAG_NAME);
 
@@ -2155,10 +2171,10 @@ static void emit_upbin_opts (void) {
 		emit_scalar(YAML_STR_TAG, "nybin");
 		emit_scalar(YAML_STR_TAG, "compat");
 		emit_bool_scalar(prog_conf.cmd_param.run.compat);
-		emit_scalar(YAML_STR_TAG, "arch_host");
-		emit_scalar(YAML_STR_TAG, prne_arch_tostr(prog_g.cmd_st.run.arch_host));
-		emit_scalar(YAML_STR_TAG, "arch_rcb");
-		emit_scalar(YAML_STR_TAG, prne_arch_tostr(prog_g.cmd_st.run.arch_rcb));
+		emit_scalar(YAML_STR_TAG, "target");
+		emit_bin_host(&prog_g.cmd_st.run.target);
+		emit_scalar(YAML_STR_TAG, "actual");
+		emit_bin_host(&prog_g.cmd_st.run.actual);
 	}
 	else {
 		emit_scalar(YAML_STR_TAG, "exec");
@@ -2260,34 +2276,37 @@ static bool upbin_do_rcb (void) {
 	}
 	prc = prne_start_bin_rcb_compat(
 		&rcb,
-		prog_g.cmd_st.run.arch_host,
-		PRNE_ARCH_NONE,
+		prog_g.cmd_st.run.target,
+		NULL,
 		NULL,
 		0,
 		0,
 		m_dv,
 		dv_len,
 		&ba,
-		&prog_g.cmd_st.run.arch_rcb);
+		&prog_g.cmd_st.run.actual);
 	if (prc != PRNE_PACK_RC_OK) {
 		pprc(prc, "prne_start_bin_rcb()", NULL);
 		goto END;
 	}
-	if (prog_g.cmd_st.run.arch_host != prog_g.cmd_st.run.arch_rcb) {
+	if (!prne_eq_bin_host(
+			&prog_g.cmd_st.run.target,
+			&prog_g.cmd_st.run.actual))
+	{
 		if (!prog_conf.cmd_param.run.compat) {
 			fprintf(
 				stderr,
 				"Compatible arch %s for target %s: not allowed\n",
-				prne_arch_tostr(prog_g.cmd_st.run.arch_rcb),
-				prne_arch_tostr(prog_g.cmd_st.run.arch_host));
+				prne_arch_tostr(prog_g.cmd_st.run.actual.arch),
+				prne_arch_tostr(prog_g.cmd_st.run.target.arch));
 			goto END;
 		}
 		if (prog_conf.prne_vl >= PRNE_VL_WARN) {
 			fprintf(
 				stderr,
 				"Using compatible arch %s for target %s.\n",
-				prne_arch_tostr(prog_g.cmd_st.run.arch_rcb),
-				prne_arch_tostr(prog_g.cmd_st.run.arch_host));
+				prne_arch_tostr(prog_g.cmd_st.run.actual.arch),
+				prne_arch_tostr(prog_g.cmd_st.run.target.arch));
 		}
 	}
 
@@ -2361,11 +2380,12 @@ static bool query_arch (void) {
 		pstatus(&prog_g.cmd_st.run.st, "Querying hostinfo");
 		goto END;
 	}
-	if (!prne_arch_inrange(hi.arch)) {
-		fprintf(stderr, "Arch out of range: %d\n", hi.arch);
+	prog_g.cmd_st.run.target.os = hi.os;
+	prog_g.cmd_st.run.target.arch = hi.arch;
+	if (!prne_bin_host_inrange(&prog_g.cmd_st.run.target)) {
+		fprintf(stderr, "Out of range: os=%d arch=%d\n", hi.os, hi.arch);
 		goto END;
 	}
-	prog_g.cmd_st.run.arch_host = hi.arch;
 	ret = true;
 
 END:

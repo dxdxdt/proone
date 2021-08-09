@@ -1,4 +1,8 @@
 #pragma once
+#ifndef CONFIG_GEN_H
+#include "config_gen.h"
+#define CONFIG_GEN_H
+#endif
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>

@@ -2,6 +2,7 @@
 #include "pack.h"
 #include "resolv.h"
 #include "cred_dict.h"
+#include "bitfield.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -33,6 +34,8 @@ struct prne_global { // TODO: tidy init code when finalised
 	prne_rcb_param_t rcb_param;
 	uint8_t *m_dvault;
 	bool is_child;
+	bool has_ba;
+	uint8_t flags[prne_bf_get_size(NB_PRNE_IFLAG)];
 
 	prne_bin_archive_t bin_archive;
 	prne_cred_dict_t cred_dict;
@@ -71,6 +74,8 @@ struct prne_shared_global {
 	char upbin_args[1024];
 	size_t host_cred_len;
 	uint8_t host_cred_data[255];
+	uint8_t instance_id[16];
+	uint8_t org_id[16];
 };
 
 

@@ -96,6 +96,7 @@ DVAULT_SIZE=$(stat -c "%s" "$PROONE_DVAULT")
 
 # cross-compile targets
 for (( i = 0; i < ARR_SIZE; i += 1 )); do
+	PROONE_BIN_OS="linux"\
 	PROONE_HOST="${HOST_ARR[$i]}"\
 	PROONE_BIN_ARCH="${ARCH_ARR[$i]}"\
 	xcomp linux-app\

@@ -45,6 +45,8 @@ char prne_ctolower (const char c);
 bool prne_cisspace (const char c);
 bool prne_cisprint (const char c);
 
+bool prne_ciszero (const char c);
+
 bool prne_nstreq (const char *a, const char *b);
 size_t prne_nstrlen (const char *s);
 char *prne_strnchr (const char *p, const char c, const size_t n);

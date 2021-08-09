@@ -28,7 +28,7 @@ separate_debug() {
 	"$PROONE_HOST-objcopy" --add-gnu-debuglink="$3" "$2"
 }
 
-BIN_PATH="$PROONE_EXEC_PREFIX.$PROONE_BIN_ARCH"
+BIN_PATH="$PROONE_EXEC_PREFIX.$PROONE_BIN_OS.$PROONE_BIN_ARCH"
 
 ./configure --host="$PROONE_HOST" --enable-static $PROONE_AM_CONF
 cd src
@@ -38,12 +38,12 @@ cd ..
 separate_debug\
 	src/proone.bin\
 	"$BIN_PATH"\
-	"$PROONE_DEBUG_SYM_PREFIX""proone.sym.$PROONE_BIN_ARCH"
+	"$PROONE_DEBUG_SYM_PREFIX""proone.sym.$PROONE_BIN_OS.$PROONE_BIN_ARCH"
 for b in $MISC_BIN; do
 	separate_debug\
 		"src/$b"\
-		"$PROONE_MISC_BIN_PREFIX/$b.$PROONE_BIN_ARCH"\
-		"$PROONE_DEBUG_SYM_PREFIX""$b.sym.$PROONE_BIN_ARCH"
+		"$PROONE_MISC_BIN_PREFIX/$b.$PROONE_BIN_OS.$PROONE_BIN_ARCH"\
+		"$PROONE_DEBUG_SYM_PREFIX""$b.sym.$PROONE_BIN_OS.$PROONE_BIN_ARCH"
 done
 
 make distclean

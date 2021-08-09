@@ -7,6 +7,7 @@
 #include <zlib.h>
 
 
+typedef struct prne_bin_host prne_bin_host_t;
 typedef struct prne_bin_tuple prne_bin_tuple_t;
 typedef struct prne_bin_archive prne_bin_archive_t;
 typedef struct prne_bin_rcb_ctx prne_bin_rcb_ctx_t;
@@ -20,13 +21,19 @@ typedef enum {
 	PRNE_PACK_RC_ERRNO,
 	PRNE_PACK_RC_Z_ERR,
 	PRNE_PACK_RC_NO_ARCH,
+	PRNE_PACK_RC_UNIMPL_REV,
 
 	NB_PRNE_PACK_RC
 } prne_pack_rc_t;
 
+struct prne_bin_host {
+	prne_os_t os;
+	prne_arch_t arch;
+};
+
 struct prne_bin_tuple {
 	size_t size;
-	prne_arch_t arch;
+	prne_bin_host_t host;
 };
 
 struct prne_bin_archive {
@@ -55,9 +62,14 @@ struct prne_rcb_param {
 	const uint8_t *m_dv;
 	size_t dv_len;
 	const prne_bin_archive_t *ba;
-	prne_arch_t self;
+	prne_bin_host_t self;
 };
 
+static const char PRNE_PACK_BA_IDEN_DATA[] = { 'p', 'r', '-', 'b', 'a' };
+static const char PRNE_PACK_NYBIN_IDEN_DATA[] = { 'n', 'y', 'b', 'i', 'n' };
+
+bool prne_eq_bin_host (const prne_bin_host_t *a, const prne_bin_host_t *b);
+bool prne_bin_host_inrange (const prne_bin_host_t *x);
 void prne_init_bin_archive (prne_bin_archive_t *a);
 void prne_free_bin_archive (prne_bin_archive_t *a);
 prne_pack_rc_t prne_index_bin_archive (
@@ -69,8 +81,8 @@ void prne_init_bin_rcb_ctx (prne_bin_rcb_ctx_t *ctx);
 void prne_free_bin_rcb_ctx (prne_bin_rcb_ctx_t *ctx);
 prne_pack_rc_t prne_start_bin_rcb (
 	prne_bin_rcb_ctx_t *ctx,
-	const prne_arch_t target,
-	const prne_arch_t self,
+	const prne_bin_host_t target,
+	const prne_bin_host_t *self,
 	const uint8_t *m_self,
 	const size_t self_len,
 	const size_t exec_len,
@@ -79,15 +91,15 @@ prne_pack_rc_t prne_start_bin_rcb (
 	const prne_bin_archive_t *ba);
 prne_pack_rc_t prne_start_bin_rcb_compat (
 	prne_bin_rcb_ctx_t *ctx,
-	const prne_arch_t target,
-	const prne_arch_t self,
+	const prne_bin_host_t target,
+	const prne_bin_host_t *self,
 	const uint8_t *m_self,
 	const size_t self_len,
 	const size_t exec_len,
 	const uint8_t *m_dvault,
 	const size_t dvault_len,
 	const prne_bin_archive_t *ba,
-	prne_arch_t *actual);
+	prne_bin_host_t *actual);
 ssize_t prne_bin_rcb_read (
 	prne_bin_rcb_ctx_t *ctx,
 	uint8_t *buf,

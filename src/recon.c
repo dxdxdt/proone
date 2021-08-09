@@ -1,4 +1,5 @@
 #include "recon.h"
+#include "config.h"
 #include "rnd.h"
 #include "llist.h"
 #include "util_rt.h"

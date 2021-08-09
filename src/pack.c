@@ -23,8 +23,20 @@ typedef struct {
 	size_t buf_len; // 0: used as z_stream buffer, > 0: used as something else
 	size_t seek, skip; // Offset to binary to exclude and its length
 	z_stream z_old, z_ny;
-	prne_arch_t a_self;
+	prne_bin_host_t self;
 } pack_rcb_rb_octx_t;
+
+bool prne_eq_bin_host (const prne_bin_host_t *a, const prne_bin_host_t *b) {
+	return
+		a->os == b->os &&
+		a->arch == b->arch;
+}
+
+bool prne_bin_host_inrange (const prne_bin_host_t *x) {
+	return
+		prne_os_inrange(x->os) &&
+		prne_arch_inrange(x->arch);
+}
 
 void prne_init_bin_archive (prne_bin_archive_t *a) {
 	prne_memzero(a, sizeof(prne_bin_archive_t));
@@ -45,34 +57,41 @@ prne_pack_rc_t prne_index_bin_archive (
 	prne_bin_tuple_t *bin = NULL;
 	size_t nb_bin, i, sum = 0;
 
-	if (len < 4) {
+	if (len < 8 ||
+		memcmp(
+			data,
+			PRNE_PACK_BA_IDEN_DATA,
+			sizeof(PRNE_PACK_BA_IDEN_DATA)) != 0)
+	{
 		ret = PRNE_PACK_RC_FMT_ERR;
 		goto END;
 	}
-	nb_bin = data[0];
-	len -= 4;
-	data += 4;
-	if (nb_bin * 4 > len) {
+	if (data[5] != 0) {
+		ret = PRNE_PACK_RC_UNIMPL_REV;
+		goto END;
+	}
+	nb_bin = prne_recmb_msb16(data[6], data[7]);
+	len -= 8;
+	data += 8;
+	if (nb_bin * 8 > len) {
 		ret = PRNE_PACK_RC_FMT_ERR;
 		goto END;
 	}
 
-	/* FIXME
-	* Is an empty bin archive possible?
-	* This will fail when nb_bin == 0
-	*/
+	// An empty bin archive is possible.
 	bin = (prne_bin_tuple_t*)prne_malloc(sizeof(prne_bin_tuple_t), nb_bin);
-	if (bin == NULL) {
+	if (bin == NULL && nb_bin > 0) {
 		ret = PRNE_PACK_RC_ERRNO;
 		goto END;
 	}
 
 	for (i = 0; i < nb_bin; i += 1) {
-		bin[i].arch = (prne_arch_t)data[0];
-		bin[i].size = prne_recmb_msb32(0, data[1], data[2], data[3]);
+		bin[i].host.os = (prne_os_t)data[2];
+		bin[i].host.arch = (prne_arch_t)data[3];
+		bin[i].size = prne_recmb_msb32(0, data[5], data[6], data[7]);
 		sum += bin[i].size;
-		data += 4;
-		len -= 4;
+		data += 8;
+		len -= 8;
 	}
 
 	out->data = data;
@@ -261,6 +280,7 @@ static ssize_t pack_rcb_dvread_f (
 		ctx->buf_len -= consume;
 	}
 	else {
+		size_t nb_bin = 0;
 		// dv
 		consume = prne_op_min(ctx->skip, len);
 		memcpy(buf, ctx->m_dv, consume);
@@ -273,46 +293,58 @@ static ssize_t pack_rcb_dvread_f (
 
 			// alignment and bin archive index
 			prne_static_assert(
-				sizeof(ctx->buf) >= PRNE_BIN_ALIGNMENT + NB_PRNE_ARCH * 4,
+				sizeof(ctx->buf) >=
+					PRNE_BIN_ALIGNMENT + (NB_PRNE_OS * NB_PRNE_ARCH) * 8,
 				"FIXME");
 			ctx->buf_len =
 				prne_salign_next(ctx->dv_len, PRNE_BIN_ALIGNMENT)
 				- ctx->dv_len;
 			prne_memzero(ctx->buf, ctx->buf_len);
 
-			nb_bin_loc = &ctx->buf[ctx->buf_len + 0];
-			*nb_bin_loc = 0;
-			ctx->buf[ctx->buf_len + 1] = 0;
-			ctx->buf[ctx->buf_len + 2] = 0;
-			ctx->buf[ctx->buf_len + 3] = 0;
-			ctx->buf_len += 4;
+			memcpy(
+				ctx->buf + ctx->buf_len,
+				PRNE_PACK_BA_IDEN_DATA,
+				sizeof(PRNE_PACK_BA_IDEN_DATA));
+			ctx->buf[ctx->buf_len + 5] = 0;
+			nb_bin_loc = ctx->buf + ctx->buf_len + 6;
+			ctx->buf_len += 8;
 
-			if (ctx->a_self != PRNE_ARCH_NONE) {
-				ctx->buf[ctx->buf_len + 0] = (uint8_t)ctx->a_self;
-				ctx->buf[ctx->buf_len + 1] =
+			if (ctx->self.arch != PRNE_ARCH_NONE) {
+				ctx->buf[ctx->buf_len + 0] = 0;
+				ctx->buf[ctx->buf_len + 1] = 0;
+				ctx->buf[ctx->buf_len + 2] = (uint8_t)ctx->self.os;
+				ctx->buf[ctx->buf_len + 3] = (uint8_t)ctx->self.arch;
+				ctx->buf[ctx->buf_len + 4] = 0;
+				ctx->buf[ctx->buf_len + 5] =
 					prne_getmsb32(ctx->z_ny.avail_in, 1);
-				ctx->buf[ctx->buf_len + 2] =
+				ctx->buf[ctx->buf_len + 6] =
 					prne_getmsb32(ctx->z_ny.avail_in, 2);
-				ctx->buf[ctx->buf_len + 3] =
+				ctx->buf[ctx->buf_len + 7] =
 					prne_getmsb32(ctx->z_ny.avail_in, 3);
-				ctx->buf_len += 4;
-				*nb_bin_loc += 1;
+				ctx->buf_len += 8;
+				nb_bin += 1;
 			}
 
 			for (size_t i = 0; i < ctx->ba->nb_bin; i += 1) {
 				t = ctx->ba->bin + i;
 
-				if (t->arch == ctx->t->arch) {
+				if (prne_eq_bin_host(&t->host, &ctx->t->host)) {
 					continue;
 				}
-				ctx->buf[ctx->buf_len + 0] = (uint8_t)t->arch;
-				ctx->buf[ctx->buf_len + 1] = prne_getmsb32(t->size, 1);
-				ctx->buf[ctx->buf_len + 2] = prne_getmsb32(t->size, 2);
-				ctx->buf[ctx->buf_len + 3] = prne_getmsb32(t->size, 3);
-				ctx->buf_len += 4;
-				*nb_bin_loc += 1;
+				ctx->buf[ctx->buf_len + 0] = 0;
+				ctx->buf[ctx->buf_len + 1] = 0;
+				ctx->buf[ctx->buf_len + 2] = (uint8_t)t->host.os;
+				ctx->buf[ctx->buf_len + 3] = (uint8_t)t->host.arch;
+				ctx->buf[ctx->buf_len + 4] = 0;
+				ctx->buf[ctx->buf_len + 5] = prne_getmsb32(t->size, 1);
+				ctx->buf[ctx->buf_len + 6] = prne_getmsb32(t->size, 2);
+				ctx->buf[ctx->buf_len + 7] = prne_getmsb32(t->size, 3);
+				ctx->buf_len += 8;
+				nb_bin += 1;
 			}
 
+			nb_bin_loc[0] = prne_getmsb16(nb_bin, 0);
+			nb_bin_loc[1] = prne_getmsb16(nb_bin, 1);
 			ctx->seek = ctx->ofs;
 			ctx->skip = ctx->t->size;
 			ctx_p->read_f = pack_rcb_rpread_f;
@@ -411,8 +443,8 @@ END:
 
 prne_pack_rc_t prne_start_bin_rcb (
 	prne_bin_rcb_ctx_t *ctx,
-	const prne_arch_t target,
-	const prne_arch_t self,
+	const prne_bin_host_t target,
+	const prne_bin_host_t *self,
 	const uint8_t *m_self,
 	const size_t self_len,
 	const size_t exec_len,
@@ -420,13 +452,13 @@ prne_pack_rc_t prne_start_bin_rcb (
 	const size_t dvault_len,
 	const prne_bin_archive_t *ba)
 {
-	if (!prne_arch_inrange(target) ||
-		(!prne_arch_inrange(self) && self != PRNE_ARCH_NONE))
+	if (!prne_bin_host_inrange(&target) ||
+		(self != NULL && !prne_bin_host_inrange(self)))
 	{
 		return PRNE_PACK_RC_INVAL;
 	}
 
-	if (self == target) {
+	if (self != NULL && prne_eq_bin_host(self, &target)) {
 		pack_rcb_pt_octx_t *ny_ctx =
 			(pack_rcb_pt_octx_t*)prne_malloc(sizeof(pack_rcb_pt_octx_t), 1);
 
@@ -452,7 +484,7 @@ prne_pack_rc_t prne_start_bin_rcb (
 		}
 
 		for (size_t i = 0; i < ba->nb_bin; i += 1) {
-			if (ba->bin[i].arch == target) {
+			if (prne_eq_bin_host(&ba->bin[i].host, &target)) {
 				t = &ba->bin[i];
 				break;
 			}
@@ -463,11 +495,10 @@ prne_pack_rc_t prne_start_bin_rcb (
 		}
 
 		ny_ctx =
-			(pack_rcb_rb_octx_t*)prne_malloc(sizeof(pack_rcb_rb_octx_t), 1);
+			(pack_rcb_rb_octx_t*)prne_calloc(sizeof(pack_rcb_rb_octx_t), 1);
 		if (ny_ctx == NULL) {
 			return PRNE_PACK_RC_ERRNO;
 		}
-		prne_memzero(ny_ctx, sizeof(pack_rcb_rb_octx_t));
 
 		if (inflateInit(&ny_ctx->z_old) != Z_OK ||
 			deflateInit(&ny_ctx->z_ny, PRNE_PACK_Z_LEVEL) != Z_OK)
@@ -487,11 +518,11 @@ prne_pack_rc_t prne_start_bin_rcb (
 
 		ny_ctx->z_old.avail_in = ba->data_size;
 		ny_ctx->z_old.next_in = (uint8_t*)ba->data;
-		if (self != PRNE_ARCH_NONE) {
+		if (self != NULL) {
+			ny_ctx->self = *self;
 			ny_ctx->z_ny.avail_in = exec_len;
 			ny_ctx->z_ny.next_in = (uint8_t*)m_self;
 		}
-		ny_ctx->a_self = self;
 
 		prne_free_bin_rcb_ctx(ctx);
 		ctx->ctx_free_f = pack_rcb_free_rb_octx;
@@ -504,17 +535,17 @@ prne_pack_rc_t prne_start_bin_rcb (
 
 prne_pack_rc_t prne_start_bin_rcb_compat (
 	prne_bin_rcb_ctx_t *ctx,
-	const prne_arch_t target,
-	const prne_arch_t self,
+	const prne_bin_host_t target,
+	const prne_bin_host_t *self,
 	const uint8_t *m_self,
 	const size_t self_len,
 	const size_t exec_len,
 	const uint8_t *m_dvault,
 	const size_t dvault_len,
 	const prne_bin_archive_t *ba,
-	prne_arch_t *actual)
+	prne_bin_host_t *actual)
 {
-	prne_arch_t a = target;
+	prne_bin_host_t a = target;
 	prne_pack_rc_t ret = prne_start_bin_rcb(
 		ctx,
 		target,
@@ -530,19 +561,19 @@ prne_pack_rc_t prne_start_bin_rcb_compat (
 	if (ret != PRNE_PACK_RC_NO_ARCH) {
 		goto END;
 	}
-	f = prne_compat_arch(target);
+	f = prne_compat_arch(target.arch);
 	if (f == NULL) {
 		goto END;
 	}
 
 	for (; *f != PRNE_ARCH_NONE; f += 1) {
-		if (*f == target) {
+		if (*f == target.arch) {
 			continue;
 		}
-		a = *f;
+		a.arch = *f;
 		ret = prne_start_bin_rcb(
 			ctx,
-			*f,
+			a,
 			self,
 			m_self,
 			self_len,
@@ -556,9 +587,7 @@ prne_pack_rc_t prne_start_bin_rcb_compat (
 	}
 
 END:
-	if (actual != NULL) {
-		*actual = a;
-	}
+	prne_chk_assign(actual, a);
 	return ret;
 }
 
@@ -581,10 +610,24 @@ bool prne_index_nybin (
 	size_t *ba_len)
 {
 	if (nybin_len < 8) {
+		errno = EPROTO;
+		return false;
+	}
+	if (memcmp(
+			m_nybin + 2,
+			PRNE_PACK_NYBIN_IDEN_DATA,
+			sizeof(PRNE_PACK_NYBIN_IDEN_DATA)) != 0)
+	{
+		errno = EPROTO;
+		return false;
+	}
+	if (m_nybin[7] != 0) {
+		errno = ENOSYS;
 		return false;
 	}
 	*dv_len = prne_recmb_msb16(m_nybin[0], m_nybin[1]);
 	if (8 + *dv_len > nybin_len) {
+		errno = EPROTO;
 		return false;
 	}
 	*m_dv = m_nybin + 8;
@@ -632,6 +675,7 @@ const char *prne_pack_rc_tostr (const prne_pack_rc_t prc) {
 	case PRNE_PACK_RC_ERRNO: return "errno";
 	case PRNE_PACK_RC_Z_ERR: return "zlib error";
 	case PRNE_PACK_RC_NO_ARCH: return "no arch";
+	case PRNE_PACK_RC_UNIMPL_REV: return "unimpl rev";
 	}
 	errno = EINVAL;
 	return NULL;

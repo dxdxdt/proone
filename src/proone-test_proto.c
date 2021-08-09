@@ -160,6 +160,7 @@ static void test_ser (void) {
 		"012345678901234567890123456789012345678901234567890123456789"
 		"012345678901234567890123456789012345678901234567890123456789"
 		"012345678901234567890123456789012345678901234567890123456789";
+	static uint8_t BF[] = { 0x55, 0xAA };
 
 	// free functions should accept NULL
 	prne_htbt_free_msg_head(NULL);
@@ -378,6 +379,8 @@ static void test_ser (void) {
 	hi_a.child_pid = 0xBABEBABE;
 	hi_a.host_cred = cred_data;
 	hi_a.host_cred_len = cred_data_len;
+	hi_a.bf = BF;
+	hi_a.bf_len = sizeof(BF);
 	memcpy(hi_a.prog_ver, prog_ver, sizeof(prog_ver));
 	memcpy(
 		hi_a.boot_id,
@@ -387,21 +390,27 @@ static void test_ser (void) {
 		hi_a.instance_id,
 		"\x25\xdc\x7e\xa2\x4a\xc6\x4a\x29\x9f\xac\xbe\x18\x42\x33\xc4\x85",
 		16);
-	hi_a.arch = prne_host_arch;
+	memcpy(
+		hi_a.org_id,
+		"\xa3\x0f\xd3\x5e\xe7\xe7\xc3\xb6\x8f\x74\xdf\xf6\x07\x45\x77\xfa",
+		16);
+	hi_a.os = PRNE_HOST_OS;
+	hi_a.arch = PRNE_HOST_ARCH;
 	assert(prne_htbt_ser_host_info(
 		proto_buf,
 		PRNE_HTBT_PROTO_MIN_BUF,
 		&proto_buf_cnt_len,
 		&hi_a) == PRNE_HTBT_SER_RC_OK);
-	assert(
-		proto_buf_cnt_len == 94 + cred_data_len &&
-		memcmp(proto_buf, prog_ver, 16) == 0 &&
-		memcmp(
+	assert(proto_buf_cnt_len == 112 + cred_data_len + sizeof(BF));
+	assert(memcmp(proto_buf, prog_ver, 16) == 0);
+	assert(memcmp(
 			proto_buf + 16,
 			// boot_id
 			"\x30\x1d\x25\x39\x90\x85\x42\xfd\x90\xb6\x20\x0b\x4a\x3b\x08\x55"
 			// instance_id
 			"\x25\xdc\x7e\xa2\x4a\xc6\x4a\x29\x9f\xac\xbe\x18\x42\x33\xc4\x85"
+			// org_id
+			"\xa3\x0f\xd3\x5e\xe7\xe7\xc3\xb6\x8f\x74\xdf\xf6\x07\x45\x77\xfa"
 			"\xAB\xBA\xBA\xBE\xFE\xFF\xFF\xFE" // parent_uptime
 			"\xDE\xAD\xBE\xEF\xAA\xBB\xCC\xDD" // child_uptime
 			"\x88\x99\xAA\xBB\xCC\xDD\xEE\xFF" // bne_cnt
@@ -409,10 +418,13 @@ static void test_ser (void) {
 			"\x11\x22\x33\x44" // crash_cnt
 			"\xDE\xAD\xBE\xEF" // parent_pid
 			"\xBA\xBE\xBA\xBE", // child_pid
-			76) == 0 &&
-		(size_t)proto_buf[16 + 76] == cred_data_len &&
-		proto_buf[16 + 76 + 1] == (uint8_t)prne_host_arch &&
-		memcmp(proto_buf + 16 + 76 + 1 + 1, cred_data, cred_data_len) == 0);
+			92) == 0);
+	assert((size_t)proto_buf[16 + 92 + 0] == cred_data_len);
+	assert(proto_buf[16 + 92 + 1] == (uint8_t)PRNE_HOST_ARCH);
+	assert(proto_buf[16 + 92 + 2] == (uint8_t)PRNE_HOST_OS);
+	assert(proto_buf[16 + 92 + 3] == sizeof(BF));
+	assert(memcmp(proto_buf + 16 + 92 + 4, cred_data, cred_data_len) == 0);
+	assert(memcmp(proto_buf + 16 + 92 + 4 + cred_data_len, BF, sizeof(BF)) == 0);
 	assert(prne_htbt_dser_host_info(
 		proto_buf,
 		proto_buf_cnt_len,
@@ -421,8 +433,9 @@ static void test_ser (void) {
 	assert(prne_htbt_eq_host_info(&hi_a, &hi_b));
 	hi_a.host_cred = NULL;
 	hi_a.host_cred_len = 0;
-	// with ownership of host_cred
-	prne_htbt_alloc_host_info(&hi_a, cred_data_len);
+	hi_a.bf = NULL;
+	hi_a.bf_len = 0;
+	// with ownership of buffers
 	assert(prne_htbt_ser_host_info(
 		proto_buf,
 		PRNE_HTBT_PROTO_MIN_BUF,
@@ -546,16 +559,30 @@ static void test_ser (void) {
 	assert(prne_htbt_eq_hover(&hv_a, &hv_b));
 	prne_htbt_free_hover(&hv_a);
 	prne_htbt_free_hover(&hv_b);
+
+	// TODO: test STDIO and RCB
 }
 
 static void test_enum (void) {
+	for (prne_os_t i = PRNE_OS_NONE + 1; i < NB_PRNE_OS; i += 1) {
+		assert(i == prne_os_fstr(prne_os_tostr(i)));
+	}
+	for (prne_os_t i = PRNE_OS_NONE + 1; i < NB_PRNE_OS; i += 1) {
+		assert(prne_os_tostr(i) != NULL);
+	}
 	for (prne_arch_t i = PRNE_ARCH_NONE + 1; i < NB_PRNE_ARCH; i += 1) {
 		assert(i == prne_arch_fstr(prne_arch_tostr(i)));
 	}
-
 	for (prne_arch_t i = PRNE_ARCH_NONE + 1; i < NB_PRNE_ARCH; i += 1) {
 		assert(prne_arch_tostr(i) != NULL);
 	}
+	for (prne_iflag_t i = PRNE_IFLAG_NONE + 1; i < NB_PRNE_IFLAG; i += 1) {
+		assert(i == prne_iflag_fstr(prne_iflag_tostr(i)));
+	}
+	for (prne_iflag_t i = PRNE_IFLAG_NONE + 1; i < NB_PRNE_IFLAG; i += 1) {
+		assert(prne_iflag_tostr(i) != NULL);
+	}
+
 	for (prne_htbt_ser_rc_t i = 0; i < NB_PRNE_HTBT_SER_RC; i += 1) {
 		assert(prne_htbt_serrc_tostr(i) != NULL);
 	}

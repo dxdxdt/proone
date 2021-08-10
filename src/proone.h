@@ -32,6 +32,7 @@ struct prne_global { // TODO: tidy init code when finalised
 	int blackhole[2];
 	int shm_fd;
 	prne_rcb_param_t rcb_param;
+	prne_bin_host_t bin_host;
 	uint8_t *m_dvault;
 	bool is_child;
 	bool has_ba;

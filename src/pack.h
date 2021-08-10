@@ -62,7 +62,7 @@ struct prne_rcb_param {
 	const uint8_t *m_dv;
 	size_t dv_len;
 	const prne_bin_archive_t *ba;
-	prne_bin_host_t self;
+	const prne_bin_host_t *self;
 };
 
 static const char PRNE_PACK_BA_IDEN_DATA[] = { 'p', 'r', '-', 'b', 'a' };

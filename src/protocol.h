@@ -278,7 +278,7 @@ struct prne_htbt_cmd {
 };
 
 struct prne_htbt_bin_meta {
-	uint32_t alloc_len;
+	size_t alloc_len;
 	prne_htbt_cmd_t cmd;
 };
 

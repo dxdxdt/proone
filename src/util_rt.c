@@ -103,16 +103,24 @@ void *prne_calloc (const size_t se, const size_t cnt) {
 }
 
 char *prne_alloc_str (const size_t len) {
+	return prne_realloc_str(NULL, len);
+}
+
+char *prne_realloc_str (char *old, const size_t len) {
 	if (len == SIZE_MAX) {
 		errno = ENOMEM;
 		return NULL;
 	}
-	return (char*)prne_malloc(1, len + 1);
+	return (char*)prne_realloc(old, 1, len + 1);
 }
 
 char *prne_dup_str (const char *str) {
+	return prne_redup_str(NULL, str);
+}
+
+char *prne_redup_str (char *old, const char *str) {
 	const size_t len = prne_nstrlen(str);
-	char *ret = prne_alloc_str(len);
+	char *ret = prne_realloc_str(old, len);
 
 	if (ret == NULL) {
 		return NULL;

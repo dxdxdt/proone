@@ -560,7 +560,7 @@ static int parse_args_hover (const int argc, char *const *args) {
 			}
 		}
 		else {
-			break;
+			return 2;
 		}
 	}
 
@@ -1983,12 +1983,9 @@ static bool run_setup (const uint16_t msgid) {
 			goto END;
 		}
 
-		if (fs.st_size < PRNE_HTBT_BIN_ALLOC_LEN_MAX) {
-			prog_conf.cmd_param.run.bm.alloc_len = (uint32_t)fs.st_size;
-		}
-		else {
-			prog_conf.cmd_param.run.bm.alloc_len = PRNE_HTBT_BIN_ALLOC_LEN_MAX;
-		}
+		prog_conf.cmd_param.run.bm.alloc_len = prne_op_min(
+			fs.st_size,
+			PRNE_HTBT_BIN_ALLOC_LEN_MAX);
 		f = &prog_conf.cmd_param.run.bm;
 		ser_f = (prne_htbt_ser_ft)prne_htbt_ser_bin_meta;
 		break;

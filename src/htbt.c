@@ -1116,6 +1116,8 @@ static bool htbt_relay_child (
 	}
 
 	while (*c_out >= 0 || *c_err >= 0) {
+		pth_yield(NULL);
+
 		// Do poll
 		pfd[1].fd = *c_in;
 		pfd[2].fd = *c_out;
@@ -1571,6 +1573,7 @@ static bool htbt_slv_srv_bin (
 	int32_t ret_errno = 0;
 	htbt_lmk_t lmk = HTBT_LMK_NONE;
 	ssize_t io_ret;
+	size_t written = 0;
 
 	prne_dbgast(
 		op == PRNE_HTBT_OP_RUN_BIN ||
@@ -1651,6 +1654,7 @@ static bool htbt_slv_srv_bin (
 			goto END;
 		}
 
+		written += stdio_f.len;
 		prne_iobuf_reset(ctx->iobuf + 0);
 		while (stdio_f.len > 0 || ctx->iobuf[0].len > 0) {
 			if (stdio_f.len > 0) {
@@ -1698,7 +1702,11 @@ static bool htbt_slv_srv_bin (
 			}
 			prne_iobuf_shift(ctx->iobuf + 0, -io_ret);
 		}
+
+		pth_yield(NULL);
 	} while (!stdio_f.fin);
+	// Just in case transfer falls short of alloc_len
+	ftruncate(fd, (off_t)written);
 	close(fd);
 	fd = -1;
 
@@ -1879,8 +1887,14 @@ static bool htbt_slv_srv_rcb (
 	}
 
 	if (rcb_f.self) {
-		target.os = ctx->rcb->self.os;
-		target.arch = ctx->rcb->self.arch;
+		if (ctx->rcb->self != NULL) {
+			target = *ctx->rcb->self;
+		}
+		else {
+			status = PRNE_HTBT_STATUS_ERRNO;
+			err = ENOMEDIUM;
+			goto STATUS_END;
+		}
 	}
 	else {
 		target.os = rcb_f.os;
@@ -1891,14 +1905,14 @@ static bool htbt_slv_srv_rcb (
 			HTBT_NT_SLV"@%"PRIuPTR": starting rcb self=%02X target=%02X"
 			" compat(%s)\n",
 			(uintptr_t)ctx,
-			ctx->rcb->self.arch,
+			ctx->rcb->self != NULL ? ctx->rcb->self->arch : PRNE_ARCH_NONE,
 			target.arch,
 			rcb_f.compat ? "*" : " ");
 	}
 	prc = prne_start_bin_rcb_compat(
 		&rcb_ctx,
 		target,
-		&ctx->rcb->self,
+		ctx->rcb->self,
 		ctx->rcb->m_self,
 		ctx->rcb->self_len,
 		ctx->rcb->exec_len,
@@ -1918,22 +1932,21 @@ static bool htbt_slv_srv_rcb (
 	mh.id = corr_id;
 	mh.is_rsp = true;
 	mh.op = PRNE_HTBT_OP_STDIO;
-	while (rcb_ib.len > 0 || prc != PRNE_PACK_RC_EOF) {
+	do {
 		prne_pth_reset_timer(&ev, &HTBT_DL_TICK_TIMEOUT);
 
-		if (rcb_ib.avail > 0 && prc != PRNE_PACK_RC_EOF) {
-			io_ret = prne_bin_rcb_read(
-				&rcb_ctx,
-				rcb_ib.m + rcb_ib.len,
-				rcb_ib.avail,
-				&prc,
-				&rcb_err);
-			if (io_ret < 0) {
-				htbt_slv_set_pack_err(prc, rcb_err, &status, &err);
-				goto STATUS_END;
-			}
-			prne_iobuf_shift(&rcb_ib, io_ret);
+		io_ret = prne_bin_rcb_read(
+			&rcb_ctx,
+			rcb_ib.m,
+			rcb_ib.avail,
+			&prc,
+			&rcb_err);
+		if (io_ret < 0) {
+			htbt_slv_set_pack_err(prc, rcb_err, &status, &err);
+			goto STATUS_END;
 		}
+		prne_iobuf_shift(&rcb_ib, io_ret);
+
 		if (rcb_ib.len > 0) {
 			data_f.len = rcb_ib.len;
 			ret =
@@ -1946,7 +1959,7 @@ static bool htbt_slv_srv_rcb (
 		}
 
 		pth_yield(NULL);
-	}
+	} while (prc != PRNE_PACK_RC_EOF);
 	prne_pth_reset_timer(&ev, &HTBT_DL_TICK_TIMEOUT);
 	data_f.fin = true;
 	data_f.len = 0;

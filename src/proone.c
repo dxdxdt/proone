@@ -1388,7 +1388,9 @@ static void init_bne (void) {
 	bne_param.cb.tmpfile = cb_tmpfile;
 	bne_param.cb.upbin = cb_upbin;
 
-	bne_param.rcb = &prne_g.rcb_param;
+	if (prne_g.has_ba) {
+		bne_param.rcb = &prne_g.rcb_param;
+	}
 	bne_param.login_attempt = PRNE_BNE_LOGIN_ATTEMPT;
 }
 
@@ -1427,9 +1429,10 @@ int main (int argc, char **args) {
 	prne_g.blackhole[1] = -1;
 	prne_g.shm_fd = -1;
 	prne_init_rcb_param(&prne_g.rcb_param);
+	prne_g.bin_host.os = PRNE_HOST_OS;
+	prne_g.bin_host.arch = PRNE_HOST_ARCH;
 	prne_g.rcb_param.ba = &prne_g.bin_archive;
-	prne_g.rcb_param.self.os = PRNE_HOST_OS;
-	prne_g.rcb_param.self.arch = PRNE_HOST_ARCH;
+	prne_g.rcb_param.self = &prne_g.bin_host;
 	prne_init_bin_archive(&prne_g.bin_archive);
 	mbedtls_x509_crt_init(&prne_g.ssl.ca);
 	prne_mbedtls_entropy_init(&prne_g.ssl.entpy);

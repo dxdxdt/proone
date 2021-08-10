@@ -60,33 +60,6 @@
 			"miDebuggerPath": "/usr/bin/gdb"
 		},
 		{
-			"name": "pack",
-			"type": "cppdbg",
-			"request": "launch",
-			"program": "${workspaceFolder}/src/proone-pack",
-			"args": [
-				"tmp/pack-test/exec",
-				"src/dvault.bin",
-				"src/data/pack-test/exec.aarch64",
-				"src/data/pack-test/exec.armv4t",
-				"src/data/pack-test/exec.armv7",
-				"src/data/pack-test/exec.i686",
-				"src/data/pack-test/exec.mips",
-				"src/data/pack-test/exec.mpsl",
-				"src/data/pack-test/exec.ppc",
-				"src/data/pack-test/exec.sh4",
-				"src/data/pack-test/exec.x86_64"
-			],
-			"stopAtEntry": false,
-			"cwd": "${workspaceFolder}",
-			"environment": [],
-			"externalConsole": false,
-			"MIMode": "gdb",
-			"setupCommands": [],
-			"preLaunchTask": "Build pack",
-			"miDebuggerPath": "/usr/bin/gdb"
-		},
-		{
 			"name": "rnd",
 			"type": "cppdbg",
 			"request": "launch",
@@ -144,9 +117,13 @@
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone-bne",
 			"args": [
+				"--cdict",
 				"./src/data/cred_dict.bin",
+				"--nybin",
 				"./builds/proone/proone.nybin",
-				"192.0.2.1" // CHANGE
+				"--vercmp",
+				"0",
+				"192.0.2.1" // CHANGE ME
 			],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",

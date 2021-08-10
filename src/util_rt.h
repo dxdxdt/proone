@@ -27,7 +27,9 @@ void *prne_malloc (const size_t se, const size_t cnt);
 void *prne_realloc (void *ptr, const size_t se, const size_t cnt);
 void *prne_calloc (const size_t se, const size_t cnt);
 char *prne_alloc_str (const size_t len);
+char *prne_realloc_str (char *old, const size_t len);
 char *prne_dup_str (const char *str);
+char *prne_redup_str (char *old, const char *str);
 void prne_free (void *ptr);
 size_t prne_getpagesize (void);
 

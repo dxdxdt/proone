@@ -42,7 +42,7 @@ uint16_t prne_calc_tcp_chksum4 (
 	sum += prne_recmb_msb16(
 		ih->daddr[2],
 		ih->daddr[3]);
-	sum += 6; // IPPROTO_TCP
+	sum += ih->protocol;
 	sum += (uint16_t)(th_len + data_len);
 
 	// tcp header
@@ -99,7 +99,7 @@ uint16_t prne_calc_tcp_chksum6 (
 
 	sum += (uint16_t)((tcp_length & 0xFFFF0000) >> 16);
 	sum += (uint16_t)(tcp_length & 0xFFFF);
-	sum += 6; // IPPROTO_TCP
+	sum += ih->next_hdr;
 
 	// tcp header
 	while (th_len > 1) {

@@ -360,6 +360,7 @@ static void deinit_prog_g (void) {
 }
 
 static void init_prog_conf (void) {
+	mlock(prog_conf.tls_key_pw, sizeof(prog_conf.tls_key_pw));
 	prne_memzero(&prog_conf, sizeof(prog_conf)); // so main() is recallable
 	prog_conf.remote_port = prne_dup_str(STRINGIFY_X(PRNE_HTBT_PROTO_PORT));
 	prog_conf.prne_vl = PRNE_VL_INFO;

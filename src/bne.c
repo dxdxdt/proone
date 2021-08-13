@@ -1025,7 +1025,9 @@ static bool bne_sh_setup (
 	// "echo | wc 2> /dev/null > /dev/null; echo wc: $?;"
 /* The upload guard shell functions
 *
-* - Clean up all files and exit when the process dies
+* - When the shell dies
+*   - Clean up all files and exit if the lock file still exists
+*   - Otherwise, just exit
 * - Just exit when the process is still running and the upload directory or the
 *   lock file is no longer present
 *
@@ -1036,16 +1038,18 @@ static bool bne_sh_setup (
 		"while [ true ]; do "\
 			"sleep 1;"\
 			"if ! kill -0 $1; then "\
-				"rm -rf \"$2\" \"$3\";"\
+				"if [ -e \"$3\" ]; then "\
+					"rm -rf \"$2\" \"$3\";"\
+				"fi;"\
 				"break;"\
 			"elif [ ! -e \"$2\" ] || [ ! -e \"$3\" ]; then "\
 				"break;"\
 			"fi;"\
 		"done;"\
 	" };"\
-/* Usage: prne_start_ug <shell pid> <upload dir> <lock file>*/\
+/* Usage: prne_start_ug <shell pid> <upload dir> <lock file> */\
 	"prne_start_ug () { "\
-		"prne_upload_guard \"$1\" \"$2\" \"$3\"&"\
+		"prne_upload_guard \"$1\" \"$2\" \"$3\" > /dev/null 2> /dev/null &"\
 	" };"
 	prne_static_assert(
 		sizeof(AVAILCMD_CMD) < 512 && sizeof(UPLOAD_GUARD_F) < 512,
@@ -1428,7 +1432,7 @@ static bool bne_sh_start_ug (bne_sh_ctx_t *sh_ctx) {
 	const char *sb[] = {
 		"prne_start_ug $$ \"",
 		sh_ctx->upload_dir, "\" \"",
-		sh_ctx->lockfile, "\"&"
+		sh_ctx->lockfile, "\" &"
 	};
 	char *cmd;
 	bool ret;
@@ -2045,7 +2049,6 @@ static bool bne_do_shell (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 
 END: // CATCH
 	if (f_ret >= 0) {
-		bne_sh_cleanup_upload(sh_ctx);
 		bne_sh_rm_lockfile(sh_ctx);
 	}
 	prne_free(exec_name);

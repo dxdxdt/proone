@@ -458,6 +458,7 @@ static void alloc_recon (void) {
 	}
 
 END: // CATCH
+	prne_dvault_reset();
 	prne_free_recon_param(&param);
 }
 
@@ -1341,16 +1342,16 @@ END:
 }
 
 static char *bne_cb_exec_name (void *ctx) {
-	size_t dvl;
-	const char *dv_str;
-	char *ret;
+	char *ret = prne_dup_str(
+		prne_dvault_get_cstr(PRNE_DATA_KEY_EXEC_NAME, NULL));
+	prne_dvault_reset();
+	return ret;
+}
 
-	dv_str = prne_dvault_get_cstr(PRNE_DATA_KEY_EXEC_NAME, &dvl);
-	ret = prne_alloc_str(dvl);
-	if (ret != NULL) {
-		memcpy(ret, dv_str, dvl + 1);
-	}
-
+static char *bne_cb_lock_name (void *ctx) {
+	char *ret = prne_dup_str(
+		prne_dvault_get_cstr(PRNE_DATA_KEY_BNE_LOCK_NAME, NULL));
+	prne_dvault_reset();
 	return ret;
 }
 
@@ -1387,6 +1388,7 @@ static void init_bne (void) {
 	bne_param.cb.vercmp = bne_cb_vercmp;
 	bne_param.cb.tmpfile = cb_tmpfile;
 	bne_param.cb.upbin = cb_upbin;
+	bne_param.cb.bne_lock_name = bne_cb_lock_name;
 
 	if (prne_g.has_ba) {
 		bne_param.rcb = &prne_g.rcb_param;

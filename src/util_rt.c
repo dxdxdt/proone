@@ -380,6 +380,9 @@ char *prne_rebuild_str (void *prev, const char **const arr, const size_t cnt) {
 }
 
 void prne_strzero (char *str) {
+	if (str == NULL) {
+		return;
+	}
 	for (; *str != 0; str += 1) {
 		*str = 0;
 	}

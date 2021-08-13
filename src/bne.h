@@ -36,6 +36,7 @@ struct prne_bne_param {
 	} vector;
 	struct {
 		char *(*exec_name)(void *ctx);
+		char *(*bne_lock_name)(void *ctx);
 		bool (*enter_dd)(void *ctx);
 		void (*exit_dd)(void *ctx);
 		uint64_t (*uptime)(void *ctx);

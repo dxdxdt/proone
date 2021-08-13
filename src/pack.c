@@ -309,7 +309,7 @@ static ssize_t pack_rcb_dvread_f (
 			nb_bin_loc = ctx->buf + ctx->buf_len + 6;
 			ctx->buf_len += 8;
 
-			if (ctx->self.arch != PRNE_ARCH_NONE) {
+			if (prne_bin_host_inrange(&ctx->self)) {
 				ctx->buf[ctx->buf_len + 0] = 0;
 				ctx->buf[ctx->buf_len + 1] = 0;
 				ctx->buf[ctx->buf_len + 2] = (uint8_t)ctx->self.os;

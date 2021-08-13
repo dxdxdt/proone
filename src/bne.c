@@ -1389,7 +1389,7 @@ static bool bne_sh_start_rcb (prne_bne_t *ctx, bne_sh_ctx_t *sh_ctx) {
 	ctx->result.prc = prne_start_bin_rcb_compat(
 		&sh_ctx->rcb,
 		ctx->result.bin_host,
-		NULL,
+		ctx->param.rcb->self,
 		ctx->param.rcb->m_self,
 		ctx->param.rcb->self_len,
 		ctx->param.rcb->exec_len,

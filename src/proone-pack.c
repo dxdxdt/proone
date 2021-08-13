@@ -265,8 +265,10 @@ static bool do_rcb (const char *prefix) {
 
 		prne_free(out_path);
 		out_path = prne_alloc_str(
-			prefix_len + 1 + strlen(arch_str));
+			prefix_len + 1 + strlen(os_str) + 1 + strlen(arch_str));
 		strcpy(out_path, prefix);
+		strcat(out_path, ".");
+		strcat(out_path, os_str);
 		strcat(out_path, ".");
 		strcat(out_path, arch_str);
 

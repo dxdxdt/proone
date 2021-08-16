@@ -110,8 +110,12 @@ static bool cb_htbt_cnc_txtrec (void *ctx, char *out) {
 static bool cb_htbt_hostinfo (void *ctx, prne_htbt_host_info_t *out) {
 	const struct timespec ts_now = prne_gettime(CLOCK_MONOTONIC);
 
-	out->parent_uptime = prne_sub_timespec(ts_now, prne_g.parent_start).tv_sec;
-	out->child_uptime = prne_sub_timespec(ts_now, prne_g.child_start).tv_sec;
+	out->parent_uptime = (uint32_t)prne_sub_timespec(
+		ts_now,
+		prne_g.parent_start).tv_sec;
+	out->child_uptime = (uint32_t)prne_sub_timespec(
+		ts_now,
+		prne_g.child_start).tv_sec;
 	if (prne_s_g != NULL) {
 		memcpy(out->org_id, prne_s_g->org_id, 16);
 		out->bne_cnt = prne_s_g->bne_cnt;

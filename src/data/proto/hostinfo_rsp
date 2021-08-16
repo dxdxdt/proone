@@ -8,8 +8,8 @@
 	301d2539908542fd90b6200b4a3b0855
 	# instance_id
 	25dc7ea24ac64a299facbe184233c485
-	ABBABABEFEFFFFFE # parent_uptime
-	DEADBEEFAABBCCDD # child_uptime
+	ABBABABE # parent_uptime
+	DEADBEEF # child_uptime
 	8899AABBCCDDEEFF # bne_cnt
 	ABBAABBAABBAABBA # infect_cnt
 	11223344 # crash_cnt

@@ -121,8 +121,8 @@ typedef enum {
 	* 	uint8_t boot_id[16]
 	* 	uint8_t instance_id[16]
 	* 	uint8_t org_id[16]
-	* 	uint64_t parent_uptime	: in seconds
-	* 	uint64_t child_uptime	: in seconds
+	* 	uint32_t parent_uptime	: in seconds
+	* 	uint32_t child_uptime	: in seconds
 	* 	uint64_t bne_cnt		: break-and-entry count
 	* 	uint64_t infect_cnt		: infect count ( <= 'bne_cnt')
 	*	uint32_t crash_cnt
@@ -250,8 +250,8 @@ struct prne_htbt_status {
 };
 
 struct prne_htbt_host_info {
-	uint64_t parent_uptime;
-	uint64_t child_uptime;
+	uint32_t parent_uptime;
+	uint32_t child_uptime;
 	uint64_t bne_cnt;
 	uint64_t infect_cnt;
 	uint32_t parent_pid;
@@ -342,7 +342,7 @@ typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(
 * Required write buffer size for submissive end. Set to that of
 * PRNE_HTBT_OP_HOST_INFO.
 */
-#define PRNE_HTBT_PROTO_SUB_MIN_BUF ((size_t)3 + 94 + 255)
+#define PRNE_HTBT_PROTO_SUB_MIN_BUF ((size_t)3 + 104 + 255 + 255)
 
 
 const char *prne_os_tostr (const prne_os_t x);

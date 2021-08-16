@@ -26,7 +26,7 @@ static const struct timespec BNE_SCK_OP_TIMEOUT = { 30, 0 }; // 30s
 static const struct timespec BNE_CLOSE_OP_TIMEOUT = { 1, 0 }; // 1s
 static const struct timespec BNE_ERR_PAUSE = { 0, 500000000 }; // 500ms
 static const struct timespec BNE_PROMPT_PAUSE = { 4, 0 }; // 4s
-static const uint64_t BNE_M2M_UPBIN_INT = 43200; // 12 hours
+static const uint32_t BNE_M2M_UPBIN_INT = 43200; // 12 hours
 
 static const size_t BNE_STDIO_IB_SIZE[] = {
 #if !PRNE_USE_MIN_MEM

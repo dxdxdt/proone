@@ -370,8 +370,8 @@ static void test_ser (void) {
 	prne_htbt_init_host_info(&hi_a);
 	prne_htbt_init_host_info(&hi_b);
 	// without ownership of host_cred
-	hi_a.parent_uptime = 0xABBABABEFEFFFFFE;
-	hi_a.child_uptime = 0xDEADBEEFAABBCCDD;
+	hi_a.parent_uptime = 0xABBABABE;
+	hi_a.child_uptime = 0xDEADBEEF;
 	hi_a.crash_cnt = 0x11223344;
 	hi_a.bne_cnt = 0x8899AABBCCDDEEFF;
 	hi_a.infect_cnt = 0xABBAABBAABBAABBA;
@@ -401,7 +401,7 @@ static void test_ser (void) {
 		PRNE_HTBT_PROTO_MIN_BUF,
 		&proto_buf_cnt_len,
 		&hi_a) == PRNE_HTBT_SER_RC_OK);
-	assert(proto_buf_cnt_len == 112 + cred_data_len + sizeof(BF));
+	assert(proto_buf_cnt_len == 104 + cred_data_len + sizeof(BF));
 	assert(memcmp(proto_buf, prog_ver, 16) == 0);
 	assert(memcmp(
 			proto_buf + 16,
@@ -411,20 +411,20 @@ static void test_ser (void) {
 			"\x25\xdc\x7e\xa2\x4a\xc6\x4a\x29\x9f\xac\xbe\x18\x42\x33\xc4\x85"
 			// org_id
 			"\xa3\x0f\xd3\x5e\xe7\xe7\xc3\xb6\x8f\x74\xdf\xf6\x07\x45\x77\xfa"
-			"\xAB\xBA\xBA\xBE\xFE\xFF\xFF\xFE" // parent_uptime
-			"\xDE\xAD\xBE\xEF\xAA\xBB\xCC\xDD" // child_uptime
+			"\xAB\xBA\xBA\xBE" // parent_uptime
+			"\xDE\xAD\xBE\xEF" // child_uptime
 			"\x88\x99\xAA\xBB\xCC\xDD\xEE\xFF" // bne_cnt
 			"\xAB\xBA\xAB\xBA\xAB\xBA\xAB\xBA" // infect_cnt
 			"\x11\x22\x33\x44" // crash_cnt
 			"\xDE\xAD\xBE\xEF" // parent_pid
 			"\xBA\xBE\xBA\xBE", // child_pid
-			92) == 0);
-	assert((size_t)proto_buf[16 + 92 + 0] == cred_data_len);
-	assert(proto_buf[16 + 92 + 1] == (uint8_t)PRNE_HOST_ARCH);
-	assert(proto_buf[16 + 92 + 2] == (uint8_t)PRNE_HOST_OS);
-	assert(proto_buf[16 + 92 + 3] == sizeof(BF));
-	assert(memcmp(proto_buf + 16 + 92 + 4, cred_data, cred_data_len) == 0);
-	assert(memcmp(proto_buf + 16 + 92 + 4 + cred_data_len, BF, sizeof(BF)) == 0);
+			84) == 0);
+	assert((size_t)proto_buf[16 + 84 + 0] == cred_data_len);
+	assert(proto_buf[16 + 84 + 1] == (uint8_t)PRNE_HOST_ARCH);
+	assert(proto_buf[16 + 84 + 2] == (uint8_t)PRNE_HOST_OS);
+	assert(proto_buf[16 + 84 + 3] == sizeof(BF));
+	assert(memcmp(proto_buf + 16 + 84 + 4, cred_data, cred_data_len) == 0);
+	assert(memcmp(proto_buf + 16 + 84 + 4 + cred_data_len, BF, sizeof(BF)) == 0);
 	assert(prne_htbt_dser_host_info(
 		proto_buf,
 		proto_buf_cnt_len,

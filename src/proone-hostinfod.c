@@ -701,8 +701,8 @@ static int build_hostinfo_query_str (
 		"%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X'),\n"
 		"\t@`org_id` = UNHEX('"
 		"%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X'),\n"
-		"\t@`parent_uptime` = %"PRIu64",\n"
-		"\t@`child_uptime` = %"PRIu64",\n"
+		"\t@`parent_uptime` = %"PRIu32",\n"
+		"\t@`child_uptime` = %"PRIu32",\n"
 		"\t@`bne_cnt` = %"PRIu64",\n"
 		"\t@`infect_cnt` = %"PRIu64",\n"
 		"\t@`parent_pid` = %"PRIu32",\n"
@@ -961,8 +961,8 @@ static bool handle_db_qe (
 		fprintf(
 			stderr,
 			"db@%"PRIxPTR": hostinfo("
-			"parent_uptime = %"PRIu64", "
-			"child_uptime = %"PRIu64", "
+			"parent_uptime = %"PRIu32", "
+			"child_uptime = %"PRIu32", "
 			"bne_cnt = %"PRIu64", "
 			"infect_cnt = %"PRIu64", "
 			"parent_pid = %"PRIu32", "

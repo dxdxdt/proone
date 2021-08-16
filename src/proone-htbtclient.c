@@ -1681,9 +1681,9 @@ static void emit_hostinfo_frame (const prne_htbt_host_info_t *hi) {
 
 	emit_mapping_start();
 	emit_scalar(YAML_STR_TAG, "parent_uptime");
-	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu64, hi->parent_uptime);
+	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu32, hi->parent_uptime);
 	emit_scalar(YAML_STR_TAG, "child_uptime");
-	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu64, hi->child_uptime);
+	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu32, hi->child_uptime);
 	emit_scalar(YAML_STR_TAG, "bne_cnt");
 	emit_scalar_fmt(YAML_INT_TAG, "%"PRIu64, hi->bne_cnt);
 	emit_scalar(YAML_STR_TAG, "infect_cnt");

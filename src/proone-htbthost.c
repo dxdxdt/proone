@@ -81,7 +81,7 @@ static bool cb_hostinfo (void *ctx, prne_htbt_host_info_t *out) {
 	int fd;
 
 	now = prne_gettime(CLOCK_MONOTONIC);
-	out->child_uptime = out->parent_uptime = prne_sub_timespec(
+	out->child_uptime = out->parent_uptime = (uint32_t)prne_sub_timespec(
 		now,
 		proc_start).tv_sec;
 	out->bne_cnt = 0;

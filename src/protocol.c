@@ -301,6 +301,7 @@ prne_htbt_ser_rc_t prne_dec_host_cred (
 
 void prne_htbt_init_host_info (prne_htbt_host_info_t *hi) {
 	prne_memzero(hi, sizeof(prne_htbt_host_info_t));
+	hi->parent_uptime = hi->child_uptime = 0xFFFFFFFF;
 }
 
 bool prne_htbt_alloc_host_info (
@@ -642,7 +643,7 @@ prne_htbt_ser_rc_t prne_htbt_ser_host_info (
 		return PRNE_HTBT_SER_RC_FMT_ERR;
 	}
 
-	*actual = 112 + in->host_cred_len + in->bf_len;
+	*actual = 104 + in->host_cred_len + in->bf_len;
 	if (mem_len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
@@ -651,56 +652,48 @@ prne_htbt_ser_rc_t prne_htbt_ser_host_info (
 	memcpy(mem + 16, in->boot_id, 16);
 	memcpy(mem + 32, in->instance_id, 16);
 	memcpy(mem + 48, in->org_id, 16);
-	mem[64] = prne_getmsb64(in->parent_uptime, 0);
-	mem[65] = prne_getmsb64(in->parent_uptime, 1);
-	mem[66] = prne_getmsb64(in->parent_uptime, 2);
-	mem[67] = prne_getmsb64(in->parent_uptime, 3);
-	mem[68] = prne_getmsb64(in->parent_uptime, 4);
-	mem[69] = prne_getmsb64(in->parent_uptime, 5);
-	mem[70] = prne_getmsb64(in->parent_uptime, 6);
-	mem[71] = prne_getmsb64(in->parent_uptime, 7);
-	mem[72] = prne_getmsb64(in->child_uptime, 0);
-	mem[73] = prne_getmsb64(in->child_uptime, 1);
-	mem[74] = prne_getmsb64(in->child_uptime, 2);
-	mem[75] = prne_getmsb64(in->child_uptime, 3);
-	mem[76] = prne_getmsb64(in->child_uptime, 4);
-	mem[77] = prne_getmsb64(in->child_uptime, 5);
-	mem[78] = prne_getmsb64(in->child_uptime, 6);
-	mem[79] = prne_getmsb64(in->child_uptime, 7);
-	mem[80] = prne_getmsb64(in->bne_cnt, 0);
-	mem[81] = prne_getmsb64(in->bne_cnt, 1);
-	mem[82] = prne_getmsb64(in->bne_cnt, 2);
-	mem[83] = prne_getmsb64(in->bne_cnt, 3);
-	mem[84] = prne_getmsb64(in->bne_cnt, 4);
-	mem[85] = prne_getmsb64(in->bne_cnt, 5);
-	mem[86] = prne_getmsb64(in->bne_cnt, 6);
-	mem[87] = prne_getmsb64(in->bne_cnt, 7);
-	mem[88] = prne_getmsb64(in->infect_cnt, 0);
-	mem[89] = prne_getmsb64(in->infect_cnt, 1);
-	mem[90] = prne_getmsb64(in->infect_cnt, 2);
-	mem[91] = prne_getmsb64(in->infect_cnt, 3);
-	mem[92] = prne_getmsb64(in->infect_cnt, 4);
-	mem[93] = prne_getmsb64(in->infect_cnt, 5);
-	mem[94] = prne_getmsb64(in->infect_cnt, 6);
-	mem[95] = prne_getmsb64(in->infect_cnt, 7);
-	mem[96] = prne_getmsb32(in->crash_cnt, 0);
-	mem[97] = prne_getmsb32(in->crash_cnt, 1);
-	mem[98] = prne_getmsb32(in->crash_cnt, 2);
-	mem[99] = prne_getmsb32(in->crash_cnt, 3);
-	mem[100] = prne_getmsb32(in->parent_pid, 0);
-	mem[101] = prne_getmsb32(in->parent_pid, 1);
-	mem[102] = prne_getmsb32(in->parent_pid, 2);
-	mem[103] = prne_getmsb32(in->parent_pid, 3);
-	mem[104] = prne_getmsb32(in->child_pid, 0);
-	mem[105] = prne_getmsb32(in->child_pid, 1);
-	mem[106] = prne_getmsb32(in->child_pid, 2);
-	mem[107] = prne_getmsb32(in->child_pid, 3);
-	mem[108] = (uint8_t)in->host_cred_len;
-	mem[109] = (uint8_t)in->arch;
-	mem[110] = (uint8_t)in->os;
-	mem[111] = (uint8_t)in->bf_len;
-	memcpy(mem + 112, in->host_cred, in->host_cred_len);
-	memcpy(mem + 112 + in->host_cred_len, in->bf, in->bf_len);
+	mem[64] = prne_getmsb32(in->parent_uptime, 0);
+	mem[65] = prne_getmsb32(in->parent_uptime, 1);
+	mem[66] = prne_getmsb32(in->parent_uptime, 2);
+	mem[67] = prne_getmsb32(in->parent_uptime, 3);
+	mem[68] = prne_getmsb32(in->child_uptime, 0);
+	mem[69] = prne_getmsb32(in->child_uptime, 1);
+	mem[70] = prne_getmsb32(in->child_uptime, 2);
+	mem[71] = prne_getmsb32(in->child_uptime, 3);
+	mem[72] = prne_getmsb64(in->bne_cnt, 0);
+	mem[73] = prne_getmsb64(in->bne_cnt, 1);
+	mem[74] = prne_getmsb64(in->bne_cnt, 2);
+	mem[75] = prne_getmsb64(in->bne_cnt, 3);
+	mem[76] = prne_getmsb64(in->bne_cnt, 4);
+	mem[77] = prne_getmsb64(in->bne_cnt, 5);
+	mem[78] = prne_getmsb64(in->bne_cnt, 6);
+	mem[79] = prne_getmsb64(in->bne_cnt, 7);
+	mem[80] = prne_getmsb64(in->infect_cnt, 0);
+	mem[81] = prne_getmsb64(in->infect_cnt, 1);
+	mem[82] = prne_getmsb64(in->infect_cnt, 2);
+	mem[83] = prne_getmsb64(in->infect_cnt, 3);
+	mem[84] = prne_getmsb64(in->infect_cnt, 4);
+	mem[85] = prne_getmsb64(in->infect_cnt, 5);
+	mem[86] = prne_getmsb64(in->infect_cnt, 6);
+	mem[87] = prne_getmsb64(in->infect_cnt, 7);
+	mem[88] = prne_getmsb32(in->crash_cnt, 0);
+	mem[89] = prne_getmsb32(in->crash_cnt, 1);
+	mem[90] = prne_getmsb32(in->crash_cnt, 2);
+	mem[91] = prne_getmsb32(in->crash_cnt, 3);
+	mem[92] = prne_getmsb32(in->parent_pid, 0);
+	mem[93] = prne_getmsb32(in->parent_pid, 1);
+	mem[94] = prne_getmsb32(in->parent_pid, 2);
+	mem[95] = prne_getmsb32(in->parent_pid, 3);
+	mem[96] = prne_getmsb32(in->child_pid, 0);
+	mem[97] = prne_getmsb32(in->child_pid, 1);
+	mem[98] = prne_getmsb32(in->child_pid, 2);
+	mem[99] = prne_getmsb32(in->child_pid, 3);
+	mem[100] = (uint8_t)in->host_cred_len;
+	mem[101] = (uint8_t)in->arch;
+	mem[102] = (uint8_t)in->os;
+	mem[103] = (uint8_t)in->bf_len;
+	memcpy(mem + 104, in->host_cred, in->host_cred_len);
+	memcpy(mem + 104 + in->host_cred_len, in->bf, in->bf_len);
 
 	return PRNE_HTBT_SER_RC_OK;
 }
@@ -872,13 +865,13 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (
 {
 	size_t cred_size, bf_size;
 
-	*actual = 112;
+	*actual = 104;
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
 	}
 
-	cred_size = data[108];
-	bf_size = data[111];
+	cred_size = data[100];
+	bf_size = data[103];
 	*actual += cred_size + bf_size;
 	if (len < *actual) {
 		return PRNE_HTBT_SER_RC_MORE_BUF;
@@ -892,16 +885,17 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (
 	memcpy(out->boot_id, data + 16, 16);
 	memcpy(out->instance_id, data + 32, 16);
 	memcpy(out->org_id, data + 48, 16);
-	out->parent_uptime = prne_recmb_msb64(
+	out->parent_uptime = prne_recmb_msb32(
 		data[64],
 		data[65],
 		data[66],
-		data[67],
+		data[67]);
+	out->child_uptime = prne_recmb_msb32(
 		data[68],
 		data[69],
 		data[70],
 		data[71]);
-	out->child_uptime = prne_recmb_msb64(
+	out->bne_cnt = prne_recmb_msb64(
 		data[72],
 		data[73],
 		data[74],
@@ -910,7 +904,7 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (
 		data[77],
 		data[78],
 		data[79]);
-	out->bne_cnt = prne_recmb_msb64(
+	out->infect_cnt = prne_recmb_msb64(
 		data[80],
 		data[81],
 		data[82],
@@ -919,34 +913,25 @@ prne_htbt_ser_rc_t prne_htbt_dser_host_info (
 		data[85],
 		data[86],
 		data[87]);
-	out->infect_cnt = prne_recmb_msb64(
+	out->crash_cnt = prne_recmb_msb32(
 		data[88],
 		data[89],
 		data[90],
-		data[91],
+		data[91]);
+	out->parent_pid = prne_recmb_msb32(
 		data[92],
 		data[93],
 		data[94],
 		data[95]);
-	out->crash_cnt = prne_recmb_msb32(
+	out->child_pid = prne_recmb_msb32(
 		data[96],
 		data[97],
 		data[98],
 		data[99]);
-	out->parent_pid = prne_recmb_msb32(
-		data[100],
-		data[101],
-		data[102],
-		data[103]);
-	out->child_pid = prne_recmb_msb32(
-		data[104],
-		data[105],
-		data[106],
-		data[107]);
-	out->arch = (prne_arch_t)data[109];
-	out->os = (prne_os_t)data[110];
-	memcpy(out->host_cred, data + 112, cred_size);
-	memcpy(out->bf, data + 112 + cred_size, bf_size);
+	out->arch = (prne_arch_t)data[101];
+	out->os = (prne_os_t)data[102];
+	memcpy(out->host_cred, data + 104, cred_size);
+	memcpy(out->bf, data + 104 + cred_size, bf_size);
 
 	return PRNE_HTBT_SER_RC_OK;
 }

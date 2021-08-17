@@ -16,7 +16,10 @@ typedef void(*prne_bf_foreach_ft)(
 
 
 void prne_bf_set (uint8_t *bf, const unsigned int bit, const bool v);
-bool prne_bf_test (const uint8_t *bf, const unsigned int bit);
+bool prne_bf_test (
+	const uint8_t *bf,
+	const size_t size,
+	const unsigned int bit);
 void prne_bf_foreach (
 	void *ctx,
 	const uint8_t *bf,

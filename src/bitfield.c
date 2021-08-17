@@ -13,11 +13,19 @@ void prne_bf_set (uint8_t *bf, const unsigned int bit, const bool v) {
 	}
 }
 
-bool prne_bf_test (const uint8_t *bf, const unsigned int bit) {
+bool prne_bf_test (
+	const uint8_t *bf,
+	const size_t size,
+	const unsigned int bit)
+{
 	const unsigned int p = bit / 8;
 	const unsigned int s = bit - p * 8;
 
-	return bf[p] & (1 << s);
+	if (size <= p) {
+		return false;
+	}
+
+	return (bf[p] & (1 << s)) != 0;
 }
 
 void prne_bf_foreach (

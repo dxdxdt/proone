@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <arpa/inet.h>
+#include <net/if.h>
 
 #include <mbedtls/entropy.h>
 
@@ -40,6 +41,10 @@ struct {
 } prog_conf;
 
 struct {
+	struct {
+		char *addr;
+		uint32_t scope_id;
+	} arg;
 	struct {
 		uint8_t *m;
 		size_t l;
@@ -102,6 +107,8 @@ static void init_g (void) {
 }
 
 static void free_g (void) {
+	prne_free(prog_g.arg.addr);
+	prog_g.arg.addr = NULL;
 	prne_free_llist(&prog_g.wkr_list);
 	mbedtls_ctr_drbg_free(&prog_g.ssl.ctr_drbg);
 	mbedtls_entropy_free(&prog_g.ssl.entropy);
@@ -141,6 +148,31 @@ static void load_str (char **dst, const char *str) {
 		perror("prne_redup_str()");
 		abort();
 	}
+}
+
+static bool load_addr (const char *addr) {
+	char *p;
+
+	prog_g.arg.addr = prne_redup_str(prog_g.arg.addr, addr);
+	prne_assert(prog_g.arg.addr != NULL);
+
+	p = strrchr(prog_g.arg.addr, '%');
+	if (p != NULL) {
+		*p = 0;
+		p += 1;
+		prog_g.arg.scope_id = if_nametoindex(p);
+
+		if (prog_g.arg.scope_id == 0 &&
+			1 != sscanf(p, "%"SCNu32, &prog_g.arg.scope_id))
+		{
+			return false;
+		}
+	}
+	else {
+		prog_g.arg.scope_id = 0;
+	}
+
+	return true;
 }
 
 static int parse_args (const int argc, char *const*args) {
@@ -216,10 +248,16 @@ static int parse_args (const int argc, char *const*args) {
 	for (size_t i = 0; i < prog_conf.targets.cnt; i += 1, optind += 1) {
 		prne_ip_addr_t *p = prog_conf.targets.arr + i;
 
-		if (inet_pton(AF_INET6, args[optind], p->addr)) {
-			p->ver = PRNE_IPV_6;
+		if (!load_addr(args[optind])) {
+			fprintf(stderr, "%s: invalid scope id\n", args[optind]);
+			return 2;
 		}
-		else if (inet_pton(AF_INET, args[optind], p->addr)) {
+
+		if (inet_pton(AF_INET6, prog_g.arg.addr, p->addr)) {
+			p->ver = PRNE_IPV_6;
+			p->scope_id = prog_g.arg.scope_id;
+		}
+		else if (inet_pton(AF_INET, prog_g.arg.addr, p->addr)) {
 			p->ver = PRNE_IPV_4;
 		}
 		else {

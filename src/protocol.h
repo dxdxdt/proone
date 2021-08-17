@@ -81,6 +81,7 @@ prne_static_assert(
 struct prne_ip_addr {
 	uint8_t addr[16];
 	prne_ipv_t ver;
+	uint32_t scope_id;
 };
 
 struct prne_net_endpoint {

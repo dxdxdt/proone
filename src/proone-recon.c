@@ -136,21 +136,22 @@ INV_LINE:
 
 static void evt_cb (void *ctx, const prne_net_endpoint_t *ep) {
 	char addr_str[prne_op_max(INET_ADDRSTRLEN, INET6_ADDRSTRLEN)];
-	const char *fmt;
 
 	switch (ep->addr.ver) {
 	case PRNE_IPV_4:
 		inet_ntop(AF_INET, ep->addr.addr, addr_str, sizeof(addr_str));
-		fmt = "%s:%"PRIu16"\n";
+		printf("%s:%"PRIu16"\n", addr_str, ep->port);
 		break;
 	case PRNE_IPV_6:
 		inet_ntop(AF_INET6, ep->addr.addr, addr_str, sizeof(addr_str));
-		fmt = "[%s]:%"PRIu16"\n";
+		printf(
+			"[%s%%%"PRIu32"]:%"PRIu16"\n",
+			addr_str,
+			ep->addr.scope_id,
+			ep->port);
 		break;
 	default: abort();
 	}
-
-	printf(fmt, addr_str, ep->port);
 }
 
 int main (const int argc, const char **args) {

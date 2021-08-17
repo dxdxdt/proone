@@ -244,6 +244,8 @@ static bool parse_param (const char *arg) {
 		prne_net_endpoint_t ep;
 		size_t pos;
 
+		prne_memzero(&ep, sizeof(ep));
+
 		pos = rm[1].rm_eo - rm[1].rm_so;
 		memcpy(str, arg + rm[1].rm_so, pos);
 		str[pos] = 0;
@@ -270,6 +272,8 @@ static bool parse_param (const char *arg) {
 	else if (regexec(&re_ns6, arg, 3, rm, 0) == 0) {
 		prne_net_endpoint_t ep;
 		size_t pos;
+
+		prne_memzero(&ep, sizeof(ep));
 
 		pos = rm[1].rm_eo - rm[1].rm_so;
 		memcpy(str, arg + rm[1].rm_so, rm[1].rm_eo - rm[1].rm_so);

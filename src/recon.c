@@ -39,26 +39,22 @@ static const struct timespec RCN_ERR_PAUSE_INT = { 10, 0 }; // 10 s
 // 60 ~ 160 syn packets per tick
 static const uint_fast32_t RCN_SYN_PPT_MIN = 60;
 static const uint_fast32_t RCN_SYN_PPT_VAR = 100;
-#define RCN_ICMPV6_PING_CNT 4
+#define RCN_IPV6_PROBE_CNT 4
 
 #define RCN_IDX_IPV4	0
 #define RCN_IDX_IPV6	1
 #define RCN_NB_FD		2
 
-static const uint8_t RCN_ICMP_ECHO_DATA[] = {
-	'O', 'I', '!', ' ', 'T', 'h', 'e', ' ',
-	'i', 'n', 't', 'e', 'r', 'n', 'e', 't',
-	' ', 'i', 's', ' ', 'b', 'e', 't', 't',
-	'e', 'r', ' ', 'o', 'f', 'f', ' ', 'w',
-	'i', 't', 'h', 'o', 'u', 't', ' ', 't',
-	'h', 'i', 's', ' ', 'd', 'e', 'v', 'i',
-	'c', 'e', '.', '@', '#', '$', '%', '^'
-};
-static const uint8_t RCN_ICMP_ECHO_DST[] = {
+static const uint8_t RCN_IPV6_DST_LL[] = {
 	0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
 };
-prne_static_assert(sizeof(RCN_ICMP_ECHO_DST) == 16, "RCN_ICMP_ECHO_DST");
+prne_static_assert(sizeof(RCN_IPV6_DST_LL) == 16, "RCN_IPV6_DST_LL");
+static const uint8_t RCN_ICMP_ECHO_DATA[] = {
+	' ', '!', '\"', '#', '$', '%', '&', '\'',
+	'(', ')', '*', '+', ',', '-', '.',
+	'/', '0', '1', '2', '3', '4', '5', '6', '7'
+};
 
 typedef struct {
 	uint32_t cur;
@@ -78,6 +74,7 @@ typedef struct {
 } rcn_v6ifaceinfo_t;
 
 struct prne_recon {
+	uint8_t buf[1504]; // typical MTU aligned to 8 bytes
 	prne_recon_param_t param;
 	pth_mutex_t lock;
 	pth_cond_t cond;
@@ -90,12 +87,13 @@ struct prne_recon {
 		prne_llist_entry_t *ptr;
 	} v4_ii;
 	struct {
-		rcn_v6ifaceinfo_t *arr;
+		rcn_v6ifaceinfo_t *arr; // sorted by addr
 		size_t cnt;
 	} v6_ii;
 	size_t t_ptr;
 	size_t ping_cnt;
 	int fd[RCN_NB_FD][2];
+	struct timespec ts_now;
 	uint8_t v6_saddr[16];
 	uint8_t v4_saddr[4];
 	uint32_t seq_mask;
@@ -103,6 +101,13 @@ struct prne_recon {
 	bool loop;
 	bool send_ptr;
 };
+
+static int rcn_v4ii_cmp_asc (const void *a, const void *b) {
+	return memcmp(
+		((rcn_v6ifaceinfo_t*)a)->addr,
+		((rcn_v6ifaceinfo_t*)b)->addr,
+		16);
+}
 
 static void rcn_main_empty_v4_ii (prne_recon_t *ctx) {
 	prne_llist_entry_t *ent = ctx->v4_ii.list.head;
@@ -257,6 +262,12 @@ static bool rcn_main_do_ifaddrs (prne_recon_t *ctx) {
 	v6arr = NULL;
 	v6cnt = 0;
 
+	qsort(
+		ctx->v6_ii.arr,
+		ctx->v6_ii.cnt,
+		sizeof(rcn_v6ifaceinfo_t),
+		rcn_v4ii_cmp_asc);
+
 	ret = true;
 END:
 	freeifaddrs(ia);
@@ -264,6 +275,29 @@ END:
 	prne_free(v6arr);
 
 	return ret;
+}
+
+static uint32_t rcn_main_get_iiv6_scope_id (
+	prne_recon_t *ctx,
+	const uint8_t *addr)
+{
+	rcn_v6ifaceinfo_t key;
+	const rcn_v6ifaceinfo_t *found;
+
+	// Because recvfrom() does not return scope_id ...
+	memcpy(key.addr, addr, 16);
+	key.scope_id = 0;
+	found = (const rcn_v6ifaceinfo_t*)bsearch(
+		&key,
+		ctx->v6_ii.arr,
+		ctx->v6_ii.cnt,
+		sizeof(rcn_v6ifaceinfo_t),
+		rcn_v4ii_cmp_asc);
+
+	if (found == NULL) {
+		return 0;
+	}
+	return found->scope_id;
 }
 
 static bool rcn_main_genaddr_ii_4 (
@@ -435,11 +469,19 @@ static bool rcn_main_chk_blist (
 	return false;
 }
 
-static void rcn_main_send_syn (prne_recon_t *ctx) {
-	prne_ipv_t ret;
-	uint8_t src[16], dst[16];
+static bool rcn_main_send_syn (
+	prne_recon_t *ctx,
+	const prne_ipv_t ipv,
+	const uint8_t *src,
+	const uint8_t *dst,
+	const uint32_t dst_scope,
+	const int snd_flags)
+{
+	prne_static_assert(
+		sizeof(ctx->buf) >= 40 + sizeof(struct tcphdr),
+		"buffer short for tcpv4");
+	bool ret;
 	uint8_t m_head[prne_op_max(sizeof(prne_iphdr4_t), sizeof(prne_iphdr6_t))];
-	uint8_t m_pkt[40 + sizeof(struct tcphdr)];
 	uint8_t m_sa[prne_op_max(
 		sizeof(struct sockaddr_in),
 		sizeof(struct sockaddr_in6))];
@@ -449,14 +491,9 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 	struct sockaddr_in6 *sa6;
 	socklen_t sl = 0;
 	struct tcphdr th;
-	size_t coin, pkt_len = 0;
+	size_t coin, pkt_len;
 	uint16_t d_port;
-	int snd_flags = MSG_NOSIGNAL, f_ret, fd = -1;
-
-	ret = rcn_main_gen_addr(ctx, src, dst, &snd_flags);
-	if (ret == PRNE_IPV_NONE || rcn_main_chk_blist(ctx, ret, dst)) {
-		return;
-	}
+	int f_ret, fd = -1;
 
 	prne_memzero(m_head, sizeof(m_head));
 	prne_memzero(m_sa, sizeof(m_sa));
@@ -471,7 +508,7 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 	prne_rnd(&ctx->rnd, (uint8_t*)&th.window, sizeof(th.window));
 	th.window = htons(100 + (th.window % (UINT16_MAX - 100)));
 
-	switch (ret) {
+	switch (ipv) {
 	case PRNE_IPV_4:
 		ih4 = (prne_iphdr4_t*)m_head;
 		ih4->ihl = 5;
@@ -496,8 +533,8 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 			NULL,
 			0));
 
-		prne_ser_iphdr4(m_pkt, ih4);
-		memcpy(m_pkt + 20, &th, sizeof(struct tcphdr));
+		prne_ser_iphdr4(ctx->buf, ih4);
+		memcpy(ctx->buf + 20, &th, sizeof(struct tcphdr));
 		pkt_len = 20 + sizeof(struct tcphdr);
 
 		sa4 = (struct sockaddr_in*)m_sa;
@@ -547,13 +584,14 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 			NULL,
 			0));
 
-		prne_ser_iphdr6(m_pkt, ih6);
-		memcpy(m_pkt + 40, &th, sizeof(struct tcphdr));
+		prne_ser_iphdr6(ctx->buf, ih6);
+		memcpy(ctx->buf + 40, &th, sizeof(struct tcphdr));
 		pkt_len = 40 + sizeof(struct tcphdr);
 
 		sa6 = (struct sockaddr_in6*)m_sa;
 		sa6->sin6_family = AF_INET6;
 		memcpy(&sa6->sin6_addr, dst, 16);
+		sa6->sin6_scope_id = dst_scope;
 		sl = sizeof(struct sockaddr_in6);
 		fd = ctx->fd[RCN_IDX_IPV6][1];
 
@@ -565,38 +603,64 @@ static void rcn_main_send_syn (prne_recon_t *ctx) {
 				inet_ntop(AF_INET6, ih6->saddr, s_str, sizeof(s_str)) &&
 				inet_ntop(AF_INET6, ih6->daddr, d_str, sizeof(d_str)));
 			prne_dbgpf(
-				"Send SYN [%s]:%"PRIu16 " -> [%s]:%"PRIu16"\n",
+				"Send SYN [%s]:%"PRIu16 " -> [%s%%%"PRIu32"]:%"PRIu16"\n",
 				s_str,
 				ntohs(th.source),
 				d_str,
+				dst_scope,
 				ntohs(th.dest));
 		}
 		break;
+	default: abort();
 	}
 
 	f_ret = sendto(
 		fd,
-		m_pkt,
+		ctx->buf,
 		pkt_len,
-		snd_flags,
+		snd_flags | MSG_NOSIGNAL,
 		(struct sockaddr*)m_sa,
 		sl);
-	if (f_ret < 0 && PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
-		prne_dbgperr("** SYN sendto()@rcn");
+	prne_assert(f_ret != 0);
+	ret = f_ret > 0;
+
+	if (!ret) {
+		if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+			prne_dbgperr("** SYN sendto()@rcn");
+		}
 	}
+	return ret;
 }
 
-static void rcn_main_send_icmpv6_from (
+static void rcn_main_do_syn (prne_recon_t *ctx) {
+	prne_ipv_t ret;
+	uint8_t src[16], dst[16];
+	int snd_flags = 0;
+
+	ret = rcn_main_gen_addr(ctx, src, dst, &snd_flags);
+	if (ret == PRNE_IPV_NONE || rcn_main_chk_blist(ctx, ret, dst)) {
+		return;
+	}
+	rcn_main_send_syn(ctx, ret, src, dst, 0, snd_flags);
+}
+
+// RFC7707 Section 4.3
+static void rcn_main_send_v6probe_from (
 	prne_recon_t *ctx,
 	const rcn_v6ifaceinfo_t *from)
 {
+#define PKT_LEN\
+	40 + /* IPv6 header */\
+	8 + /* Malicious options */\
+	sizeof(struct icmp6_hdr) + /* Legit ICMPv6 that shouldn't be processed */\
+	sizeof(RCN_ICMP_ECHO_DATA) /* ECHO data */
+
+	prne_static_assert(
+		sizeof(ctx->buf) >= PKT_LEN,
+		"buffer short for v6prove");
 	prne_iphdr6_t iph;
 	struct icmp6_hdr icmph;
-	uint8_t m_pkt[
-		40 +
-		sizeof(struct icmp6_hdr) +
-		sizeof(RCN_ICMP_ECHO_DATA)];
-	uint8_t *p = m_pkt;
+	uint8_t *p = ctx->buf;
 	struct sockaddr_in6 sa;
 	int f_ret;
 
@@ -605,14 +669,14 @@ static void rcn_main_send_icmpv6_from (
 	prne_memzero(&sa, sizeof(sa));
 
 	sa.sin6_family = AF_INET6;
-	memcpy(&sa.sin6_addr, RCN_ICMP_ECHO_DST, 16);
+	memcpy(&sa.sin6_addr, RCN_IPV6_DST_LL, 16);
 	sa.sin6_scope_id = from->scope_id;
 
-	iph.payload_len = sizeof(struct icmp6_hdr) + sizeof(RCN_ICMP_ECHO_DATA);
+	iph.payload_len = 8 + sizeof(struct icmp6_hdr) + sizeof(RCN_ICMP_ECHO_DATA);
 	iph.next_hdr = IPPROTO_ICMPV6;
 	iph.hop_limit = 1;
 	memcpy(iph.saddr, from->addr, 16);
-	memcpy(iph.daddr, RCN_ICMP_ECHO_DST, 16);
+	memcpy(iph.daddr, RCN_IPV6_DST_LL, 16);
 
 	icmph.icmp6_type = ICMP6_ECHO_REQUEST;
 	icmph.icmp6_id = htons((uint16_t)ctx->seq_mask);
@@ -622,8 +686,18 @@ static void rcn_main_send_icmpv6_from (
 		sizeof(icmph),
 		RCN_ICMP_ECHO_DATA,
 		sizeof(RCN_ICMP_ECHO_DATA)));
+
+	iph.next_hdr = IPPROTO_DSTOPTS;
 	prne_ser_iphdr6(p, &iph);
 	p += 40;
+// https://www.iana.org/assignments/ipv6-parameters/ipv6-parameters.xhtml
+// RFC4727
+	p[0] = IPPROTO_ICMPV6;
+	p[1] = 0;
+	p[2] = 0x9e;
+	p[3] = 4;
+	prne_rnd(&ctx->rnd, p + 4, 4);
+	p += 8;
 	memcpy(p, &icmph, sizeof(icmph));
 	p += sizeof(icmph);
 	memcpy(p, RCN_ICMP_ECHO_DATA, sizeof(RCN_ICMP_ECHO_DATA));
@@ -637,7 +711,8 @@ static void rcn_main_send_icmpv6_from (
 			inet_ntop(AF_INET6, iph.saddr, s_str, sizeof(s_str)) &&
 			inet_ntop(AF_INET6, iph.daddr, d_str, sizeof(d_str)));
 		prne_dbgpf(
-			"Send ICMPv6 ECHO [%s%%%"PRIu32"] -> [%s] id=%"PRIu16" seq=%"PRIu16"\n",
+			"Send bogus ICMPv6 ECHO [%s%%%"PRIu32"] -> "
+			"[%s] id=%"PRIu16" seq=%"PRIu16"\n",
 			s_str,
 			from->scope_id,
 			d_str,
@@ -647,90 +722,111 @@ static void rcn_main_send_icmpv6_from (
 
 	f_ret = sendto(
 		ctx->fd[RCN_IDX_IPV6][1],
-		m_pkt,
-		sizeof(m_pkt),
+		ctx->buf,
+		PKT_LEN,
 		MSG_NOSIGNAL,
 		(struct sockaddr*)&sa,
 		sizeof(sa));
 	if (f_ret < 0 && PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
 		prne_dbgperr("** ICMPv6 sendto()@rcn");
 	}
+#undef PKT_LEN
 }
 
 static void rcn_main_send_icmpv6 (prne_recon_t *ctx) {
 	for (size_t i = 0; i < ctx->v6_ii.cnt; i += 1) {
-		rcn_main_send_icmpv6_from(ctx, ctx->v6_ii.arr + i);
+		rcn_main_send_v6probe_from(ctx, ctx->v6_ii.arr + i);
 	}
 }
 
 static void rcn_main_recv_syn_tail (
 	prne_recon_t *ctx,
+	const uint8_t *daddr,
 	const struct tcphdr *th,
 	const uint32_t exp_ack,
-	const prne_net_endpoint_t *ep)
+	prne_net_endpoint_t *ep)
 {
 	if (ntohs(th->dest) == ctx->s_port &&
 		ntohl(th->ack_seq) == exp_ack &&
 		th->ack && th->syn && !th->rst && !th->fin)
 	{
+		if (ep->addr.ver == PRNE_IPV_6) {
+			ep->addr.scope_id = rcn_main_get_iiv6_scope_id(ctx, daddr);
+		}
 		ctx->param.evt_cb(ctx->param.cb_ctx, ep);
 	}
 }
 
-static void rcn_main_recv_4 (prne_recon_t *ctx) {
+static bool rcn_main_recv_4 (prne_recon_t *ctx) {
+	prne_static_assert(
+		sizeof(ctx->buf) >= 20 + 60/*options*/ + sizeof(struct tcphdr),
+		"buffer short for tcpv4");
 	ssize_t f_ret;
-	uint8_t buf[
-		20 +
-		60 + // options
-		sizeof(struct tcphdr)];
 	struct tcphdr th;
 	prne_iphdr4_t ih;
 	uint32_t exp_ack;
 	prne_net_endpoint_t ep;
 
-	while (true) {
-		f_ret = recv(
-			ctx->fd[RCN_IDX_IPV4][0],
-			buf,
-			sizeof(buf),
-			0);
-		if (f_ret < 0) {
-			if (errno != EAGAIN &&
-				errno != EWOULDBLOCK &&
-				PRNE_DEBUG &&
-				PRNE_VERBOSE >= PRNE_VL_ERR)
-			{
-				prne_dbgperr("** SYN recv()@rcn");
-			}
-			break;
+	f_ret = recv(
+		ctx->fd[RCN_IDX_IPV4][0],
+		ctx->buf,
+		sizeof(ctx->buf),
+		0);
+	if (f_ret < 0) {
+		if (errno != EAGAIN &&
+			errno != EWOULDBLOCK &&
+			PRNE_DEBUG &&
+			PRNE_VERBOSE >= PRNE_VL_ERR)
+		{
+			prne_dbgperr("** recv()@rcn");
 		}
-		if (f_ret < 20) {
-			continue;
-		}
-		prne_dser_iphdr4(buf, &ih);
-		if (ih.ihl * 4 + sizeof(struct tcphdr) > (size_t)f_ret) {
-			continue;
-		}
-		memcpy(&th, buf + ih.ihl * 4, sizeof(struct tcphdr));
-
-		prne_memzero(&ep, sizeof(prne_net_endpoint_t));
-		ep.addr.ver = PRNE_IPV_4;
-		memcpy(ep.addr.addr, ih.saddr, 4);
-		ep.port = ntohs(th.source);
-		exp_ack = prne_recmb_msb32(
-			ih.saddr[0],
-			ih.saddr[1],
-			ih.saddr[2],
-			ih.saddr[3]) ^
-			ctx->seq_mask;
-		exp_ack += 1;
-		rcn_main_recv_syn_tail(ctx, &th, exp_ack, &ep);
+		return false;
 	}
+	if (f_ret < 20) {
+		return true;
+	}
+	prne_dser_iphdr4(ctx->buf, &ih);
+	if (ih.ihl * 4 + sizeof(struct tcphdr) > (size_t)f_ret) {
+		return true;
+	}
+	memcpy(&th, ctx->buf + ih.ihl * 4, sizeof(struct tcphdr));
+
+	prne_memzero(&ep, sizeof(prne_net_endpoint_t));
+	ep.addr.ver = PRNE_IPV_4;
+	memcpy(ep.addr.addr, ih.saddr, 4);
+	ep.port = ntohs(th.source);
+	exp_ack = prne_recmb_msb32(
+		ih.saddr[0],
+		ih.saddr[1],
+		ih.saddr[2],
+		ih.saddr[3]) ^
+		ctx->seq_mask;
+	exp_ack += 1;
+	rcn_main_recv_syn_tail(ctx, ih.daddr, &th, exp_ack, &ep);
+
+	return true;
 }
 
-static void rcn_main_recv_6 (prne_recon_t *ctx) {
+static void rcn_main_recv_6_icmp_tail (
+	prne_recon_t *ctx,
+	const prne_iphdr6_t *ih)
+{
+	rcn_main_send_syn(
+		ctx,
+		PRNE_IPV_6,
+		ih->daddr,
+		ih->saddr,
+		rcn_main_get_iiv6_scope_id(ctx, ih->daddr),
+		MSG_DONTROUTE);
+}
+
+static bool rcn_main_recv_6 (prne_recon_t *ctx) {
+	prne_static_assert(
+		sizeof(ctx->buf) >= 40 + prne_op_max(
+			sizeof(struct tcphdr),
+			sizeof(struct icmp6_hdr)),
+		"buffer short for tcpv6");
 	ssize_t f_ret;
-	uint8_t buf[1024];
 	prne_iphdr6_t ih;
 	uint8_t m_hdr[prne_op_max(
 		sizeof(struct tcphdr),
@@ -742,140 +838,190 @@ static void rcn_main_recv_6 (prne_recon_t *ctx) {
 	uint32_t exp_ack;
 	prne_net_endpoint_t ep;
 	size_t data_len;
-	uint8_t *p = buf;
+	uint8_t *p = ctx->buf;
+	uint32_t pptr;
 
 	prne_memzero(&ep, sizeof(prne_net_endpoint_t));
 	ep.addr.ver = PRNE_IPV_6;
 
-LOOP:
-	while (true) {
-		f_ret = recv(
-			ctx->fd[RCN_IDX_IPV6][0],
-			buf,
-			sizeof(buf),
-			0);
-		if (f_ret < 0) {
-			if (errno != EAGAIN &&
-				errno != EWOULDBLOCK &&
-				PRNE_DEBUG &&
-				PRNE_VERBOSE >= PRNE_VL_ERR)
-			{
-				prne_dbgperr("** SYN recv()@rcn");
-			}
-			break;
+	f_ret = recv(
+		ctx->fd[RCN_IDX_IPV6][0],
+		ctx->buf,
+		sizeof(ctx->buf),
+		0);
+	if (f_ret < 0) {
+		if (errno != EAGAIN &&
+			errno != EWOULDBLOCK &&
+			PRNE_DEBUG &&
+			PRNE_VERBOSE >= PRNE_VL_ERR)
+		{
+			prne_dbgperr("** SYN recv()@rcn");
 		}
-		if (f_ret < 40) {
-			continue;
-		}
-		prne_dser_iphdr6(buf, &ih);
+		return false;
+	}
+	if (f_ret < 40) {
+		return true;
+	}
+	prne_dser_iphdr6(ctx->buf, &ih);
 
-		ext_pos = 40;
-		next_hdr = ih.next_hdr;
-		// skip ext headers
-		while (next_hdr != IPPROTO_TCP && next_hdr != IPPROTO_ICMPV6) {
-			switch (next_hdr) {
-			case 0:
-			case 43:
-			case 60:
-				if (ext_pos + 1 >= (size_t)f_ret) {
-					goto LOOP;
-				}
-				next_hdr = buf[ext_pos];
-				ext_pos += buf[ext_pos + 1] * 8 + 8;
-				break;
-			case 59: // no next header
-			default: // can't parse this packet
-				goto LOOP;
-			}
-		}
+	if (memcmp(ih.saddr, ih.daddr, 16) == 0) {
+		return true;
+	}
 
-		memcpy(ep.addr.addr, ih.saddr, 16);
-		p += ext_pos;
+	ext_pos = 40;
+	next_hdr = ih.next_hdr;
+	// skip ext headers
+	while (next_hdr != IPPROTO_TCP && next_hdr != IPPROTO_ICMPV6) {
 		switch (next_hdr) {
-		case IPPROTO_TCP:
-			if ((size_t)f_ret < ext_pos + sizeof(struct tcphdr)) {
-				continue;
+		case 0:
+		case 43:
+		case 60:
+			if (ext_pos + 1 >= (size_t)f_ret) {
+				return true;
 			}
-			memcpy(m_hdr, p, sizeof(struct tcphdr));
-			p += sizeof(struct tcphdr);
-			th = (struct tcphdr*)m_hdr;
-
-			ep.port = ntohs(th->source);
-			exp_ack =
-				prne_recmb_msb32(
-					ep.addr.addr[0],
-					ep.addr.addr[1],
-					ep.addr.addr[2],
-					ep.addr.addr[3]) ^
-				prne_recmb_msb32(
-					ep.addr.addr[4],
-					ep.addr.addr[5],
-					ep.addr.addr[6],
-					ep.addr.addr[7]) ^
-				prne_recmb_msb32(
-					ep.addr.addr[8],
-					ep.addr.addr[9],
-					ep.addr.addr[10],
-					ep.addr.addr[11]) ^
-				prne_recmb_msb32(
-					ep.addr.addr[12],
-					ep.addr.addr[13],
-					ep.addr.addr[14],
-					ep.addr.addr[15]) ^
-				ctx->seq_mask;
-			exp_ack += 1;
-			rcn_main_recv_syn_tail(ctx, th, exp_ack, &ep);
+			next_hdr = ctx->buf[ext_pos];
+			ext_pos += ctx->buf[ext_pos + 1] * 8 + 8;
 			break;
-		case IPPROTO_ICMPV6:
-			if ((size_t)f_ret < ext_pos + sizeof(struct icmp6_hdr)) {
-				continue;
-			}
-			memcpy(m_hdr, p, sizeof(struct icmp6_hdr));
-			p += sizeof(struct icmp6_hdr);
-			icmph = (struct icmp6_hdr*)m_hdr;
-			data_len = f_ret - ext_pos - sizeof(struct icmp6_hdr);
+		case 59: // no next header
+		default: // can't parse this packet
+			return true;
+		}
+	}
 
-			if (memcmp(ih.saddr, ih.daddr, 16) == 0 ||
-				icmph->icmp6_type != ICMP6_ECHO_REPLY ||
-				icmph->icmp6_code != 0 ||
+	memcpy(ep.addr.addr, ih.saddr, 16);
+	p += ext_pos;
+	switch (next_hdr) {
+	case IPPROTO_TCP:
+		if ((size_t)f_ret < ext_pos + sizeof(struct tcphdr)) {
+			return true;
+		}
+		memcpy(m_hdr, p, sizeof(struct tcphdr));
+		p += sizeof(struct tcphdr);
+		th = (struct tcphdr*)m_hdr;
+
+		ep.port = ntohs(th->source);
+		exp_ack =
+			prne_recmb_msb32(
+				ep.addr.addr[0],
+				ep.addr.addr[1],
+				ep.addr.addr[2],
+				ep.addr.addr[3]) ^
+			prne_recmb_msb32(
+				ep.addr.addr[4],
+				ep.addr.addr[5],
+				ep.addr.addr[6],
+				ep.addr.addr[7]) ^
+			prne_recmb_msb32(
+				ep.addr.addr[8],
+				ep.addr.addr[9],
+				ep.addr.addr[10],
+				ep.addr.addr[11]) ^
+			prne_recmb_msb32(
+				ep.addr.addr[12],
+				ep.addr.addr[13],
+				ep.addr.addr[14],
+				ep.addr.addr[15]) ^
+			ctx->seq_mask;
+		exp_ack += 1;
+		rcn_main_recv_syn_tail(ctx, ih.daddr, th, exp_ack, &ep);
+		break;
+	case IPPROTO_ICMPV6:
+		if ((size_t)f_ret < ext_pos + sizeof(struct icmp6_hdr)) {
+			return true;
+		}
+		memcpy(m_hdr, p, sizeof(struct icmp6_hdr));
+		p += sizeof(struct icmp6_hdr);
+		icmph = (struct icmp6_hdr*)m_hdr;
+		data_len = f_ret - ext_pos - sizeof(struct icmp6_hdr);
+
+		switch (icmph->icmp6_type) {
+		case ICMP6_ECHO_REPLY:
+			if (icmph->icmp6_code != 0 ||
 				ntohs(icmph->icmp6_id) != (uint16_t)ctx->seq_mask ||
 				ntohs(icmph->icmp6_seq) != 0 ||
 				data_len != sizeof(RCN_ICMP_ECHO_DATA) ||
 				memcmp(p, RCN_ICMP_ECHO_DATA, sizeof(RCN_ICMP_ECHO_DATA)) != 0)
 			{
-				continue;
+				return true;
 			}
-			else {
-				ep.port = 0;
-				ctx->param.evt_cb(ctx->param.cb_ctx, &ep);
+			// this node shouldn't have processed this packet, but we'll accept
+			if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_WARN) {
+				char s_str[INET6_ADDRSTRLEN];
+				char d_str[INET6_ADDRSTRLEN];
+
+				prne_assert(
+					inet_ntop(AF_INET6, ih.saddr, s_str, sizeof(s_str)) &&
+					inet_ntop(AF_INET6, ih.daddr, d_str, sizeof(d_str)));
+				prne_dbgpf(
+					"Bad IPv6 implementation! [%s] -> [%s]\n",
+					s_str,
+					d_str);
 			}
+
+			rcn_main_recv_6_icmp_tail(ctx, &ih);
+			break;
+		case ICMP6_PARAM_PROB:
+			pptr = ntohl(icmph->icmp6_pptr);
+			if (icmph->icmp6_code != ICMP6_PARAMPROB_OPTION ||
+				data_len <= pptr ||
+				p[pptr] != 0x9e)
+			{
+				return true;
+			}
+			if (PRNE_DEBUG && PRNE_VERBOSE >= PRNE_VL_DBG0) {
+				char s_str[INET6_ADDRSTRLEN];
+				char d_str[INET6_ADDRSTRLEN];
+
+				prne_assert(
+					inet_ntop(AF_INET6, ih.saddr, s_str, sizeof(s_str)) &&
+					inet_ntop(AF_INET6, ih.daddr, d_str, sizeof(d_str)));
+				prne_dbgpf(
+					"ICMP 4,2 [%s] -> [%s]\n",
+					s_str,
+					d_str);
+			}
+
+			rcn_main_recv_6_icmp_tail(ctx, &ih);
 			break;
 		}
+		break;
 	}
+
+	return true;
 }
 
-static void rcn_main_recv (prne_recon_t *ctx) {
+static bool rcn_main_recv (prne_recon_t *ctx) {
+	bool ret[2];
+
 	if (ctx->fd[RCN_IDX_IPV4][0] >= 0) {
-		rcn_main_recv_4(ctx);
+		ret[0] = rcn_main_recv_4(ctx);
+	}
+	else {
+		ret[0] = false;
 	}
 	if (ctx->fd[RCN_IDX_IPV6][0] >= 0) {
-		rcn_main_recv_6(ctx);
+		ret[1] = rcn_main_recv_6(ctx);
 	}
+	else {
+		ret[1] = false;
+	}
+
+	return ret[0] || ret[1];
 }
 
 static void *rcn_main_entry (void *ctx_p) {
 	prne_recon_t *ctx = (prne_recon_t*)ctx_p;
-	struct timespec ts_now;
-	unsigned int syn_cnt, tick_dur;
+	unsigned int i, syn_cnt, tick_dur;
 	pth_event_t ev_root = NULL, ev;
 	pth_time_t to_pth;
 	struct timespec to_ts, tick_dur_ts;
 
+LOOP:
 	while (ctx->loop) {
-		ts_now = prne_gettime(CLOCK_MONOTONIC);
+		ctx->ts_now = prne_gettime(CLOCK_MONOTONIC);
 
 		// periodic op
-		if (prne_cmp_timespec(ctx->ts.ii_up, ts_now) <= 0) {
+		if (prne_cmp_timespec(ctx->ts.ii_up, ctx->ts_now) <= 0) {
 			unsigned long n;
 
 			rcn_main_update_saddr(ctx);
@@ -883,10 +1029,14 @@ static void *rcn_main_entry (void *ctx_p) {
 			if (rcn_main_do_ifaddrs(ctx)) {
 				prne_rnd(&ctx->rnd, (uint8_t*)&n, sizeof(n));
 				n = RCN_II_UPDATE_INT_MIN + (n % RCN_II_UPDATE_INT_VAR);
-				ctx->ts.ii_up = prne_add_timespec(ts_now, prne_ms_timespec(n));
+				ctx->ts.ii_up = prne_add_timespec(
+					ctx->ts_now,
+					prne_ms_timespec(n));
 			}
 			else {
-				ctx->ts.ii_up = prne_add_timespec(ts_now, RCN_ERR_PAUSE_INT);
+				ctx->ts.ii_up = prne_add_timespec(
+					ctx->ts_now,
+					RCN_ERR_PAUSE_INT);
 			}
 
 			prne_rnd(&ctx->rnd, (uint8_t*)&n, sizeof(n));
@@ -901,27 +1051,19 @@ static void *rcn_main_entry (void *ctx_p) {
 		tick_dur = RCN_SYN_TICK_MIN + (tick_dur % RCN_SYN_TICK_VAR);
 		prne_rnd(&ctx->rnd, (uint8_t*)&ctx->seq_mask, sizeof(ctx->seq_mask));
 
-		for (unsigned int i = 0; i < syn_cnt; i += 1) {
-			rcn_main_send_syn(ctx);
+		for (i = 0; i < syn_cnt; i += 1) {
+			rcn_main_do_syn(ctx);
 		}
-		if (ctx->ping_cnt < RCN_ICMPV6_PING_CNT) {
+		if (ctx->ping_cnt < RCN_IPV6_PROBE_CNT) {
 			rcn_main_send_icmpv6(ctx);
 			ctx->ping_cnt += 1;
-			if (ctx->ping_cnt >= RCN_ICMPV6_PING_CNT) {
-				rcn_main_empty_v6_ii(ctx);
-			}
 		}
 
-		ts_now = prne_gettime(CLOCK_MONOTONIC);
+		ctx->ts_now = prne_gettime(CLOCK_MONOTONIC);
 		tick_dur_ts = prne_ms_timespec(tick_dur);
 		to_pth = prne_pth_tstimeout(tick_dur_ts);
-		to_ts = prne_add_timespec(ts_now, tick_dur_ts);
+		to_ts = prne_add_timespec(ctx->ts_now, tick_dur_ts);
 		while (ctx->loop) {
-			ts_now = prne_gettime(CLOCK_MONOTONIC);
-			if (prne_cmp_timespec(to_ts, ts_now) <= 0) {
-				break;
-			}
-
 			// build event
 			pth_event_free(ev_root, TRUE);
 			ev_root = pth_event(PTH_EVENT_TIME, to_pth);
@@ -943,7 +1085,24 @@ static void *rcn_main_entry (void *ctx_p) {
 			pth_mutex_release(&ctx->lock);
 
 			// process
-			rcn_main_recv(ctx);
+			i = 0;
+			do {
+				// this loop is to prevent the thread starving other threads
+				// because a continuous flow of packets could keep the loop
+				// going forever
+				ctx->ts_now = prne_gettime(CLOCK_MONOTONIC);
+				if (prne_cmp_timespec(to_ts, ctx->ts_now) <= 0) {
+					goto LOOP;
+				}
+
+				i += 1;
+				if (i % syn_cnt == 0) {
+					i = 0;
+					pth_yield(NULL);
+				}
+				// the thread will wait on event when no packet has been
+				// received. i.e. rcn_main_recv() returns false
+			} while (ctx->loop && rcn_main_recv(ctx));
 		}
 	}
 

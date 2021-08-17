@@ -125,6 +125,7 @@ void prne_net_ep_tosin6 (
 	struct sockaddr_in6 *out)
 {
 	memcpy(&out->sin6_addr, ep->addr.addr, 16);
+	out->sin6_scope_id = ep->addr.scope_id;
 	out->sin6_family = AF_INET6;
 	out->sin6_port = htons(ep->port);
 }

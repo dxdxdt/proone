@@ -1,5 +1,10 @@
 # Proone Dev Notes
 
+## "Hacks"
+### Use lightweight crypto
+The RSA keys are at least 2048 bits long. Consider using elliptic-curve based
+alternatives to reduce the binary size.
+
 ## Potential Improvements
 ### TODO switching to real threads?
 
@@ -59,8 +64,12 @@ traffic. These are the "characteristics" of Proone.
 * SYN packets to remote port 64420[^2]
 * The ALPN string "prne-htbt" in TLS hello messages
 * Client and server certificates in TLS hello messages
-* Spewing of crafted SYN packets followed by RST packets if the remote end has
-  that port open[^1]
+* Spewing crafted SYN packets followed by RST packets if the remote end has that
+  port open[^1]
+* Bogus ICMPv6 packets multicast to the link-local network. The packets contain
+  a destination option that the node should not process. The recipient nodes are
+  required to notify the source node by sending an ICMPv6 packet with type 4 and
+  code 2
 
 Most of the characteristics can be changed by regenerating the PKI or using
 different port for Heartbeat.
@@ -68,10 +77,26 @@ different port for Heartbeat.
 The use of ALPN can be disabled by not setting the ALPN list for ssl config(ie.
 not calling `mbedtls_ssl_conf_alpn_protocols()`).
 
+## Notes on Arch
+For ARM, the codes are assigned for arches with major changes as per the
+"industry standard". ARMV4T is the first and oldest Linux suppports. The thumb
+variant has been chosen because almost all ARM CPUs run Linux kernel with Thumb
+enabled. Major improvements and features were introduced with ARMV7(hfp) and
+AARCH64(more hfp registers and 64bit address space). Note that in order for a
+64-bit kernel to run 32-bit executables, the kernel must be configured with
+CONFIG_COMPAT. There's no major penalty for enabling this so it's assumed that
+most AARCH64 devices are configured with CONFIG_COMPAT.
+
+Proone recognises that the arches that have gone "extinct". These arches are SH4
+and M68K. They are merely defined to honor the Mirai's choice of arches. There
+are also arches that lack the prevalence in embedded devices. These include PPC
+and SPARC(not assigned, but targetted by Mirai). ARC CPUs are supported by Linux
+but no actual product powered by ARC runs Linux.
 
 [^1]: The crafted packets are not recognised by the kernel because no socket is
-associated with the port. The kernel is forced to send a RST back and this
-packet will reach the remote end if there's no firewall in the way that filters
-it.
+      associated with the port. The kernel is forced to send a RST back and this
+      packet will reach the remote end if there's no firewall in the way that
+      filters it.
+
 [^2]: The port 64420 is in the ephemeral port range. Blocking this port may lead
-to mild consequences for ISPs.
+      to mild consequences for ISPs.

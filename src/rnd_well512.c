@@ -1,3 +1,12 @@
+// The Well Equidistributed Long-period Linear PRNG 512a variant
+// http://www.iro.umontreal.ca/~panneton/well/WELL512a.c
+/* ***************************************************************************** */
+/* Copyright:      Francois Panneton and Pierre L'Ecuyer, University of Montreal */
+/*                 Makoto Matsumoto, Hiroshima University                        */
+/* Notice:         This code can be used freely for personal, academic,          */
+/*                 or non-commercial purposes. For commercial purposes,          */
+/*                 please contact P. L'Ecuyer at: lecuyer@iro.UMontreal.ca       */
+/* ***************************************************************************** */
 #include "rnd.h"
 #include "util_rt.h"
 

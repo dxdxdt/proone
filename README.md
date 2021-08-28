@@ -3,6 +3,8 @@
 with MMU. It features self-contained breaking and entering, replicating, IPv6
 support and CNC using DNS over TLS.
 
+Copyright (c) 2019-2021 David Timber &lt;mieabby@gmail.com&gt;
+
 ## Foreword
 In a nutshell, this project is a reengineered version of Mirai, but in a serious
 tone and with some extras. Inspired by the work of original authors of Mirai,

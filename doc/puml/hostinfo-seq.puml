@@ -1,0 +1,5 @@
+@startuml hostinfo-seq
+"A"  -> "S": +HOST_INFO
+"S" --> "A":  HOST_INFO
+"S" --> "A":  Hostinfo Frame
+@enduml

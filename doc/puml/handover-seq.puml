@@ -1,0 +1,7 @@
+@startuml handover-seq
+"A"  -> "S": +HOVER
+"A"  -> "S": Handover Frame
+"S"  -> "S": queue request
+"S" --> "A": STATUS
+"S" --> "A": Status Frame
+@enduml

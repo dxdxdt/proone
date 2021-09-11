@@ -1,0 +1,4 @@
+@startuml noop-seq
+"A"  -> "B": +0x00 NOOP
+"B" --> "A":  0x00 NOOP
+@enduml

@@ -1,0 +1,51 @@
+@startuml execbin-seq
+"A"  -> "S": +RUN_BIN
+"A"  -> "S": Binary Meta Frame
+"S"  -> "S": open() tmpfile
+"A"  -> "S": +STDIO
+"A"  -> "S": STDIO Frame
+"A"  -> "S": Binary Data
+"S"  -> "S": write()
+"A"  -> "S": +STDIO
+"A"  -> "S": STDIO Frame
+"A"  -> "S": Binary Data
+"S"  -> "S": write()
+Note across: Repeat ...
+"A"  -> "S": +STDIO
+"A"  -> "S": STDIO Frame, fin
+"S"  -> "S": close()
+
+Create P
+"S"  -> "P": fork(), exec()
+
+"A"  -> "S": +STDIO
+"A"  -> "S": STDIO Frame
+"A"  -> "S": STDIO Data
+
+"S"  -> "P": STDIO Data
+"P"  -> "S": STDIO Data
+
+"S" --> "A": STDIO
+"S" --> "A": STDIO Frame
+"S" --> "A": STDIO Data
+
+Note across: Repeat ...
+
+"A"  -> "S": +STDIO
+"A"  -> "S": STDIO Frame len=0, fin
+"S"  -> "P": STDIN EOF
+
+"P"  -> "S": STDOUT EOF
+"S" --> "A": STDIO
+"S" --> "A": STDIO Frame len=0, fin
+
+"P"  -> "S": STDERR EOF
+"S" --> "A": STDIO
+"S" --> "A": STDIO Frame len=0, err, fin
+
+"P"  -> "P": exit()
+"S" <-> "P" !!: waitpid()
+Note over "P": Process reaped
+"S" --> "A": Status
+"S" --> "A": Status Frame
+@enduml

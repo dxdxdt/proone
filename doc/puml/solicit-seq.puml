@@ -1,0 +1,3 @@
+@startuml solicit-seq
+"S"  -> "A": +SOLICIT
+@enduml

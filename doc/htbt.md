@@ -4,9 +4,11 @@ complete heartbeat connection consists of an **authoritive host** and a
 **submissive host**. The authoritive host and the submissive host can be either
 end of the TCP/IP connection.
 
-**A session** is a series of messages identified by a single message id.
-A message is a combination of multiple frames. All messages begin with
-a Message Header Frame. The frame that should appear next depdens on the OP code
+Copyright (c) 2019-2021 David Timber &lt;mieabby@gmail.com&gt;
+
+**A session** is a series of messages identified by a single message id. A
+message is a combination of one or more frames. All messages begin with the
+message header frame. The frame that should appear next depdens on the OP code
 of the message header frame. A session is usually terminated by a message that
 indicates the end of the session.
 
@@ -26,7 +28,9 @@ indicates the end of the session.
 * The OP code of a message header dictates the format of the following frame
 
 The framinig protocol is designed so that multiple sessions can be pipelined
-over a TCP/IP connection or a DNS TXT record stream.
+into a single TCP/IP connection or a DNS TXT record stream.
+
+
 
 ## Other Characteristics
 * Heartbeat Protocol is a big-endian protocol
@@ -48,10 +52,11 @@ over a TCP/IP connection or a DNS TXT record stream.
 Unlike conventional botnets, Proone instances(our jargon for "bots") are
 controlled by TXT DNS records containing one or more request sessions of an
 authoritive host. In this scheme, Proone instances periodicallty query the
-contents of the TXT records to execute them. Any response data resulted in the
-process is discarded. The serialised frames in the records are encoded in base64
-because most DNS management software do not accept binary data for the value of
-TXT records. The
+contents of the TXT records to parse and serve request messages as if they were
+from a "real" authoritive host on the TLS connection. Any response data resulted
+in the process is discarded. The serialised frames in the records are encoded in
+base64 because most DNS management software do not accept binary data for the
+value of TXT records. The
 spec([rfc1035](https://datatracker.ietf.org/doc/html/rfc1035#section-3.3) does
 not impose such restriction.
 
@@ -60,17 +65,17 @@ interception. The rationale behind this is that the DNS protocol is not
 encrypted and ISPs or law enforcfements can easily filter out TXT REC CNC
 traffic simply by doing plain-text string search. Proone queries public DNS
 servers directly rather than using system functions. This eliminates the chance
-of letting ISP DNS servers giving false results. Using public DNS servers is
-also beneficial since law enforcements would have to take down the domain itself
-as it would be difficult to convince the operators of public DNS servers to
-block a recursive query to a particular name server. Another benefit is not
-having to run CNC servers for simple tasks like running shell scripts.
+of ISP DNS servers giving false results. Using public DNS servers is also
+beneficial because law enforcements would have to take down the domain itself as
+it would be difficult to convince the operators of public DNS servers to block a
+recursive query to a particular name server. Another benefit is not having to
+run CNC implementations for simple tasks like running shell scripts.
 
 There are 2 recommended applications. One typical application is having a
 `PRNE_HTBT_OP_HOVER`(Hand-over Command) request frame in TXT records to instruct
 the instances to connect to servers running authoritive htbt implementations for
 furthur instructions. The second application is having a
-`PRNE_HTBT_OP_RUN_CMD`(Execute Command) frame or a
+`PRNE_HTBT_OP_RUN_CMD`(Execute) frame or a
 `PRNE_HTBT_OP_RUN_BIN`(Execute Binary Command) containing a simple minified
 shell script to be run on the hosts.
 
@@ -89,6 +94,20 @@ their own executable when a new version is detected during this process.
 **proone-htbtclient** can be used to examine and maintain the Proone instance
 via this port.
 
+## TLS PKI
+Unlike in a usual TLS set up, both server and client heartbeat implementations
+are required to verify the remote host's certificate. This prevents access to
+the instances from unwanted parties and enforces "domains" of the same
+implementation operated by different users. The ALPN(application layer protocol
+negotiation) string "prne-htbt" is also used to further ensure that the remote
+endpoint the implementation connects to is served by a Proone implementation
+serving heartbeat connections.
+
+The Proone executables carry files necessray to set up TLS connections hardcoded
+in their binary. These files include the CA cert, a DH param, a cert and a
+private key for client connections and a cert and private key for server
+connections.
+
 ## Custom Authoritive Server Implementations
 In order to do things of complexity, it's recommended to implement an
 authoritive server implementation and command Proone instances to take orders
@@ -105,8 +124,10 @@ run lightweight shells like Ash(BusyBox) and Toysh(Toybox). The best is strategy
 is targetting Bourne shell, which has been a default shell for the majority of
 systems(historically).
 
-* `reboot -nf` to reboot host
-* `half -nf` to disable host
+* `reboot -nf` to reboot host: this effectively terminates Proone's presence on
+  the host)
+* `half -nf` to disable host: the device will remain dormant until the owner of
+  the device resets it
 
 To make hosts run an arbitrary binary executable, `PRNE_HTBT_OP_HOST_INFO`(Host
 Info Request) can be used to query the archeticture type of the host to select
@@ -116,7 +137,7 @@ does to prepare the binary for the instance.
 `PRNE_HTBT_OP_UP_BIN`(Binary Upgrade) can be used to replace the executable of
 the Proone instance.
 
-## Frame Formats
+## The Frames
 ### Attributes
 | Name   | Description                                                         |
 | ------ | ------------------------------------------------------------------- |
@@ -163,14 +184,19 @@ the Proone instance.
 | MinLen    | 3                                                                |
 | MaxLen    | -                                                                |
 
-Message Header frames mark the start of a message. The **op** code dictates the
-type of the frame which follows the message header frame. The **id** is used to
-identify which session the message belongs to. A session is initiated with a
+The message header frames mark the start of a message. The **op** code dictates
+the type of the frame which follows the message header frame. The **id** is used
+to identify which session the message belongs to. A session is initiated with a
 message with a new *id* and the **I** flag set.
 
-The special value 0x00 is reserved for *id* for use in No Operation sessions.
-The id value 0x00 is illegal if not used for NOOP. This rule is in place so that
-the NOOP messages always appear as `80 00 00` and `00 00 00` in binary.
+The special value 0x0000 is reserved for *id* for use in No Operation sessions.
+The id value 0x00 is illegal if it's not used for NOOP. This rule is in place so
+that the NOOP messages always appear as `80 00 00` and `00 00 00` in binary.
+
+The special id value 0x7FFF is used to indicate a "notification session" in
+which the recipient host is not expected to produce any response messages for
+that session. For example, a Status message can be sent with the id 0x7FFF by
+either host to report a protorol error.
 
 #### OP Codes
 | Enum      | Value | Name                 | Next Frame           |
@@ -182,8 +208,8 @@ the NOOP messages always appear as `80 00 00` and `00 00 00` in binary.
 | HOVER     | 0x03  | Hand-over            | Handover             |
 | SOLICIT   | 0x04  | Solicit              | -                    |
 | RUN_CMD   | 0x05  | Execute              | Command              |
-| UP_BIN    | 0x06  | Binary Upgrade       | Binary Meta          |
-| RUN_BIN   | 0x07  | Execute Binary       | Binary Meta          |
+| UP_BIN    | 0x06  | Binary Upgrade       | Binary meta          |
+| RUN_BIN   | 0x07  | Execute Binary       | Binary meta          |
 | STDIO     | 0x08  | STDIO                | STDIO                |
 | RCB       | 0x09  | Binary Recombination | RCB                  |
 
@@ -219,8 +245,9 @@ the NOOP messages always appear as `80 00 00` and `00 00 00` in binary.
 | MinLen    | 5                                                                |
 | MaxLen    | -                                                                |
 
-Status frames are used to describe the result of a request or an error occurred.
-*err* is used to convey `errno` or a return value from the library.
+The status frame is used to describe the result of a request or an error
+occurred. *err* is used to convey `errno` or a return value from the underlaying
+library.
 
 Note that the host CPU architecture may be using [unusual signed integer
 format](https://en.wikipedia.org/wiki/Signed_number_representations). If this is
@@ -235,7 +262,7 @@ representation from/to two's complement representation.
 |           |       | required is not implemented                              |
 | PROTO_ERR | 0x02  | Protocol error was detected while processing frames      |
 | ERRNO     | 0x03  | Operation was not successful and *err* is set to errno   |
-| SUB       | 0x04  | *err* is set to the error code returned from a module    |
+| SUB       | 0x04  | *err* is set to the error code returned from the  module |
 | LIMIT     | 0x05  | Request could not be served because a limit was reached  |
 
 ### Hostinfo Frame
@@ -335,7 +362,8 @@ representation from/to two's complement representation.
 Hostinfo frames are used to carry diagnostic and statistic data on the instance.
 
 **prog_ver** is a hardcoded uuid used to identify the version of Proone
-instances. The submissive host should use the value of `PRNE_PROG_VER`.
+instances. The submissive host should return the value of `PRNE_PROG_VER` in
+this field.
 
 **boot_id** is a uuid provided by the host
 kernel(`/proc/sys/kernel/random/boot_id` on Linux). A zeroed-out uuid indicates
@@ -351,7 +379,7 @@ zeroed-out uuid indicates that the *org_id* is not specified.
 **parent_uptime** is the number of seconds elapsed since the parent process has
 started. **child_uptime** is the numer of seconds elapsed since the child
 process has been spawned by the parent process. The value 0xFFFFFFFF is used to
-indicate error like integer overflow or unset value.
+indicate errors like integer overflow or unset value.
 
 **bne_cnt** is the number of times the instance has breached a host. This
 includes the number of successful logins and the number of successful breaches
@@ -411,6 +439,15 @@ memory. Other examples are ...
 * Without the Heartbeat worker(WKR_HTBT unset), the instance cannot perform M2M
   communication with other hosts
 
+#### Bitfield Format
+The bitfield carries bits in octet units starting from the least significant
+byte. For example, the bitfield of 1 octet carries up to 8 bits and 2 octets 16
+bits and so on. The bits from 0th to 7th are placed in the first byte, bits from
+8th to 15th in the second and so on. The bitfield is little-endian unlike the
+protocol itself because the implementation is simplest this way. See
+[/src/bitfield.h](/src/bitfield.h) header, which defines intuitive interfaces
+for facilitating the use of bitfields.
+
 ### Hand-over Frame
 ```
      0                   1                   2                   3
@@ -450,11 +487,11 @@ memory. Other examples are ...
 | MinLen    | 24                                                               |
 | MaxLen    | -                                                                |
 
-Hand-over frames are used to represent the socket addresses of another
-authoritive host. All-zero addresses(0.0.0.0 and ::) are used to represent that
-the address is unspecified. If both IPv4 and IPv6 addresses are specified, the
-IPv6 address takes the precedence. This means that the use of IPv6 is favoured
-whenever IPv6 connectivity is available.
+The hand-over frame is used to represent the socket addresses of another
+authoritive host. Zeroed-out addresses(0.0.0.0 and ::) are used to represent
+that the address is unspecified. If both IPv4 and IPv6 addresses are specified,
+the IPv6 address takes the precedence. This means that the use of IPv6 is
+favoured whenever IPv6 connectivity is available.
 
 ### Command Frame
 ```
@@ -487,15 +524,15 @@ whenever IPv6 connectivity is available.
 | MinLen    | 2                                                                |
 | MaxLen    | 1025                                                             |
 
-Command frames are used to represent arguments to `exec()` syscall.
+The command frame is used to represent arguments to `exec()` syscall.
 
 **D**("detach") is a flag used to indicate whether the process should be spawned
 detached or not. A detached process should be set up such that ...
 
 * The result of reading the standard input is always EOF
 * Writing to the standard output or the standard error result in EPIPE and
-  SIGPIPE sent to the process
-* The process is made a "daemon"[^1]
+  SIGPIPE sent to the process[^1]
+* The process is made a "daemon"[^2]
   * The process is both a process group and a session leader
   * The parent process is a "system process" that reaps child processes in the
     background
@@ -564,7 +601,7 @@ with zero is illegal. Empty strings are permitted.
 | MinLen    | 5                                                                |
 | MaxLen    | 1028                                                             |
 
-Bin Meta frames are an extension of the Command frames.
+The bin meta frame is an extension of the Command frames.
 
 **alloc_len** is the length in octets advised by the authoritive implementation
 for preallocation. The submissive implementation may choose to honor the field
@@ -610,7 +647,8 @@ Refer to ###Command Frame section for furthur info.
 | MinLen    | 2                                                                |
 | MaxLen    | -                                                                |
 
-STDIO frames are used for transmission of stdio data and arbitrary binary data.
+The STDIO frame is used for transmission of stdio data and arbitrary binary
+data.
 
 **E**("err") is a flag used to indicate whether the frame holds the output of
 the standard error. This flag is only used by the submissive host in Execute and
@@ -622,7 +660,7 @@ Recombination sessions.
 used in Execute or Execute Binary sessions, the flag indicates that the channel
 has reached EOF and the corresponding file descriptors should be closed. When
 used in Binary Upgrade or Binary Recombination sessions, the flag means that the
-there is no more data to be transferred.
+there are no more data to be transferred.
 
 **len** is the octet length of the data that follows. Note that STDIO frames
 with *fin* flag set and *len* > 0 are legal. The implementations should deliver
@@ -658,14 +696,14 @@ closing the file descriptors.
 | MinLen    | 3                                                                |
 | MaxLen    | -                                                                |
 
-RCB frames are used to instruct the submissive host to initiate binary
+The RCB frame is used to instruct the submissive host to initiate binary
 recombination.
 
 The submissive host is allowed to choose an alternative architecture if the one
-requested is unavailable if the **C**("compat") flag is set. The submissive host
-is required to transmit the copy of its executable if **S**("self") is set. The
-binary recombination target is specified in **os** and **arch** fields. These
-fields are ignored if *S* is set.
+requested is unavailable when the **C**("compat") flag is set. The submissive
+host is required to transmit the copy of its executable if **S**("self") is set.
+The binary recombination target is specified in **os** and **arch** fields.
+These fields are ignored if *S* is set.
 
 ## Enum Codes
 ### CPU Architecture Codes
@@ -674,7 +712,7 @@ fields are ignored if *S* is set.
 | NONE    | 0x00  | Special value used to indicate that the code is not used   |
 | I686    | 0x01  | Intel P6 microarchitecture (Pentium Pro)                   |
 | X86_64  | 0x02  | AMD64 Opteron "SledgeHammer"                               |
-| ARMV4T  | 0x03  | ARM v4 w/ MMU, Thumb, MMU (ARM920T)                        |
+| ARMV4T  | 0x03  | ARM v4 w/ MMU, Thumb (ARM920T)                             |
 | ARMV7   | 0x04  | ARM v7 w/ MMU, Thumb-2, VFPv4 FPU (Cortex-A5)              |
 | AARCH64 | 0x05  | AArch64 (Cortex-A35)                                       |
 | MIPS    | 0x06  | MIPS 1 (R3000) running in big-endian mode                  |
@@ -687,10 +725,11 @@ fields are ignored if *S* is set.
 
 The codes represent the target arch of the compiler output. They coincide with
 the default target of modern compilers like GCC or Clang. For example, the I686
-output will run on later versions of x86 arches, say Pentium 4. But it won't run
-on older version of x86 CPUs like P5. I686 is chosen because the Linux kernel
-dropped support for P5 and older arches a long time ago. The same reasoning
-applies to other arches that the Heartbeat protocol defines.
+target("-m32") will run on later versions of x86 arches, say Pentium 4. But it
+won't run on older version of x86 CPUs such as P5. I686 is chosen because the
+Linux kernel dropped support for P5 and older arches a long time ago(hence
+"-m32" target being P6). The same reasoning applies to other arches that the
+Heartbeat protocol defines.
 
 More on arch codes in [dev_notes](dev_notes.md).
 
@@ -707,16 +746,316 @@ distinguish the ABI of executables in the future.
 ## Sessions
 All messages must start with a message header frame. The op code dictates the
 type of the next frame. Some op codes define no next header nor following
-messages. In this case the message header could be the only frame that appears
+messages. In this case the initial message header is the only frame that appears
 in the session.
 
-A new session is initiated by the authoritive host sending a message with a new
-message id(randomly generated) and the I flag set.
+A new session is initiated when the authoritive host sends a message with a new
+message id(randomly generated) and the I flag set. The hosts exchange messages
+until the session is concluded.
 
-TODO
+### No Operation
+```
+     ┌─┐          ┌─┐
+     │A│          │B│
+     └┬┘          └┬┘
+      │+0x00 NOOP  │
+      │───────────>│
+      │            │
+      │ 0x00 NOOP  │
+      │<─ ─ ─ ─ ─ ─│
+     ┌┴┐          ┌┴┐
+     │A│          │B│
+     └─┘          └─┘
+```
+
+The No Operation is a special session used to perform "are you there"(AYT)
+enquiry. It can be used by any host to check the health of the live TLS
+connection. It can also be used to keep the connection alive for long-lived
+sessions like Execute/Execute Binary sessions.
+
+### Host Info Session
+```
+     ┌─┐             ┌─┐
+     │A│             │S│
+     └┬┘             └┬┘
+      │  +HOST_INFO   │
+      │──────────────>│
+      │               │
+      │  HOST_INFO    │
+      │<─ ─ ─ ─ ─ ─ ─ │
+      │               │
+      │Hostinfo Frame │
+      │<─ ─ ─ ─ ─ ─ ─ │
+     ┌┴┐             ┌┴┐
+     │A│             │S│
+     └─┘             └─┘
+```
+
+The Host Info session is initiated by the authoritive host to query the
+information of the submissive end(the instance). The possible response from the
+submissive end can be following.
+
+* A message w/ op code set to HOST_INFO and Hostinfo as next frame
+* A message w/ op code set to STATUS and STATUS as next frame
+  * Code UNIMPL if the submissive host does not implement the processing of Host
+    Info requests
+  * Code ERRNO if an internal error has occurred on the submissive host whilst
+    processing the request. Err field is set to the errno returned
+
+### Hand-over Session
+```
+     ┌─┐             ┌─┐
+     │A│             │S│
+     └┬┘             └┬┘
+      │    +HOVER     │
+      │──────────────>│
+      │               │
+      │Handover Frame │
+      │──────────────>│
+      │               │
+      │               ────┐
+      │                   │ queue request
+      │               <───┘
+      │               │
+      │    STATUS     │
+      │<─ ─ ─ ─ ─ ─ ─ │
+      │               │
+      │ Status Frame  │
+      │<─ ─ ─ ─ ─ ─ ─ │
+     ┌┴┐             ┌┴┐
+     │A│             │S│
+     └─┘             └─┘
+```
+
+The Hand-over session is initiated by the authoritive host when furthur the
+subsmissive host should request further instructions from another authroitive
+host. The request is served in the background and the connection continues. The
+possible status response:
+
+* OK if the request is queued successfully
+* UNIMPL if the submissive host does not implement the request
+* LIMIT if the maximum number of redirection is reached
+* ERRNO for syscall errors except ...
+  * EAGAIN if the request queue reached the maximum size
+
+If the thread processing the request receives another Hand-over session sent by
+another authoritive host, the thread increments the internal counter to enforce
+the "redirection limit".
+
+When the submissive host establishes a TLS connection to another authoritive
+host, the submissive host is required to initiate a Solicit session to request
+furthur instructions. Note that this is where the hosts switch places in the TLS
+connection - the authoritive host becomes the server and the submissive host
+client.
+
+### Solicit Session
+```
+     ┌─┐          ┌─┐
+     │S│          │A│
+     └┬┘          └┬┘
+      │ +SOLICIT   │
+      │───────────>│
+     ┌┴┐          ┌┴┐
+     │S│          │A│
+     └─┘          └─┘
+```
+
+The Solicit session is initiated by the subissive host after establishing a TLS
+connection to another authoritive to carry out the Hand-over request. There is
+no next frame that follows the message.
+
+The authoritive host may choose to reuse the message id used for the request to
+initiate request to the submissive host. This is not a requirement and
+disregarding the message id in the Solicit message is not illegal.
+
+### Execute Session
+```
+     ┌─┐                          ┌─┐
+     │A│                          │S│
+     └┬┘                          └┬┘
+      │         +RUN_CMD           │
+      │───────────────────────────>│
+      │                            │
+      │       Command Frame        │
+      │───────────────────────────>│                │
+      │                            │                │
+      │                            │fork(), exec() ┌─┐
+      │                            │──────────────>│P│
+      │                            │               └┬┘
+      │          +STDIO            │                │
+      │───────────────────────────>│                │
+      │                            │                │
+      │        STDIO Frame         │                │
+      │───────────────────────────>│                │
+      │                            │                │
+      │        STDIO Data          │                │
+      │───────────────────────────>│                │
+      │                            │                │
+      │                            │  STDIO Data    │
+      │                            │───────────────>│
+      │                            │                │
+      │                            │  STDIO Data    │
+      │                            │<───────────────│
+      │                            │                │
+      │           STDIO            │                │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                │
+      │                            │                │
+      │        STDIO Frame         │                │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                │
+      │                            │                │
+      │        STDIO Data          │                │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                │
+      │                            │                │
+    ╔═╧════════════════════════════╧════════════════╧═╗
+    ║Repeat ...                                      ░║
+    ╚═╤════════════════════════════╤════════════════╤═╝
+      │          +STDIO            │                │
+      │───────────────────────────>│                │
+      │                            │                │
+      │  STDIO Frame len=0, fin    │                │
+      │───────────────────────────>│                │
+      │                            │                │
+      │                            │   STDIN EOF    │
+      │                            │───────────────>│
+      │                            │                │
+      │                            │  STDOUT EOF    │
+      │                            │<───────────────│
+      │                            │                │
+      │           STDIO            │                │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                │
+      │                            │                │
+      │  STDIO Frame len=0, fin    │                │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                │
+      │                            │                │
+      │                            │  STDERR EOF    │
+      │                            │<───────────────│
+      │                            │                │
+      │           STDIO            │                │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                │
+      │                            │                │
+      │STDIO Frame len=0, err, fin │                │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                │
+      │                            │                │
+      │                            │                │────┐
+      │                            │               \│/   │ exit()
+      │                            │                X<───┘
+      │                            │               /│\
+      │                            │   waitpid()    │
+      │                            │<──────────────>│
+      │                            │                │
+      │                            │        ╔═══════╧════════╗
+      │                            │        ║Process reaped ░║
+      │                            │        ╚═══════╤════════╝
+      │          Status            │                │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                │
+      │                            │                │
+      │       Status Frame         │                │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                │
+     ┌┴┐                          ┌┴┐              ┌┴┐
+     │A│                          │S│              │P│
+     └─┘                          └─┘              └─┘
+```
+
+The Execute session is used to do exec() on the submissive host, similar to the
+`system()` function. A Command frame is used to specify arguments to exec()
+function. The first string in the *args* field must be the absolute path to an
+executable on the host as per the usage of exec().
+
+STDIO messages are used to transfer standard input and output data from and to
+the child process. The authoritive host should send a STDIO frame with fin flag
+so that `read()` on the standard input returns EOF in the child process. The
+submissive host must notify the authoritive host with STDIO frames with fin flag
+when the child process closes its standard output and standard error. Once both
+outputs reached EOF, the submissive host reaps the child process to retrieve the
+exit code, which is then sent over a Status frame to the authoritive host.
+
+If an error occurs during the process, the submissive host will skip to sending
+a status frame with errno. The authoritive host shouldn't expect and send
+furthur STDIO messages. The submissive host may skip to sending a Status frame
+with UNIMPL if it does not implement Execute sessions.
 
 ### Binary Upgrade Session
-TODO
+```
+     ┌─┐                   ┌─┐
+     │A│                   │S│
+     └┬┘                   └┬┘
+      │      +UP_BIN        │
+      │────────────────────>│
+      │                     │
+      │ Binary Meta Frame   │
+      │────────────────────>│
+      │                     │
+      │                     ────┐
+      │                         │ open() tmpfile
+      │                     <───┘
+      │                     │
+      │       +STDIO        │
+      │────────────────────>│
+      │                     │
+      │    STDIO Frame      │
+      │────────────────────>│
+      │                     │
+      │    Binary Data      │
+      │────────────────────>│
+      │                     │
+      │                     ────┐
+      │                         │ write()
+      │                     <───┘
+      │                     │
+      │       +STDIO        │
+      │────────────────────>│
+      │                     │
+      │    STDIO Frame      │
+      │────────────────────>│
+      │                     │
+      │    Binary Data      │
+      │────────────────────>│
+      │                     │
+      │                     ────┐
+      │                         │ write()
+      │                     <───┘
+      │                     │
+    ╔═╧═════════════════════╧═╗
+    ║Repeat ...              ░║
+    ╚═╤═════════════════════╤═╝
+      │       +STDIO        │
+      │────────────────────>│
+      │                     │
+      │  STDIO Frame, fin   │
+      │────────────────────>│
+      │                     │
+      │                     ────┐
+      │                         │ close(), rename()
+      │                     <───┘
+      │                     │
+      │       Status        │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
+      │                     │
+     \│/   Status Frame     │
+      X<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
+     /│\                    │
+      │Terminate connection │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
+      │                     │
+      │                     ────┐
+      │                         │ clean up, exec()
+      │                     <───┘
+     ┌┴┐                   ┌┴┐
+     │A│                   │S│
+     └─┘                   └─┘
+```
+
+The Binary Upgrade session is used to replace the executable of a Proone
+instance. The instance will simply change the image of its process to the new
+executable using `exec()`. The Binary Meta frame contains the arguments to the
+`exec()` syscall which are honoured by the submissive host. STDIO frames are
+used for data transfer. The format of the new executable can be any format
+recognised by the host kernel(ELF or #! if the kernel supports it). The
+authoritive host is responsible for providing the suitable executable for the
+submissive host. Usually, the Host Info is queried to prepare the right
+executable for the host. The Status frame is used to deliver the result of the
+data tranfer. In the event of an error, the submissive host does not wait for
+the data transfer to finish before sending the Status frame.
 
 Upon successful upload, the Proone instance will attempt to `exec()` to the
 binary from the parent process. In the event of failure, Proone will continue to
@@ -724,8 +1063,205 @@ function with the existing binary. The only way to check the result of the
 operation is by reestablishing the connection to the Proone instance and
 querying the version of the binary through `PRNE_HTBT_OP_HOST_INFO` request.
 
+### Execute Binary Session
+```
+     ┌─┐                          ┌─┐
+     │A│                          │S│
+     └┬┘                          └┬┘
+      │         +RUN_BIN           │
+      │───────────────────────────>│
+      │                            │
+      │     Binary Meta Frame      │
+      │───────────────────────────>│
+      │                            │
+      │                            ────┐
+      │                                │ open() tmpfile
+      │                            <───┘
+      │                            │
+      │          +STDIO            │
+      │───────────────────────────>│
+      │                            │
+      │        STDIO Frame         │
+      │───────────────────────────>│
+      │                            │
+      │        Binary Data         │
+      │───────────────────────────>│
+      │                            │
+      │                            ────┐
+      │                                │ write()
+      │                            <───┘
+      │                            │
+      │          +STDIO            │
+      │───────────────────────────>│
+      │                            │
+      │        STDIO Frame         │
+      │───────────────────────────>│
+      │                            │
+      │        Binary Data         │
+      │───────────────────────────>│
+      │                            │
+      │                            ────┐
+      │                                │ write()
+      │                            <───┘
+      │                            │
+    ╔═╧════════════════════════════╧═════════════════════╗
+    ║Repeat ...                                         ░║
+    ╚═╤════════════════════════════╤═════════════════════╝
+      │          +STDIO            │
+      │───────────────────────────>│
+      │                            │
+      │     STDIO Frame, fin       │
+      │───────────────────────────>│
+      │                            │
+      │                            ────┐
+      │                                │ close()
+      │                            <───┘               │
+      │                            │                   │
+      │                            │ fork(), exec()   ┌─┐
+      │                            │────────────────> │P│
+      │                            │                  └┬┘
+      │          +STDIO            │                   │
+      │───────────────────────────>│                   │
+      │                            │                   │
+      │        STDIO Frame         │                   │
+      │───────────────────────────>│                   │
+      │                            │                   │
+      │        STDIO Data          │                   │
+      │───────────────────────────>│                   │
+      │                            │                   │
+      │                            │    STDIO Data     │
+      │                            │──────────────────>│
+      │                            │                   │
+      │                            │    STDIO Data     │
+      │                            │<──────────────────│
+      │                            │                   │
+      │           STDIO            │                   │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                   │
+      │                            │                   │
+      │        STDIO Frame         │                   │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                   │
+      │                            │                   │
+      │        STDIO Data          │                   │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                   │
+      │                            │                   │
+    ╔═╧════════════════════════════╧═══════════════════╧═╗
+    ║Repeat ...                                         ░║
+    ╚═╤════════════════════════════╤═══════════════════╤═╝
+      │          +STDIO            │                   │
+      │───────────────────────────>│                   │
+      │                            │                   │
+      │  STDIO Frame len=0, fin    │                   │
+      │───────────────────────────>│                   │
+      │                            │                   │
+      │                            │    STDIN EOF      │
+      │                            │──────────────────>│
+      │                            │                   │
+      │                            │    STDOUT EOF     │
+      │                            │<──────────────────│
+      │                            │                   │
+      │           STDIO            │                   │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                   │
+      │                            │                   │
+      │  STDIO Frame len=0, fin    │                   │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                   │
+      │                            │                   │
+      │                            │    STDERR EOF     │
+      │                            │<──────────────────│
+      │                            │                   │
+      │           STDIO            │                   │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                   │
+      │                            │                   │
+      │STDIO Frame len=0, err, fin │                   │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                   │
+      │                            │                   │
+      │                            │                   ────┐
+      │                            │                  \ /  │ exit()
+      │                            │                   X───┘
+      │                            │                  /│\
+      │                            │    waitpid()      │
+      │                            │<─────────────────>│
+      │                            │                   │
+      │                            │           ╔═══════╧════════╗
+      │                            │           ║Process reaped ░║
+      │                            │           ╚═══════╤════════╝
+      │          Status            │                   │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                   │
+      │                            │                   │
+      │       Status Frame         │                   │
+      │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                   │
+     ┌┴┐                          ┌┴┐                 ┌┴┐
+     │A│                          │S│                 │P│
+     └─┘                          └─┘                 └─┘
+```
+
+The Execute Binary session is used to execute an arbitrary executable on the
+host. It's an extension of the Execute session with the extra step of binary
+transmission. Refer to the description of the Binary Upgrade and Execute
+sessions.
+
+### Binary Recombination Session
+```
+     ┌─┐               ┌─┐
+     │A│               │S│
+     └┬┘               └┬┘
+      │      +RCB       │
+      │────────────────>│
+      │                 │
+      │   RCB Frame     │
+      │────────────────>│
+      │                 │
+      │     STDIO       │
+      │<─ ─ ─ ─ ─ ─ ─ ─ │
+      │                 │
+      │  STDIO Frame    │
+      │<─ ─ ─ ─ ─ ─ ─ ─ │
+      │                 │
+      │   STDIO Data    │
+      │<─ ─ ─ ─ ─ ─ ─ ─ │
+      │                 │
+      │     STDIO       │
+      │<─ ─ ─ ─ ─ ─ ─ ─ │
+      │                 │
+      │  STDIO Frame    │
+      │<─ ─ ─ ─ ─ ─ ─ ─ │
+      │                 │
+      │   STDIO Data    │
+      │<─ ─ ─ ─ ─ ─ ─ ─ │
+      │                 │
+    ╔═╧═════════════════╧═╗
+    ║Repeat ...          ░║
+    ╚═╤═════════════════╤═╝
+      │     STDIO       │
+      │<─ ─ ─ ─ ─ ─ ─ ─ │
+      │                 │
+      │STDIO Frame, fin │
+      │<─ ─ ─ ─ ─ ─ ─ ─ │
+     ┌┴┐               ┌┴┐
+     │A│               │S│
+     └─┘               └─┘
+```
+
+The Binary Recombination session is used to initiate binary recombination of
+Proone. It is mainly used by the Proone instances for M2M binary upgrade. The
+submissive host can send a Status message to report an error at any point of the
+session. The Status message is then the final message that concludes the
+session.
+
 ## Protocol Error
+The protocol error is reported using a Status message. The status code PROTO_ERR
+is used. If the error is encountered in mid-session, the message id for the
+session is used for the Status mesage. Otherwise, the special message id 0x7FFF
+is used.
 
+A protocol error is raised when
 
-[^1]: This can be done by doing `fork()` again from the child process and then
+* The serialisation function returns FMT_ERR
+* An unexpected op code for the session is encountered
+
+## Footnotes
+[^1]: This is to avoid the use of the null device because the `/dev` pseudo file
+      system can be disabled on Linux. Use the host shell directly to run binary
+      or command that cannot be "shushed"
+
+[^2]: This can be done by doing `fork()` again from the child process and then
       calling `setsid()`

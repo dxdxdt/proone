@@ -1,0 +1,16 @@
+@startuml rcb-seq
+"A"  -> "S": +RCB
+"A"  -> "S": RCB Frame
+
+"S" --> "A": STDIO
+"S" --> "A": STDIO Frame
+"S" --> "A": STDIO Data
+"S" --> "A": STDIO
+"S" --> "A": STDIO Frame
+"S" --> "A": STDIO Data
+
+Note across: Repeat ...
+
+"S" --> "A": STDIO
+"S" --> "A": STDIO Frame, fin
+@enduml

@@ -1,0 +1,23 @@
+@startuml upbin-seq
+"A"  -> "S": +UP_BIN
+"A"  -> "S": Binary Meta Frame
+"S"  -> "S": open() tmpfile
+"A"  -> "S": +STDIO
+"A"  -> "S": STDIO Frame
+"A"  -> "S": Binary Data
+"S"  -> "S": write()
+"A"  -> "S": +STDIO
+"A"  -> "S": STDIO Frame
+"A"  -> "S": Binary Data
+"S"  -> "S": write()
+Note across: Repeat ...
+"A"  -> "S": +STDIO
+"A"  -> "S": STDIO Frame, fin
+"S"  -> "S": close(), rename()
+
+"S" --> "A": Status
+"S" --> "A": Status Frame
+"S" --> "A" !!: Terminate connection
+
+"S"  -> "S": clean up, exec()
+@enduml

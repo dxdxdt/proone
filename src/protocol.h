@@ -344,8 +344,8 @@ typedef prne_htbt_ser_rc_t(*prne_htbt_dser_ft)(
 
 #define PRNE_HTBT_TLS_ALP			"prne-htbt"
 #define PRNE_HTBT_MSG_ID_MIN		1
-#define PRNE_HTBT_MSG_ID_MAX		INT16_MAX
-#define PRNE_HTBT_MSG_ID_DELTA		INT16_MAX
+#define PRNE_HTBT_MSG_ID_DELTA		(INT16_MAX - 1)
+#define PRNE_HTBT_MSG_ID_NOTIFY		INT16_MAX
 #define PRNE_HTBT_PROTO_PORT		64420
 // _POSIX_ARG_MAX equiv
 #define PRNE_HTBT_ARGS_MAX			255

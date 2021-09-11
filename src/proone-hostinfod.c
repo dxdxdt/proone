@@ -1414,6 +1414,12 @@ END: // CATCH
 	return ret;
 }
 
+static uint16_t gen_msgid (void *ctx) {
+	uint16_t ret = PRNE_HTBT_MSG_ID_MIN;
+	prne_rnd((prne_rnd_t*)ctx, (uint8_t*)&ret, sizeof(ret));
+	return ret;
+}
+
 static int proc_client_stream (th_ctx_t *ctx, client_ctx_t *c) {
 	prne_htbt_msg_head_t mh;
 	prne_htbt_ser_rc_t src;
@@ -1444,10 +1450,7 @@ static int proc_client_stream (th_ctx_t *ctx, client_ctx_t *c) {
 		}
 
 		mh.op = PRNE_HTBT_OP_HOST_INFO;
-		prne_rnd(&ctx->rnd, (uint8_t*)&mh.id, sizeof(mh.id));
-		mh.id =
-			PRNE_HTBT_MSG_ID_MIN +
-			((mh.id % PRNE_HTBT_MSG_ID_MAX) - PRNE_HTBT_MSG_ID_MIN);
+		mh.id = prne_htbt_gen_msgid(&ctx->rnd, gen_msgid);
 
 		prne_htbt_ser_msg_head(NULL, 0, &actual, &mh);
 		if (prne_alloc_iobuf(c->ib + 1, actual)) {

@@ -826,11 +826,12 @@ static bool htbt_slv_recv_mh (
 	const bool mid,
 	pth_event_t ev)
 {
+	static const uint16_t ERR_MSGID = PRNE_HTBT_MSG_ID_NOTIFY;
 	bool ret = htbt_slv_recv_frame(
 		ctx,
 		mh,
 		(prne_htbt_dser_ft)prne_htbt_dser_msg_head,
-		corr_id,
+		&ERR_MSGID,
 		mid,
 		ev);
 
@@ -2196,25 +2197,26 @@ static bool htbt_main_slv_loopchk_f (void *ioctx) {
 	return ctx->parent->loop_flag;
 }
 
+static uint16_t htbt_main_gen_msgid (void *ctx) {
+	uint16_t ret = PRNE_HTBT_MSG_ID_MIN;
+	mbedtls_ctr_drbg_random(
+		(mbedtls_ctr_drbg_context*)ctx,
+		(unsigned char *)&ret,
+		sizeof(ret));
+	return ret;
+}
+
 static bool htbt_main_slv_setup_f (void *ioctx, pth_event_t ev) {
 	htbt_main_client_t *ctx = (htbt_main_client_t*)ioctx;
 	bool ret = true;
 	size_t actual;
 	prne_htbt_msg_head_t mh;
-	int f_ret;
 
 	prne_htbt_init_msg_head(&mh);
 
-	f_ret = mbedtls_ctr_drbg_random(
+	mh.id = prne_htbt_gen_msgid(
 		ctx->parent->param.ctr_drbg,
-		(unsigned char *)&mh.id,
-		sizeof(mh.id));
-	if (f_ret == 0) {
-		mh.id = (mh.id % PRNE_HTBT_MSG_ID_DELTA) + PRNE_HTBT_MSG_ID_MIN;
-	}
-	else {
-		mh.id = PRNE_HTBT_MSG_ID_MIN;
-	}
+		htbt_main_gen_msgid);
 	mh.is_rsp = false;
 	mh.op = PRNE_HTBT_OP_SOLICIT;
 	prne_htbt_ser_msg_head(NULL, 0, &actual, &mh);

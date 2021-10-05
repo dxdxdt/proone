@@ -30,8 +30,6 @@ indicates the end of the session.
 The framinig protocol is designed so that multiple sessions can be pipelined
 into a single TCP/IP connection or a DNS TXT record stream.
 
-
-
 ## Other Characteristics
 * Heartbeat Protocol is a big-endian protocol
 * Frames are not aligned to minimise "packet footprint"
@@ -59,6 +57,48 @@ base64 because most DNS management software do not accept binary data for the
 value of TXT records. The
 spec([rfc1035](https://datatracker.ietf.org/doc/html/rfc1035#section-3.3) does
 not impose such restriction.
+
+The subthread called "CNC probe worker(CNCP)" of the heartbeat worker runs CNC
+instructions by querying the CNC TXT REC periodically. The interval is hardcoded
+to 1800±1800 seconds. The value of the header record is configured with the
+macro `PRNE_CNC_TXT_REC` and defined as:
+
+```re
+([0-9a-fA-F]{8})(.*)
+```
+
+The first capture group is the number of the data records in hexadecimal with
+leading zeros. The second capture group is the suffix of the data records.
+The name of data TXT records can be constructed like so:
+
+```c
+for (uint32_t i = 0; i < nb_rec; i += 1) {
+    printf("%08X%s", i, suffix);
+}
+```
+
+Where
+
+* *nb_rec* is the number of the data records
+* *suffix* is the suffix of the data records
+
+The CNCP worker will query the data records sequentially from 0th record to get
+the base64 encoded binary data. The stream of base64 data is then decoded and
+fed into a submissive heartbeat context for process.
+
+For example, if the value of the header record is `00000003.cnc.test`, the
+following series of data records are queried.
+
+* `00000000.cnc.test`
+* `00000001.cnc.test`
+* `00000002.cnc.test`
+
+Note that the suffix does not have to start with a dot. And the records from
+different domains can be involved. For example, the name of the header record
+can be "cnc.mydomain.example" and the value "0000000F.otherdomain.example".
+Multiple values of the header record may be defined to achieve load balancing.
+However, a data record must have only 1 value otherwise the CNCP worker will
+regard it as a protocol error.
 
 Only public DNS servers which support DNS over TLS are used to counter lawful
 interception. The rationale behind this is that the DNS protocol is not

@@ -36,12 +36,12 @@ software is programmed to do something illegal! If you wish to use this
 software, please do so in a controlled environment safely isolated from the
 Internet.
 
-## Index of Documents
+## Index
 Where to go from here
 
 * [User Guide](doc/user_guide.md)
 * [Software Design Spec](doc/sws.md)
-* [Protocol Spec](doc/proto.md)
+* [Heartbeat Protocol Spec](doc/htbt.md)
 * [Dev Notes](doc/dev_notes.md)
 
 ## Subprojects

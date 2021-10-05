@@ -1,0 +1,34 @@
+@startuml proone
+package "Proone Instance" as prne_i {
+	[Main Thread]
+	component Heartbeat {
+		interface LBD
+		component CNCP
+		component "Main CTX" as htbt_main_ctx
+	}
+	component Resolv
+	component Recon
+	component "BNE Pool" as bne_pool {
+		[instance]
+	}
+
+	[CNCP] <-d-> [Resolv]: Queue TXT REC Query
+	[Recon] -> [Main Thread]: Event Callback
+	[Main Thread] -d-> [instance]: Spawn
+}
+
+cloud "Public DOT Nameservers" {
+	component "CNC TXT REC" as cnc_txt_rec
+}
+
+usecase "Heartbeat Auth Impl" as htbt_auth_impl
+usecase "Another Proone Instance" as a_prne_i
+usecase "Maintenance Tool" as mttool
+node "Victim Host" as victim_host
+
+[htbt_main_ctx] -> [htbt_auth_impl]: SOLICIT
+[cnc_txt_rec] <-> [Resolv]: Query TXT REC
+a_prne_i -d-> (LBD): M2M
+mttool -d-> (LBD): Maintenance Access
+[instance] -d-> victim_host: Infect
+@enduml

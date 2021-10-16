@@ -42,7 +42,12 @@ Where to go from here
 * [User Guide](doc/user_guide.md)
 * [Software Design Spec](doc/sws.md)
 * [Heartbeat Protocol Spec](doc/htbt.md)
+* [Proone Data Format Spec](doc/fmts.md)
 * [Dev Notes](doc/dev_notes.md)
 
 ## Subprojects
 * proone-xcomp: Infrastructure for building and testing cross-compiled builds (TODO)
+
+## Read Also
+* https://scholarship.law.tamu.edu/lawreview/vol3/iss3/9/
+* https://www.duo.uio.no/bitstream/handle/10852/22917/JeremyxLundex-xUiO-Thesis.pdf?sequence=1

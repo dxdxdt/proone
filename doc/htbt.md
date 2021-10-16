@@ -68,8 +68,8 @@ macro `PRNE_CNC_TXT_REC` and defined as:
 ```
 
 The first capture group is the number of the data records in hexadecimal with
-leading zeros. The second capture group is the suffix of the data records.
-The name of data TXT records can be constructed like so:
+leading zeroes. The second capture group is the suffix of the data records. The
+name of data TXT records can be constructed like so:
 
 ```c
 for (uint32_t i = 0; i < nb_rec; i += 1) {
@@ -441,10 +441,14 @@ instance runs as a daemon. **child_pid** is the process id of the child process.
 **arch** and **os** correspond to the value of `PRNE_HOST_ARCH`(CPU Architecture
 Code) and `PRNE_HOST_OS`(OS Code) value of the instance respectively.
 
-**hc** contains the credential used to break into the host. The data could be
-empty(*hc_len* is zero and there's no *hc* after the fixed-length part of the
-frame) since hosts can be breached by means other than brute foce login attacks.
-The format of the data is specified in the [separate document](fmts.md).
+**hc** contains the credential used to break into the host. The field is merely
+the user name string and the password string combined together in that order.
+The credential data can be used after being validated by searching for two
+zeroes, the last of which is at the end of the data, to prevent buffer overflow.
+This data is non-existent(*hc_len* is zero and there's no *hc* after the
+fixed-length part of the frame) if the host has been breached by means other
+than brute foce login attacks.
+
 
 **bf** contains the flag bits to describe the attributes of the instance. The
 bits used are specified in the following section.

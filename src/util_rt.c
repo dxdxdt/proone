@@ -151,6 +151,19 @@ char *prne_redup_str (char *old, const char *str) {
 	return ret;
 }
 
+void prne_sfree_str (char *s) {
+	char *p;
+
+	if (s == NULL) {
+		return;
+	}
+
+	for (p = s; *p != 0; p += 1) {
+		*p = 0;
+	}
+	prne_free(s);
+}
+
 void prne_free (void *ptr) {
 	free(ptr);
 }

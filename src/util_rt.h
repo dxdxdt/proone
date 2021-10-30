@@ -51,6 +51,7 @@ char *prne_alloc_str (const size_t len);
 char *prne_realloc_str (char *old, const size_t len);
 char *prne_dup_str (const char *str);
 char *prne_redup_str (char *old, const char *str);
+void prne_sfree_str (char *s);
 void prne_free (void *ptr);
 size_t prne_getpagesize (void);
 

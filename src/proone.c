@@ -1335,7 +1335,7 @@ static void bne_cb_exit_dd (void *ctx) {
 static uint64_t bne_cb_uptime (void *ctx) {
 	return prne_sub_timespec(
 		prne_gettime(CLOCK_MONOTONIC),
-		prne_g.child_start).tv_sec;
+		prne_g.parent_start).tv_sec;
 }
 
 static int bne_cb_vercmp (void *ctx, const uint8_t *uuid) {

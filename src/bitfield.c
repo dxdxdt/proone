@@ -43,6 +43,7 @@ bool prne_bf_test (
 	const unsigned int s = bit - p * 8;
 
 	if (size <= p) {
+		// treat unset if the index is out of bounds
 		return false;
 	}
 

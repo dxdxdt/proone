@@ -2647,7 +2647,7 @@ static bool rcb_open_outfile (void) {
 
 		prog_g.cmd_st.rcb.fd = open(
 			prog_conf.cmd_param.rcb.out_path,
-			O_CREAT | O_TRUNC | O_WRONLY,
+			O_CREAT | O_TRUNC | O_WRONLY | O_EXCL,
 			0755);
 		if (prog_g.cmd_st.rcb.fd < 0) {
 			perror(prog_conf.cmd_param.rcb.out_path);

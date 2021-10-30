@@ -1638,7 +1638,7 @@ static bool htbt_slv_srv_bin (
 	errno = 0;
 	fd = ctx->cbset->tmpfile(
 		ctx->cb_ctx,
-		O_CREAT | O_TRUNC | O_WRONLY,
+		O_CREAT | O_TRUNC | O_WRONLY | O_EXCL,
 		0700,
 		bin_meta.alloc_len,
 		&path);

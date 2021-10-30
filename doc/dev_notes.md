@@ -152,22 +152,6 @@ But doing exec() from the main process seemed as an acceptable risk becuase the
 host doesn't have to maintain both old and new images this way. Memory is a
 scarce commodity on embedded devices!
 
-### Tmpfile Race Condition
-From *mktemp(3)*:
-
-> Never  use  mktemp().   Some  implementations  follow 4.3BSD and replace
-XXXXXX by the current process ID and a single letter, so that at most 26
-different names can be returned.  Since  on the  one hand the names are easy to
-guess, and on the other hand there is a race between test‐ ing whether the name
-exists and opening the file, every use of mktemp() is  a  security  risk. The
-race is avoided by mkstemp(3) and mkdtemp(3).
-
-The same issue exists in the way the instance creates and uses temp files. The
-workers create temp files using callback functions. The temp files are returned
-as paths, not as open file descriptors. This is a design flaw. If Prone were
-fully fledged commercial software, this flaw would have been a serious
-vulnerability.
-
 ## Notes on Arch
 For ARM, the codes are assigned for arches with major changes as per the
 "industry standard". ARMV4T is the first and oldest Linux suppports. The thumb

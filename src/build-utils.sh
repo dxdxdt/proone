@@ -1,4 +1,11 @@
 #!/bin/bash
+## \file
+# \brief Convenience shell functions for fabrication of Proone executables
+# \param 1 The subcommand. One of align-size, align-file, append-uint32 or
+# 	append-uint16
+# \param 2 or greator: arguments to the subcommand.
+# \note These shell functions are used in the Automake recipe to facilitate
+#	extra unconventional steps to build Proone executables.
 
 # Copyright (c) 2019-2021 David Timber <mieabby@gmail.com>
 #
@@ -20,6 +27,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+##
+# \brief Align size x to y
+# \param 1 The alignment.
+# \param 2 The size to align.
+# \return The aligned size.
 cmd_align-size () {
 	local aligned
 
@@ -40,6 +52,10 @@ cmd_align-size () {
 	return 0
 }
 
+##
+# \brief Align the size of the file using truncate
+# \param 1 The alignment.
+# \param 2 The path to the file to align.
 cmd_align-file () {
 	if [ $# -lt 2 ]; then
 		echo "Usage: $0 <alignment> <file>" >&2
@@ -49,6 +65,10 @@ cmd_align-file () {
 	truncate -s $("$SELF" align-size "$1" $(stat -c "%s" $2)) "$2"
 }
 
+##
+# \brief Append a 32-bit unsigned integer to the file, MSB first
+# \param 1 The integer value to append
+# \param 2 The file to append the integer to
 cmd_append-uint32 () {
 	local a b c d
 
@@ -68,6 +88,10 @@ cmd_append-uint32 () {
 	printf "\\x$a\\x$b\\x$c\\x$d" >> "$2"
 }
 
+##
+# \brief Append a 16-bit unsigned integer to the file, MSB first
+# \param 1 The integer value to append
+# \param 2 The file to append the integer to
 cmd_append-uint16 () {
 	local a b
 

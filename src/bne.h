@@ -113,7 +113,7 @@ struct prne_bne_param {
 		 * \brief The destination file name of the Proone executable (required)
 		 * \param ctx \c cb_ctx
 		 * \return A pointer to a null-terminated string.
-		 * \return Return null to indicate an unsuccessful operation. \c errno
+		 * \retval Null to indicate an unsuccessful operation. \c errno
 		 * 	should be set to an appropriate value.
 		 *
 		 * \note The returned memory must be writable and freeable with
@@ -129,10 +129,10 @@ struct prne_bne_param {
 		 * \brief The name of the upload lock file (optional)
 		 * \param ctx \c cb_ctx
 		 * \return A pointer to a null-terminated string.
-		 * \return Set \c errno to an appropriate value and return null to
-		 * 	indicate an unsuccessful operation.
-		 * \return Set \c errno to zero and return null to disable the use of
-		 * 	lock file.
+		 * \retval Null to indicate an unsuccessful operation with \c errno set
+		 * 	to an appropriate value.
+		 * \retval Null to disable the use of the lock file with \c errno set to
+		 * 	zero.
 		 *
 		 * \note The returned memory must be writable and freeable with
 		 * 	\c prne_free() The worker scrubs the string and frees it immediately
@@ -151,9 +151,9 @@ struct prne_bne_param {
 		/**
 		 * \brief Enter data dictionary callback (optional)
 		 * \param ctx \c cb_ctx
-		 * \return False if unable to enter the data dictionary. \c errno must
-		 * 	be set to an appropriate value.
-		 * \return True otherwise.
+		 * \retval False if unable to enter the data dictionary with \c errno
+		 * 	set to an appropriate value.
+		 * \retval True otherwise.
 		 *
 		 * \note \c exit_dd() is guaranteed to be invoked if returned true.
 		 * \note The function must always return true if \c cred_dict does not
@@ -182,7 +182,7 @@ struct prne_bne_param {
 		 * \brief Process uptime enquiry callback (optional)
 		 * \param ctx \c cb_ctx
 		 * \return The elapsed real time of the parent process in seconds.
-		 * \return \c UINT64_MAX to disable the uptime check for M2M binary
+		 * \retval \c UINT64_MAX to disable the uptime check for M2M binary
 		 * 	upgrade of the local instance or if process uptime information is
 		 * 	unavailable.
 		 * \see \c BNE_M2M_UPBIN_INT
@@ -197,10 +197,10 @@ struct prne_bne_param {
 		 * \brief Proone version comparator callback (optional)
 		 * \param ctx \c cb_ctx
 		 * \param uuid The version uuid of the remote instance.
-		 * \return A negative integer if \p uuid is newer than that of the local
+		 * \retval A negative integer if \p uuid is newer than that of the local
 		 * 	instance.
-		 * \return Zero if \p uuid is identical to that of the local instance.
-		 * \return A positive integer if \p uuid is older than that of the local
+		 * \retval Zero if \p uuid is identical to that of the local instance.
+		 * \retval A positive integer if \p uuid is older than that of the local
 		 * 	instance.
 		 *
 		 * \note Always returning zero effectively disables M2M binary upgrade.
@@ -224,8 +224,7 @@ struct prne_bne_param {
 		 * 	\c prne_free()
 		 * \return An open and valid file descriptor upon successful creation of
 		 * 	temporary file.
-		 * \return A negative integer otherwise. \c errno must be set to an
-		 * 	appropriate value.
+		 * \retval A negative integer with \c errno set to an appropriate value.
 		 *
 		 * \note
 		 * This is the callback function that the worker uses to create
@@ -249,9 +248,10 @@ struct prne_bne_param {
 		 * \param path The path to the new executable.
 		 * \param cmd The command line arguments without the first element,
 		 * 	which is the path to the executable.
-		 * \return True if the new executable is accepted and no error has
-		 * 	occurred during the process. False otherwise. \c errno may be set to
-		 * 	explain why the executable has not been accepted.
+		 * \retval True if the new executable is accepted and no error has
+		 * 	occurred during the process.
+		 * \retval False otherwise with \c errno set to explain why the
+		 * executable has not been accepted.
 		 *
 		 * \note
 		 * This function is called by the worker upon the successful download of
@@ -323,15 +323,17 @@ struct prne_bne_result {
  */
 void prne_init_bne_param (prne_bne_param_t *p);
 /**
- * \brief Free the resources allocated for the BNE worker parameter object.
+ * \brief Free the resources allocated for the BNE worker parameter object
  * \param p The pointer to the object that has been initialised using
  * 	\c prne_init_bne_param()
  */
 void prne_free_bne_param (prne_bne_param_t *p);
 
 /**
- * \brief Convert the enum value to a string describing the enum value
+ * \brief Convert the enum value to a descriptive string
  * \return A pointer to the string from the read-only static string pool.
+ * \retval Null if \p v is out of bounds of the valid range with \c errno set to
+ * 	\c EINVAL
  */
 const char *prne_bne_vector_tostr (const prne_bne_vector_t v);
 

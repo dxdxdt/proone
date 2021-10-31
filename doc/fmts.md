@@ -36,11 +36,10 @@ Where
 | offset_n     | 16-bit unsigned integer offset to start of a data entry       |
 | data_entries | series of data entries                                        |
 
-**mask key** is 256-octet long mask key for masking *data* as a whole. It is
-randomly generated for each build(i.e. each time proone-mkdvault is invoked).
-**offset_***n* is an offset to the start of the *n*th data entry.
-**data_entries** is a series of data entries. The format of a data entry is
-described blow.
+**mask key** is 256-octet long mask key for masking. It is randomly generated
+for each build(i.e. each time proone-mkdvault is invoked). **offset_***n* is an
+offset to the start of the *n*th data entry. **data_entries** is a series of
+data entries. The format of a data entry is described blow.
 
 ```
     0                   1                   2                   3
@@ -67,8 +66,8 @@ the data type of the entry data. The definition of the values is described blow.
 | CSTR  | 0x00  | 8-bit narrow character string (UTF-8)                        |
 | BIN   | 0x02  | binary data in octet units                                   |
 
-Entry data is masked so that it can be accessed and unmasked randomly and
-possibly in parallel.
+All the fields excluding *salt* are kept masked. Entry data is masked so that it
+can be accessed and unmasked randomly and possibly in parallel.
 
 ```c
 for (size_t i = 0; i < size; i += 1) {
@@ -83,14 +82,14 @@ Where
 * mask: the mask key - the 256-elements-long array of 8-bit unsigned integers
 * salt: the 8-bit unsigned integer salt value
 
-As evident from the algorithm shown above, the salt value simply acts as a
-offset to the start of the mask key for the entry. In order to unmask an entry,
-the *data_size* field must be unmasked first to determine the length of the
-data. Once the length of the data is unmasked, the data part of the masked entry
-data can be unmasked using the same algorithm again. When the unmasked data
-entry is referenced and no longer needed, the entirety of the data must be
-masked back to the original form so that the data entries are kept obsecure in
-memory. This should be done immediately by calling `prne_dvault_reset()`.
+The salt value simply acts as a offset to the start of the mask key for the
+entry. In order to unmask an entry, the *data_size* field must be unmasked first
+to determine the length of the data. Once the length of the data is unmasked,
+the data part of the masked entry data can be unmasked using the same algorithm.
+When the unmasked data entry is referenced and no longer needed, the entirety of
+the data must be masked back to the original form so that the data entries are
+kept obsecure in memory. This should be done immediately by calling
+`prne_dvault_reset()`.
 
 Note that the total length of entries can be up to **around** 65,535 octets
 because offsets are represented in 16-bit unsigned integer values. Since DVault

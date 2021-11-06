@@ -252,7 +252,7 @@ static bool cb_upbin (
 	return true;
 }
 
-static bool cb_fork (void *ctx) {
+static bool cb_fork_child (void *ctx) {
 	sigset_t ss;
 
 	sigfillset(&ss);
@@ -282,7 +282,7 @@ static void alloc_htbt (void) {
 	param.cb_f.hostinfo = cb_htbt_hostinfo;
 	param.cb_f.tmpfile = cb_tmpfile;
 	param.cb_f.upbin = cb_upbin;
-	param.cb_f.fork = cb_fork;
+	param.cb_f.fork.child = cb_fork_child;
 	param.rcb = &prne_g.rcb_param;
 	param.blackhole = prne_g.blackhole[1];
 

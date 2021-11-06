@@ -107,6 +107,7 @@ cmd_append-uint16 () {
 	printf "\\x$a\\x$b" >> "$2"
 }
 
+# Invoke subcommand
 SELF="$0"
 cmd="$1"
 shift 1

@@ -239,7 +239,7 @@ combination. The format of combo lines is specified below.
 
 | Field    | Description                                                       |
 | -------- | ----------------------------------------------------------------- |
-| WEIGHT   | (required) weight value with range of 0 to 255                    |
+| WEIGHT   | (required) weight value in range \[0, 255\]                       |
 | USERNAME | (required) username string                                        |
 | PW       | (optional) password string                                        |
 

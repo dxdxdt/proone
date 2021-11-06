@@ -86,7 +86,9 @@ typedef enum prne_bne_vector prne_bne_vector_t;
 
 /**
  * \brief The BNE worker parameter object
- * \note The referenced objects must be valid until the worker is freed.
+ * \warning The referenced objects must be valid until the worker is freed.
+ * \see \c prne_init_bne_param()
+ * \see \c prne_free_bne_param()
  */
 struct prne_bne_param {
 	// The cred dict to use for brute force login (optional)
@@ -339,11 +341,11 @@ const char *prne_bne_vector_tostr (const prne_bne_vector_t v);
 
 /**
  * \brief Allocate and start an instance of the BNE worker
- * \param w A pointer to the pth worker object.
+ * \param w The pointer to the pth worker object.
  * \param ctr_drbg An instance of CTR DRBG for initialising internal PRNGs.
- * \param param A pointer to the BNE worker parameter object.
- * \return A pointer to the new instance of the BNE worker. A null pointer
- * 	on error.
+ * \param param The pointer to the BNE worker parameter object.
+ * \return The pointer to the new instance of the BNE worker.
+ * \retval NULL on error with \c errno set.
  * \note The worker keeps its own copy of \p param. The memory used for \p param
  * 	can be freed after the function returns.
  * \note The thread can be controlled with \p w. The interruption of the worker,

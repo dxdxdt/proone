@@ -2238,7 +2238,8 @@ static bool htbt_main_slv_setup_f (void *ioctx, pth_event_t ev) {
 		&ctx->ssl,
 		mbedtls_ssl_handshake,
 		ctx->fd,
-		ev))
+		ev,
+		NULL))
 	{
 		ret = false;
 		goto END;
@@ -2272,7 +2273,8 @@ static void htbt_main_slv_cleanup_f (void *ioctx, pth_event_t ev) {
 		&ctx->ssl,
 		mbedtls_ssl_close_notify,
 		ctx->fd,
-		ev);
+		ev,
+		NULL);
 	shutdown(ctx->fd, SHUT_RDWR);
 }
 
@@ -2959,11 +2961,14 @@ static bool htbt_lbd_slv_loopchk_f (void *ioctx) {
 static bool htbt_lbd_slv_setup_f (void *ioctx, pth_event_t ev) {
 	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)ioctx;
 
-	return prne_mbedtls_pth_handle(
-		&ctx->ssl,
-		mbedtls_ssl_handshake,
-		ctx->fd,
-		ev) && prne_mbedtls_verify_alp(
+	return
+		prne_mbedtls_pth_handle(
+			&ctx->ssl,
+			mbedtls_ssl_handshake,
+			ctx->fd,
+			ev,
+			NULL) &&
+		prne_mbedtls_verify_alp(
 			ctx->parent->param.lbd_ssl_conf,
 			&ctx->ssl,
 			PRNE_HTBT_TLS_ALP);
@@ -2972,7 +2977,12 @@ static bool htbt_lbd_slv_setup_f (void *ioctx, pth_event_t ev) {
 static void htbt_lbd_slv_cleanup_f (void *ioctx, pth_event_t ev) {
 	htbt_lbd_client_t *ctx = (htbt_lbd_client_t*)ioctx;
 
-	prne_mbedtls_pth_handle(&ctx->ssl, mbedtls_ssl_close_notify, ctx->fd, ev);
+	prne_mbedtls_pth_handle(
+		&ctx->ssl,
+		mbedtls_ssl_close_notify,
+		ctx->fd,
+		ev,
+		NULL);
 	prne_shutdown(ctx->fd, SHUT_RDWR);
 }
 

@@ -2123,7 +2123,8 @@ static bool bne_vhtbt_do_handshake (
 			&vctx->ssl,
 			mbedtls_ssl_handshake,
 			vctx->fd,
-			*ev))
+			*ev,
+			NULL))
 	{
 		return false;
 	}
@@ -2771,7 +2772,8 @@ static bool bne_do_vec_htbt (prne_bne_t *ctx) {
 			&vctx.ssl,
 			mbedtls_ssl_close_notify,
 			vctx.fd,
-			ev))
+			ev,
+			NULL))
 	{
 		prne_shutdown(vctx.fd, SHUT_RDWR);
 	}

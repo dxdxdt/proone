@@ -560,7 +560,8 @@ static bool resolv_ensure_conn (prne_resolv_t *ctx) {
 			&ctx->ssl.ctx,
 			mbedtls_ssl_handshake,
 			ctx->act_sck_pfd.fd,
-			ev))
+			ev,
+			NULL))
 		{
 			if (pth_event_status(ev) != PTH_STATUS_OCCURRED) {
 				pth_event_free(ev, FALSE);
@@ -1325,7 +1326,8 @@ static void resolv_proc_close (prne_resolv_t *ctx) {
 		&ctx->ssl.ctx,
 		mbedtls_ssl_close_notify,
 		ctx->act_sck_pfd.fd,
-		ev);
+		ev,
+		NULL);
 	resolv_close_sck(ctx, ret ? NULL : &RESOLV_CONN_ERR_PAUSE, !ret);
 
 	pth_event_free(ev, FALSE);

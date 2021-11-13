@@ -69,7 +69,8 @@ void prne_free_imap (prne_imap_t *im);
  * \brief Clear the elements of the integer map object.
  * \param im The pointer to the integer map object.
  * \warning The function call may have the exact same effect as
- *	\c prne_free_imap() but \c prne_free_imap() must always be used.
+ *	\c prne_free_imap() but \c prne_free_imap() must always be used to free the
+ *	resources allocated for the object.
  */
 void prne_imap_clear (prne_imap_t *im);
 /**
@@ -79,6 +80,8 @@ void prne_imap_clear (prne_imap_t *im);
  * \param val The value of the new tuple.
  * \return The pointer to the new tuple allocated in the map. The pointer is
  *	valid as long as the map object remains unmodified.
+ * \retval NULL if a memory allocation has occurred and \c errno is set to
+ *	\c ENOMEM
  * \note Calling the function invalidates the pointers previously returned by
  *	other functions.
  */

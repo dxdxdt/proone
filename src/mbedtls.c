@@ -176,15 +176,19 @@ bool prne_mbedtls_pth_handle (
 	mbedtls_ssl_context *ssl,
 	int(*mbedtls_f)(mbedtls_ssl_context*),
 	const int fd,
-	pth_event_t ev)
+	pth_event_t ev,
+	int *f_ret_out)
 {
-	int pollret;
+	int f_ret;
+	bool ret;
 	struct pollfd pfd;
 
 	pfd.fd = fd;
 
 	while (true) {
-		switch (mbedtls_f(ssl)) {
+		f_ret = mbedtls_f(ssl);
+
+		switch (f_ret) {
 		case MBEDTLS_ERR_SSL_WANT_READ:
 			pfd.events = POLLIN;
 			break;
@@ -192,18 +196,23 @@ bool prne_mbedtls_pth_handle (
 			pfd.events = POLLOUT;
 			break;
 		case 0:
-			return true;
+			ret = true;
+			goto END;
 		default:
-			return false;
+			ret = false;
+			goto END;
 		}
 
-		do {
-			pollret = prne_pth_poll(&pfd, 1, -1, ev);
-			if (pollret < 0) {
-				return false;
-			}
-		} while (false);
+		f_ret = prne_pth_poll(&pfd, 1, -1, ev);
+		if (f_ret < 0) {
+			ret = false;
+			goto END;
+		}
 	}
+
+END:
+	prne_chk_assign(f_ret_out, f_ret);
+	return ret;
 }
 
 bool prne_mbedtls_verify_alp (

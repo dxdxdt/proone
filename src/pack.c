@@ -115,6 +115,7 @@ prne_pack_rc_t prne_index_bin_archive (
 		len -= 8;
 	}
 
+	prne_free_bin_archive(out);
 	out->data = data;
 	out->data_size = len;
 	out->nb_bin = nb_bin;

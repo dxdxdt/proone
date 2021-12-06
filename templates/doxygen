@@ -1,0 +1,64 @@
+/**
+ * \brief Convert the enum value to a string
+ * \return The pointer to the string from the read-only static string pool.
+ * \retval NULL if \p x is out of bounds and \c errno set to \c EINVAL
+ */
+/**
+ * \brief Convert the enum value to a string, which can be converted back to the
+ *	original enum value.
+ * \return The pointer to the string from the read-only static string pool.
+ * \retval NULL if \p x is out of bounds and \c errno set to \c EINVAL
+ */
+
+/**
+ * \brief Initialise the
+ * \note Initialises the members of \p x to initial values. Prepares \p x so
+ * 	that it can be freed using \c ff()
+ */
+/**
+ * \brief Free the resources allocated for the
+ * \param x The pointer to the object that has been initialised using
+ * 	\c if()
+ */
+
+/**
+ * \brief The equality operator of the
+ * \retval true if the contents of both \p a and \p b are identical
+ * \retval false otherwise
+ */
+/**
+ * \brief The deep copy operator of the
+ * \retval true if the contents of \p src have been successfully copied into
+ * 	\p dst
+ * \retval false otherwise and \c errno set
+ */
+/**
+ * \brief Allocate variable-length members of the
+ * \param x The pointer to the object
+ * \param x The byte length required for the
+ * \return true if allocation was successful
+ * \return false on failure and \c errno set to \c ENOMEM
+ */
+
+/**
+ * \brief The serialisation function for the
+ * \param mem The output buffer
+ * \param mem_len The byte length of the buffer available
+ * \param actual The actual number of bytes required or written
+ * \param in The pointer to the object
+ * \retval PRNE_HTBT_SER_RC_OK on success
+ * \retval PRNE_HTBT_SER_RC_MORE_BUF if more buffer is required for output
+ * \retval PRNE_HTBT_SER_RC_ERRNO if an error occurred during the process
+ * \retval PRNE_HTBT_SER_RC_FMT_ERR if a format error encountered
+ */
+/**
+ * \brief The deserialisation function for the
+ * \param data The input binary data
+ * \param len The byte length of the input binary data
+ * \param actual The actual number of bytes processed or required
+ * \param out The pointer to the object for output
+ * \retval PRNE_HTBT_SER_RC_OK on success
+ * \retval PRNE_HTBT_SER_RC_MORE_BUF if more input data is required for parsing
+ * \retval PRNE_HTBT_SER_RC_ERRNO if an error occurred during the process
+ * \retval PRNE_HTBT_SER_RC_FMT_ERR if a format error encountered
+ */

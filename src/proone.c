@@ -1162,6 +1162,8 @@ static bool init_shared_global (void) {
 		// Session init code goes here
 		prne_memzero(prne_s_g->upbin_path, sizeof(prne_s_g->upbin_path));
 		prne_memzero(prne_s_g->upbin_args, sizeof(prne_s_g->upbin_args));
+		prne_g.shm_fd = fd;
+		fd = -1;
 	}
 
 END:

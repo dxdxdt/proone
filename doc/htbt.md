@@ -302,7 +302,7 @@ representation from/to two's complement representation.
 |           |       | required is not implemented                              |
 | PROTO_ERR | 0x02  | Protocol error was detected while processing frames      |
 | ERRNO     | 0x03  | Operation was not successful and *err* is set to errno   |
-| SUB       | 0x04  | *err* is set to the error code returned from the  module |
+| SUB       | 0x04  | *err* is set to the error code returned from the module  |
 | LIMIT     | 0x05  | Request could not be served because a limit was reached  |
 
 ### Hostinfo Frame
@@ -747,7 +747,7 @@ The submissive host is allowed to choose an alternative architecture if the one
 requested is unavailable when the **C**("compat") flag is set. The submissive
 host is required to transmit the copy of its executable if **S**("self") is set.
 The binary recombination target is specified in **os** and **arch** fields.
-These fields are ignored if *S* is set.
+These fields are ignored if **S** is set.
 
 ## Enum Codes
 ### CPU Architecture Codes
@@ -781,7 +781,7 @@ More on arch codes in [dev_notes](dev_notes.md).
 | Enum    | Value | Description                                                |
 | ------- | ----- | ---------------------------------------------------------- |
 | NONE    | 0x00  | Special value used to indicate that the code is not used   |
-| LINUX   | 0x01  | Linux ABI                                                  |
+| LINUX   | 0x01  | Linux ABI (Linux Standard Base)                            |
 
 The OS codes are used to represent the ABI the executable is compiled against.
 Proone is designed with portability in mind and OS codes will be used to

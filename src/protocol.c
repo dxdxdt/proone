@@ -1124,6 +1124,7 @@ char **prne_htbt_parse_args (
 	while (ptr < end) {
 		next = prne_strnchr(ptr, 0, end - ptr);
 		if (next == NULL) {
+			errno = EINVAL;
 			return NULL; // reject non-null-terminated
 		}
 		else {
@@ -1135,6 +1136,7 @@ char **prne_htbt_parse_args (
 	}
 	cnt += add_argc;
 	if (cnt > max_args) {
+		errno = E2BIG;
 		return NULL;
 	}
 

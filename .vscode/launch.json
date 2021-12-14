@@ -9,7 +9,10 @@
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone-htbthost",
-			"args": [ "test", "--no-verify" ],
+			"args": [
+				"test",
+				"--no-verify"
+			],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
@@ -35,7 +38,11 @@
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone-htbtclient",
-			"args": [ "-t", "localhost", "hostinfo" ],
+			"args": [
+				"-t",
+				"localhost",
+				"hostinfo"
+			],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
@@ -64,7 +71,10 @@
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone-rnd",
-			"args": [ "256", "256" ],
+			"args": [
+				"256",
+				"256"
+			],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
@@ -79,7 +89,11 @@
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone-recon",
-			"args": [ "./src/data/recon.conf", "22", "23" ],
+			"args": [
+				"./src/data/recon.conf",
+				"22",
+				"23"
+			],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
@@ -87,8 +101,7 @@
 			"MIMode": "gdb",
 			"setupCommands": [
 				{
-					"description":
-						"Disable startup-with-shell to pass file cap",
+					"description": "Disable startup-with-shell to pass file cap",
 					"text": "set startup-with-shell off",
 					"ignoreFailures": false
 				}
@@ -101,7 +114,10 @@
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone-mkcdict",
-			"args": [ "./src/data/cred_dict.txt", "./src/data/cred_dict.bin" ],
+			"args": [
+				"./src/data/cred_dict.txt",
+				"./src/data/cred_dict.bin"
+			],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
@@ -139,7 +155,9 @@
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone-hostinfod",
-			"args": [ "./src/data/hostinfod.conf" ],
+			"args": [
+				"./src/data/hostinfod.conf"
+			],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
@@ -155,13 +173,14 @@
 			"preLaunchTask": "Build hostinfod",
 			"miDebuggerPath": "/usr/bin/gdb"
 		},
-
 		{
 			"name": "proone",
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/src/proone",
-			"args": [ "cm9vdABhZG1pbgA=" ],
+			"args": [
+				"cm9vdABhZG1pbgA="
+			],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
@@ -179,8 +198,7 @@
 					"ignoreFailures": false
 				},
 				{
-					"description":
-						"Disable startup-with-shell to pass file cap",
+					"description": "Disable startup-with-shell to pass file cap",
 					"text": "set startup-with-shell off",
 					"ignoreFailures": false
 				}
@@ -188,7 +206,6 @@
 			"preLaunchTask": "Build proone",
 			"miDebuggerPath": "/usr/bin/gdb"
 		},
-
 		{
 			"name": "test_proto",
 			"type": "cppdbg",
@@ -203,6 +220,28 @@
 			"setupCommands": [],
 			"preLaunchTask": "Build test_proto",
 			"miDebuggerPath": "/usr/bin/gdb"
+		},
+		{
+			"name": "txtrec-del",
+			"type": "python",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-txtrec-del.py",
+			"args": [ "CHANGE.ME.test", "aws", "AAAAAAAAAAAAA" ],
+			"console": "integratedTerminal"
+		},
+		{
+			"name": "txtrec-set",
+			"type": "python",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/proone-txtrec-set.py",
+			"args": [
+				"CHANGE.ME.test",
+				"CHANGE.ME.cnc.test",
+				"aws",
+				"AAAAAAAAAAAAA",
+				"<",
+				"${workspaceFolder}/src/data/proto/txtrec-testdata" ],
+			"console": "integratedTerminal"
 		},
 	]
 }

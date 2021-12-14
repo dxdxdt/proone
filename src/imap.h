@@ -80,7 +80,7 @@ void prne_imap_clear (prne_imap_t *im);
  * \param val The value of the new tuple.
  * \return The pointer to the new tuple allocated in the map. The pointer is
  *	valid as long as the map object remains unmodified.
- * \retval NULL if a memory allocation has occurred and \c errno is set to
+ * \retval NULL if memory allocation error has occurred and \c errno is set to
  *	\c ENOMEM
  * \note Calling the function invalidates the pointers previously returned by
  *	other functions.

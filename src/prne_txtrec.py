@@ -1,5 +1,3 @@
-#!/bin/bash
-
 # Copyright (c) 2019-2021 David Timber <mieabby@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -19,64 +17,47 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+import sys
+from typing import Iterable
 
-set -e
+# AWS hook - The max number of objects in a request
+AWS_MAX_ITEMS = 1000
 
-ARR_HOOKS="
-	aws
-"
+## Handle error according to the error definition
+# @param o the error definition
+# @param e the exception (optional)
+# @param m the error message header, perror() param equiv (optional)
+# @note The function will call \c exit() if the error definition dictates to do
+# 	so
+def handle_err (o, e, m):
+	if e:
+		sys.stderr.write(e + "\n\n")
+	if m:
+		l = m + ": " + o["msg"] + "\n"
+	else:
+		l = o["msg"] + "\n"
 
-if [ $# -lt 2 ]; then
-	echo "Usage: $0 <head rec> <hook> <zone id> [TTL]
-Hooks:" >&2
-	for h in $ARR_HOOKS; do
-		echo -e "\t$h"
-	done
+	sys.stderr.write(l)
+	if "ec" in o:
+		exit(o["ec"])
 
-	exit 2
-fi
+## Append a dot(".") to the string if it does not end with the dot
+def termdot (str: str):
+	if not str.endswith("."):
+		return str + "."
+	return str
 
-HEAD_REC="$1"
-HOOK="$2"
-ZONE_ID="$3"
-if [ -z "$4" ]; then
-	TTL=3600
-else
-	TTL="$4"
-fi
+# Change all RRs specified in the iterable
+def change_all (client, zone_id: str, action: str, it: Iterable):
+	c_arr = []
+	for rr in it:
+		c_arr.append({
+			'Action': action,
+			'ResourceRecordSet': rr
+		})
+	cb = { 'Changes': c_arr }
 
-aws_param () {
-	cat << EOF
-{
-	"Changes": [
-		{
-			"Action": "UPSERT",
-			"ResourceRecordSet": {
-				"Name": "$1",
-				"Type": "TXT",
-				"TTL": $TTL,
-				"ResourceRecords": [
-					{ "Value": "\"$2\"" }
-				]
-			}
-		}
-	]
-}
-EOF
-}
-
-hook_aws () {
-	aws route53 change-resource-record-sets\
-		--hosted-zone-id "$ZONE_ID"\
-		--change-batch "$(aws_param "$1" "$2")"
-}
-
-while read line; do
-	if [ -z "$line" ]; then
-		break;
-	fi
-	"hook_$HOOK" $line
-done
-
-read line
-"hook_$HOOK" "$HEAD_REC" "$line"
+	return client.change_resource_record_sets(
+			HostedZoneId = zone_id,
+			ChangeBatch = cb
+		)

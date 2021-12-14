@@ -467,12 +467,11 @@ proone-htbtclient. MariaDB for DB backend.
 * /scripts/extsymsize.sh: (undocumented)
 * /src/build-utils.sh: file alignment tool used by Makefile recipe
 * /src/data/proto/print-raw.sh: (undocumented)
+* /src/data/sql/hi-create.sql: MariaDB schema for hostinfo daemon
+* /src/proone-txtrec-del.py: CNC TXT REC deletion tool
+* /src/proone-txtrec-set.py: CNC TXT REC set up tool
 * /src/run-tests.sh: (undocumented)
 * /src/test-resolv.sh: test suite for resolv worker
-* /src/txtrec-del.sh: CNC TXT REC deletion tool
-* /src/txtrec-enc.sh: CNC TXT REC data encoding tool
-* /src/txtrec-set.sh: CNC TXT REC set up tool
-* /src/data/sql/hi-create.sql: MariaDB schema for hostinfo daemon
 
 ## Footnotes
 [^1]: i.e. representing values in code: `int value = 123;`

@@ -1341,12 +1341,3 @@ bool prne_alloc_recon_param (
 
 	return ret;
 }
-
-prne_recon_param_t prne_own_recon_param (
-	const prne_recon_param_t *p,
-	const bool ownership)
-{
-	prne_recon_param_t ret = *p;
-	ret.ownership = ownership;
-	return ret;
-}

@@ -1,5 +1,10 @@
 # Proone Dev Notes
 
+## Debugging
+### Capabilities(7)
+Both gdb and the executable to debug must have `CAP_NET_RAW` set in order for
+BNE to work.
+
 ## Platform-specifics
 ### Erasing arguments passed to Proone
 The Proone instance processes may look suspicious because the cmdline string
@@ -37,7 +42,12 @@ to real threads, expect some race condition related bugs.
 ### Put Mbed TLS on Diet
 The build is not light because the Mbed TLS library is extensive. Proone is
 tested using default Mbed TLS config included in Buildroot, but size reduction
-may be achieved by disabling unnessary features like threading and DTLS support.
+may be achieved by disabling unnessary features.
+
+* Threading
+* DTLS
+* TLS Renegotiation
+* ZLIB
 
 ### Don't Build Clean-up Code
 Disabling clean-up code for release build is widely accepted technique to reduce

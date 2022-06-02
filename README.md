@@ -41,6 +41,7 @@ Where to go from here
 
 * [User Guide](doc/user_guide.md)
 * [Software Design Spec](doc/sws.md)
+* [Implementation Note](doc/impl.md)
 * [Heartbeat Protocol Spec](doc/htbt.md)
 * [Proone Data Format Spec](doc/fmts.md)
 * [Dev Notes](doc/dev_notes.md)

@@ -11,15 +11,14 @@
  */
 
 /**
- * \brief Initialise the
- * \note Initialises the members of \p x to initial values. Prepares \p x so
- * 	that it can be freed using \c ff()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 /**
- * \brief Free the resources allocated for the
- * \param x The pointer to the object that has been initialised using
- * 	\c if()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
+
 
 /**
  * \brief The equality operator of the
@@ -38,6 +37,7 @@
  * \param x The byte length required for the
  * \return true if allocation was successful
  * \return false on failure and \c errno set to \c ENOMEM
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 
 /**

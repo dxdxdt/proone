@@ -47,15 +47,13 @@ struct prne_strmap_tuple {
 };
 
 /**
- * \brief Initialise the string map object
- * \note Initialises the members of \p map to initial values. Prepares \p map so
- * 	that it can be freed using \c prne_free_strmap()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_init_strmap (prne_strmap_t *map);
 /**
- * \brief Free the resources allocated for the string map object
- * \param map The pointer to the object that has been initialised using
- * 	\c prne_init_strmap()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_free_strmap (prne_strmap_t *map);
 

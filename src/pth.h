@@ -50,16 +50,13 @@ typedef struct prne_pth_cv prne_pth_cv_t;
 
 
 /**
- * \brief Initialise the worker object
- * \note Initialises the members of \p w to initial values. Prepares \p w so
- * 	that it can be freed using \c prne_free_worker()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_init_worker (prne_worker_t *w);
 /**
- * \brief Free the resources allocated for the worker object
- * \param w The pointer to the object that has been initialised using
- * 	\c prne_init_worker()
- * \warning The worker has to be joined using \c pth_join() beforehand!
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_free_worker (prne_worker_t *w);
 /**

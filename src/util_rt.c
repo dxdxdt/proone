@@ -36,12 +36,11 @@
 #include <pthsem.h>
 
 
-void prne_empty_func (void) {}
-
-void prne_close (const int fd) {
+int prne_close (const int fd) {
 	if (fd >= 0) {
-		close(fd);
+		return close(fd);
 	}
+	return 0;
 }
 
 void prne_shutdown (const int fd, const int how) {
@@ -59,9 +58,18 @@ int prne_chfd (const int old, const int ny) {
 	int ret;
 
 	if (old == ny) {
+		/*
+		 * dup2() will do nothing if both are same. This is not desired because
+		 * the function will end up closing the original fd!
+		 */
 		return old;
 	}
 
+	/*
+	 * Be careful if you're changing this to dup3()! Using the same fd on dup2()
+	 * is no op whereas dup3() considers this an invalid use case(EINVAL). The
+	 * behaviour of dup2() is desired for this function.
+	 */
 	ret = dup2(old, ny);
 	if (ret < 0) {
 		return ret;
@@ -152,15 +160,7 @@ char *prne_redup_str (char *old, const char *str) {
 }
 
 void prne_sfree_str (char *s) {
-	char *p;
-
-	if (s == NULL) {
-		return;
-	}
-
-	for (p = s; *p != 0; p += 1) {
-		*p = 0;
-	}
+	prne_strzero(s);
 	prne_free(s);
 }
 
@@ -254,32 +254,13 @@ char *prne_strnchr (const char *p, const char c, const size_t n) {
 			return (char*)p + i;
 		}
 		else if (p[i] == 0) {
+			// c == 0 is a valid use
+			// stop at a null terminator
 			return NULL;
 		}
 	}
 
 	return NULL;
-}
-
-size_t prne_str_shift_spaces (char *str, const size_t len) {
-	size_t i, ret = len;
-
-	for (i = 0; i < ret; ) {
-		if (prne_cisspace(str[i])) {
-			if (i + 1 >= ret) {
-				// last trailing whitespace
-				ret -= 1;
-				break;
-			}
-			memmove(str + i, str + i + 1, ret - i - 1);
-			ret -= 1;
-		}
-		else {
-			i += 1;
-		}
-	}
-
-	return ret;
 }
 
 bool prne_chkcstr (const char *str, bool(*chk_f)(const char)) {

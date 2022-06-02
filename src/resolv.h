@@ -287,15 +287,13 @@ bool prne_resolv_prm_gettxtrec (
 	prne_resolv_prm_t *out);
 
 /**
- * \brief Initialise the name server pool object
- * \note Initialises the members of \p pool to initial values. Prepares \p pool
- * 	so that it can be freed using \c prne_resolv_free_ns_pool()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_resolv_init_ns_pool (prne_resolv_ns_pool_t *pool);
 /**
- * \brief Free the resources allocated for the name server pool object
- * \param pool The pointer to the object that has been initialised using
- * 	\c prne_resolv_init_ns_pool()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_resolv_free_ns_pool (prne_resolv_ns_pool_t *pool);
 /**
@@ -318,39 +316,33 @@ prne_resolv_ns_pool_t prne_resolv_own_ns_pool(
 	const prne_resolv_ns_pool_t *pool,
 	const bool ownership);
 /**
- * \brief Initialise the query operation promise object
- * \note Initialises the members of \p prm to initial values. Prepares \p prm so
- * 	that it can be freed using \c prne_resolv_free_prm()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_resolv_init_prm (prne_resolv_prm_t *prm);
 /**
- * \brief Free the resources allocated for the query operation promise object
- * \param prm The pointer to the object that has been initialised using
- * 	\c prne_resolv_init_prm()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_resolv_free_prm (prne_resolv_prm_t *prm);
 /**
- * \brief Initialise the query operation future object
- * \note Initialises the members of \p fut to initial values. Prepares \p fut so
- * 	that it can be freed using \c prne_free_resolv_fut()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_init_resolv_fut (prne_resolv_fut_t *fut);
 /**
- * \brief Free the resources allocated for the query operation future object
- * \param fut The pointer to the object that has been initialised using
- * 	\c prne_init_resolv_fut()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_free_resolv_fut (prne_resolv_fut_t *fut);
 /**
- * \brief Initialise the query resource record
- * \note Initialises the members of \p rr to initial values. Prepares \p rr so
- * 	that it can be freed using \c prne_free_resolv_rr()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_init_resolv_rr (prne_resolv_rr_t *rr);
 /**
- * \brief Free the resources allocated for the query resource record
- * \param rr The pointer to the object that has been initialised using
- * 	\c prne_init_resolv_rr()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_free_resolv_rr (prne_resolv_rr_t *rr);
 

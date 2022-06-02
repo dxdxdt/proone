@@ -445,16 +445,13 @@ bool prne_net_ep_set_ipv6 (
 const char *prne_htbt_op_tostr (const prne_htbt_op_t x);
 
 /**
- * \brief Initialise the heartbeat framing protocol message header frame
- * \note Initialises the members of \p mh to initial values. Prepares \p mh so
- * 	that it can be freed using \c prne_htbt_free_msg_head()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_init_msg_head (prne_htbt_msg_head_t *mh);
 /**
- * \brief Free the resources allocated for the heartbeat framing protocol
- *	message header frame
- * \param mh The pointer to the object that has been initialised using
- * 	\c prne_htbt_init_msg_head()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_free_msg_head (prne_htbt_msg_head_t *mh);
 /**
@@ -468,16 +465,13 @@ bool prne_htbt_eq_msg_head (
 	const prne_htbt_msg_head_t *b);
 
 /**
- * \brief Initialise the heartbeat framing protocol status frame
- * \note Initialises the members of \p s to initial values. Prepares \p s so
- * 	that it can be freed using \c prne_htbt_free_status()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_init_status (prne_htbt_status_t *s);
 /**
- * \brief Free the resources allocated for the heartbeat framing protocol status
- *	frame
- * \param s The pointer to the object that has been initialised using
- * 	\c prne_htbt_init_status()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_free_status (prne_htbt_status_t *s);
 /**
@@ -490,9 +484,8 @@ bool prne_htbt_eq_status (
 	const prne_htbt_status_t *b);
 
 /**
- * \brief Initialise the host credential object
- * \note Initialises the members of \p hc to initial values. Prepares \p hc so
- * 	that it can be freed using \c prne_free_host_cred()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_init_host_cred (prne_host_cred_t *hc);
 /**
@@ -512,9 +505,8 @@ bool prne_alloc_host_cred (
 	const uint8_t id_len,
 	const uint8_t pw_len);
 /**
- * \brief Free the resources allocated for the host credential object
- * \param hc The pointer to the object that has been initialised using
- * 	\c prne_init_host_cred()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_free_host_cred (prne_host_cred_t *hc);
 /**
@@ -559,9 +551,8 @@ prne_htbt_ser_rc_t prne_dec_host_cred (
 	prne_host_cred_t *out);
 
 /**
- * \brief Initialise the heartbeat framing protocol hostinfo frame
- * \note Initialises the members of \p hi to initial values. Prepares \p hi so
- * 	that it can be freed using \c prne_htbt_free_host_info()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_init_host_info (prne_htbt_host_info_t *hi);
 /**
@@ -572,16 +563,15 @@ void prne_htbt_init_host_info (prne_htbt_host_info_t *hi);
  * \param bf_len The byte length required for the bit field data
  * \return true if allocation was successful
  * \return false on failure and \c errno set to \c ENOMEM
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 bool prne_htbt_alloc_host_info (
 	prne_htbt_host_info_t *hi,
 	const size_t cred_len,
 	const size_t bf_len);
 /**
- * \brief Free the resources allocated for the heartbeat framing protocol
- *	hostinfo frame
- * \param hi The pointer to the object that has been initialised using
- * 	\c prne_htbt_init_host_info()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_free_host_info (prne_htbt_host_info_t *hi);
 /**
@@ -594,9 +584,8 @@ bool prne_htbt_eq_host_info (
 	const prne_htbt_host_info_t *b);
 
 /**
- * \brief Initialise the heartbeat framing protocol command frame
- * \note Initialises the members of \p cmd to initial values. Prepares \p cmd so
- * 	that it can be freed using \c prne_htbt_free_cmd()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_init_cmd (prne_htbt_cmd_t *cmd);
 /**
@@ -615,10 +604,8 @@ bool prne_htbt_alloc_cmd (
 	const size_t *args_len);
 bool prne_htbt_set_cmd (prne_htbt_cmd_t *cmd, const char **args);
 /**
- * \brief Free the resources allocated for the heartbeat framing protocol
- *	command frame
- * \param cmd The pointer to the object that has been initialised using
- * 	\c prne_htbt_init_cmd()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_free_cmd (prne_htbt_cmd_t *cmd);
 /**
@@ -629,16 +616,13 @@ void prne_htbt_free_cmd (prne_htbt_cmd_t *cmd);
 bool prne_htbt_eq_cmd (const prne_htbt_cmd_t *a, const prne_htbt_cmd_t *b);
 
 /**
- * \brief Initialise the heartbeat framing protocol binary meta frame
- * \note Initialises the members of \p nb to initial values. Prepares \p nb so
- * 	that it can be freed using \c prne_htbt_free_bin_meta()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_init_bin_meta (prne_htbt_bin_meta_t *nb);
 /**
- * \brief Free the resources allocated for the the heartbeat framing protocol
- * 	binary meta frame
- * \param nb The pointer to the object that has been initialised using
- * 	\c prne_htbt_init_bin_meta()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_free_bin_meta (prne_htbt_bin_meta_t *nb);
 /**
@@ -652,16 +636,13 @@ bool prne_htbt_eq_bin_meta (
 	const prne_htbt_bin_meta_t *b);
 
 /**
- * \brief Initialise the heartbeat framing protocol hand-over frame
- * \note Initialises the members of \p ho to initial values. Prepares \p ho so
- * 	that it can be freed using \c prne_htbt_free_hover()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_init_hover (prne_htbt_hover_t *ho);
 /**
- * \brief Free the resources allocated for the heartbeat framing protocol
- * 	hand-over frame
- * \param ho The pointer to the object that has been initialised using
- * 	\c prne_htbt_init_hover()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_free_hover (prne_htbt_hover_t *ho);
 /**
@@ -685,16 +666,13 @@ bool prne_htbt_cp_hover (
 	prne_htbt_hover_t *dst);
 
 /**
- * \brief Initialise the heartbeat framing protocol STDIO frame
- * \note Initialises the members of \p s to initial values. Prepares \p s so
- * 	that it can be freed using \c prne_htbt_free_stdio()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_init_stdio (prne_htbt_stdio_t *s);
 /**
- * \brief Free the resources allocated for the heartbeat framing protocol STDIO
- * 	frame
- * \param s The pointer to the object that has been initialised using
- * 	\c prne_htbt_init_stdio()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_free_stdio (prne_htbt_stdio_t *s);
 /**
@@ -707,16 +685,13 @@ bool prne_htbt_eq_stdio (
 	const prne_htbt_stdio_t *b);
 
 /**
- * \brief Initialise the heartbeat protocol binary RCB frame
- * \note Initialises the members of \p r to initial values. Prepares \p r so
- * 	that it can be freed using \c prne_htbt_free_rcb()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_init_rcb (prne_htbt_rcb_t *r);
 /**
- * \brief Free the resources allocated for the heartbeat protocol binary RCB
- * 	frame
- * \param r The pointer to the object that has been initialised using
- * 	\c prne_htbt_init_rcb()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_free_rcb (prne_htbt_rcb_t *r);
 /**

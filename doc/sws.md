@@ -360,7 +360,8 @@ proone-htbtclient. MariaDB for DB backend.
 ### Executables
 * /src/proone: Proone instance executable with DVault only
 * /src/proone.bin: Proone instance executable ELF part only (not runnable)
-* /src/proone-bne: standalone bne tool for testing and index case(P0)
+* /src/proone-bne: standalone bne tool for testing and deployment of an index
+  case(P0)
 * /src/proone-hostinfod: hostinfo daemon, an example of authoritive heartbeat
   implementation
 * /src/proone-htbtclient: heartbeat client, Proone instance maintenance tool

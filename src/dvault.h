@@ -101,16 +101,13 @@ void prne_dvault_invert_mem (
 	const uint8_t *mask);
 
 /**
- * \brief Initialise the data vault masking operation result object
- * \note Initialises the members of \p r to initial values. Prepares \p r so
- * 	that it can be freed using \c prne_free_dvault_mask_result()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_init_dvault_mask_result (prne_dvault_mask_result_t *r);
 /**
- * \brief Free the resources allocated for the the data vault masking operation
- * 	result object
- * \param p The pointer to the object that has been initialised using
- * 	\c prne_init_dvault_mask_result()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_free_dvault_mask_result (prne_dvault_mask_result_t *r);
 /**

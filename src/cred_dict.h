@@ -54,15 +54,13 @@ struct prne_cred_dict {
 };
 
 /**
- * \brief Initialise the credential dictionary object
- * \note Initialises the members of \p p to initial values. Prepares \p p so
- * 	that it can be freed using \c prne_free_cred_dict()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_init_cred_dict (prne_cred_dict_t *p);
 /**
- * \brief Free the resources allocated for the credential dictionary object.
- * \param p The pointer to the object that has been initialised using
- * 	\c prne_init_cred_dict()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_free_cred_dict (prne_cred_dict_t *p);
 

@@ -210,14 +210,12 @@ struct prne_htbt_param {
 prne_htbt_t *prne_alloc_htbt (prne_worker_t *w, const prne_htbt_param_t *param);
 
 /**
- * \brief Initialise the heartbeat worker parameter object
- * \note Initialises the members of \p p to initial values. Prepares \p p so
- * 	that it can be freed using \c prne_htbt_free_param()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_init_param (prne_htbt_param_t *p);
 /**
- * \brief Free the resources allocated for the heartbeat worker parameter object
- * \param p The pointer to the object that has been initialised using
- * 	\c prne_htbt_init_param()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_htbt_free_param (prne_htbt_param_t *p);

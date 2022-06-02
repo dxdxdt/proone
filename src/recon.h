@@ -84,15 +84,13 @@ prne_recon_t *prne_alloc_recon (
 	mbedtls_ctr_drbg_context *ctr_drbg,
 	const prne_recon_param_t *param);
 /**
- * \brief Initialise the recon worker parameter object
- * \note Initialises the members of \p p to initial values. Prepares \p p so
- * 	that it can be freed using \c prne_free_recon_param()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_init_recon_param (prne_recon_param_t *p);
 /**
- * \brief Free the resources allocated for the recon worker parameter object
- * \param p The pointer to the object that has been initialised using
- * 	\c prne_init_recon_param()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_free_recon_param (prne_recon_param_t *p);
 /**

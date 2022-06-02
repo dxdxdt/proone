@@ -47,15 +47,13 @@ typedef struct prne_rnd prne_rnd_t;
 
 
 /**
- * \brief Initialise the PRNG engine object
- * \note Initialises the members of \p p to initial values. Prepares \p p so
- * 	that it can be freed using \c prne_free_rnd()
+ * \brief Initialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_init_rnd (prne_rnd_t *p);
 /**
- * \brief Free the resources allocated for the PRNG engine object
- * \param p The pointer to the object that has been initialised using
- * 	\c prne_init_rnd()
+ * \brief Deinitialisation function
+ * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
 void prne_free_rnd (prne_rnd_t *p);
 /**

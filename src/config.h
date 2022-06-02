@@ -33,11 +33,17 @@
 #endif
 #include "protocol.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 
 #include <zlib.h>
+
+// Refuse 7-bit byte
+#if CHAR_BIT != 8
+#error "FIXME!"
+#endif
 
 /** \def PRNE_HOST_WORDSIZE
  * \brief Th system "word size". 32 if the system is a 32-bit machine. 64 if the

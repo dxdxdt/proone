@@ -23,32 +23,36 @@ from typing import Iterable
 # AWS hook - The max number of objects in a request
 AWS_MAX_ITEMS = 1000
 
-## Handle error according to the error definition
-# @param o the error definition
-# @param e the exception (optional)
-# @param m the error message header, perror() param equiv (optional)
-# @note The function will call \c exit() if the error definition dictates to do
-# 	so
-def handle_err (o, e, m):
+def handle_err (o: dict, e, m: str):
+	"""Handle error according to the error definition
+
+	The function will call exit() if the error definition dictates to do so
+
+	Parameters:
+		o: the error definition
+		e: the exception (optional)
+		m: the error message header, perror() param equiv (optional)
+	"""
 	if e:
-		sys.stderr.write(e + "\n\n")
+		sys.stderr.write(str(e) + "\n\n")
 	if m:
 		l = m + ": " + o["msg"] + "\n"
 	else:
 		l = o["msg"] + "\n"
-
 	sys.stderr.write(l)
-	if "ec" in o:
-		exit(o["ec"])
 
-## Append a dot(".") to the string if it does not end with the dot
+	ec = o.get("ec", None)
+	if ec is not None:
+		exit(ec)
+
 def termdot (str: str):
+	"""Append a dot(".") to the string if it does not end with the dot"""
 	if not str.endswith("."):
 		return str + "."
 	return str
 
-# Change all RRs specified in the iterable
 def change_all (client, zone_id: str, action: str, it: Iterable):
+	"""Change all RRs specified in the iterable"""
 	c_arr = []
 	for rr in it:
 		c_arr.append({

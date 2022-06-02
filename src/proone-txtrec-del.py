@@ -59,8 +59,8 @@ HOOK_ERRORS = {
 	},
 }
 
-# AWS hook main function
 def main_aws (zone_id: str, head_rec: str):
+	"""AWS hook main function"""
 	try:
 		import boto3
 	except ModuleNotFoundError as e:

@@ -42,8 +42,8 @@ HOOK_ERRORS = {
 	}
 }
 
-# AWS hook main function
 def main_aws (zone_id: str, head_rec: str, suffix: str, ttl: int):
+	"""AWS hook main function"""
 	if ttl is None:
 		ttl = 3600
 

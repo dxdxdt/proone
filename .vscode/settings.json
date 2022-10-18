@@ -1,10 +1,29 @@
 {
+	"editor.tabSize": 4,
+	"editor.insertSpaces": false,
+	"files.trimTrailingWhitespace": true,
+	"C_Cpp.default.cStandard": "c11",
+	"C_Cpp.default.defines": [
+		"_POSIX_C_SOURCE=200112L",
+		"PRNE_DEBUG",
+		"PRNE_VERBOSE=UINT_MAX",
+		"PRNE_BUILD_ENTROPY={ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }",
+		"PRNE_BIN_ALIGNMENT=8"],
+	"C_Cpp.default.compilerArgs": [
+		"-pedantic",
+		"-Wall",
+		"-Wextra",
+		"-Wno-switch",
+		"-Wno-unused-parameter",
+		"-Werror=implicit-function-declaration"
+	],
 	"doxdocgen.cpp.tparamTemplate": "\\tparam {param} ",
 	"doxdocgen.file.fileTemplate": "\\file {name}",
+	"doxdocgen.file.versionTag": "\\version 0.1",
+	"doxdocgen.generic.authorTag": "\\author {author} ({email})",
 	"doxdocgen.generic.briefTemplate": "\\brief {text}",
+	"doxdocgen.generic.commandSuggestionAddPrefix": true,
 	"doxdocgen.generic.dateTemplate": "\\date {date}",
 	"doxdocgen.generic.paramTemplate": "\\param {param} ",
-	"doxdocgen.generic.returnTemplate": "\\return {type} ",
-	"doxdocgen.file.versionTag": "\\version 0.1",
-	"doxdocgen.generic.authorTag": "\\author {author} ({email})"
+	"doxdocgen.generic.returnTemplate": "\\return {type} "
 }

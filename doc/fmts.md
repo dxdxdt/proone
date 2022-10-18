@@ -1,6 +1,6 @@
 # Proone Data Format Spec
 
-Copyright (c) 2019-2021 David Timber &lt;mieabby@gmail.com&gt;
+Copyright (c) 2019-2022 David Timber &lt;dxdt@dev.snart.me&gt;
 
 ## Structure of Entire Proone Executable
 

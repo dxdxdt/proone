@@ -4,7 +4,7 @@ complete heartbeat connection consists of an **authoritive host** and a
 **submissive host**. The authoritive host and the submissive host can be either
 end of the TCP/IP connection.
 
-Copyright (c) 2019-2021 David Timber &lt;mieabby@gmail.com&gt;
+Copyright (c) 2019-2022 David Timber &lt;dxdt@dev.snart.me&gt;
 
 **A session** is a series of messages identified by a single message id. A
 message is a combination of one or more frames. All messages begin with the

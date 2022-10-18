@@ -2,7 +2,7 @@
  * \brief The convenience functions and abstraction for GNU Portable Threads
  */
 /*
-* Copyright (c) 2019-2021 David Timber <mieabby@gmail.com>
+* Copyright (c) 2019-2022 David Timber <dxdt@dev.snart.me>
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal

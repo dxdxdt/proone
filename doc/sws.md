@@ -2,7 +2,7 @@
 This document is part of **Proone Worm Project**. See [README.md](/README.md)
 for overview.
 
-Copyright (c) 2019-2021 David Timber &lt;mieabby@gmail.com&gt;
+Copyright (c) 2019-2022 David Timber &lt;dxdt@dev.snart.me&gt;
 
 ## Subsystems
 ![Subsystem UML Diagram](img/proone.svg)

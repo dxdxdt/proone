@@ -7,7 +7,7 @@
 # \note These shell functions are used in the Automake recipe to facilitate
 #	extra unconventional steps to build Proone executables.
 
-# Copyright (c) 2019-2021 David Timber <mieabby@gmail.com>
+# Copyright (c) 2019-2022 David Timber <dxdt@dev.snart.me>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal

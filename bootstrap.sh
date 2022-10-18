@@ -11,6 +11,6 @@ EOF
 fi
 
 aclocal &&
+	autoheader &&
 	automake --add-missing --copy &&
-	autoconf &&
-	autoheader
+	autoconf

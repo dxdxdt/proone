@@ -75,6 +75,11 @@
 			"type": "shell",
 			"command": "make -C ./src proone"
 		},
+		{
+			"label": "Build yamlls",
+			"type": "shell",
+			"command": "make -C ./src proone-yamlls"
+		},
 
 
 		{

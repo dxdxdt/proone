@@ -36,7 +36,6 @@
 
 #include <sys/sysinfo.h>
 
-#include <yaml.h>
 #include <mysql/mysql.h>
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy.h>
@@ -49,6 +48,7 @@
 #include "protocol.h"
 #include "mbedtls.h"
 #include "rnd.h"
+#include "yaml.h"
 
 #if !defined(MBEDTLS_THREADING_C)
 #error "Mbedtls must be compiled with threading support"
@@ -185,263 +185,198 @@ static void set_def_prog_param (void) {
 	prog_conf.listen_port = DEFCONF_LISTEN_PORT;
 }
 
-typedef enum {
-	PS_INIT,
-	PS_STREAM,
-	PS_DOC,
-	PS_SEQ_START,
-	PS_SEQ,
-	PS_MAPPING_START,
-	PS_MAPPING_VAL
-} parse_state_t;
-
-typedef struct {
-	char *path;
-	prne_llist_t path_list;
-	parse_state_t state;
-	bool err;
-} parse_context_t;
-
-static void yaml_parse_build_path (parse_context_t *ctx) {
-	const char **sb = prne_malloc(sizeof(char*) * 2, ctx->path_list.size);
-	size_t ptr = 0;
-
-	for (prne_llist_entry_t *e = ctx->path_list.head; e != NULL; e = e->next) {
-		sb[ptr + 0] = "/";
-		sb[ptr + 1] = (char*)e->element;
-		ptr += 2;
+static void dup_assign_str (char **dst, const char *src) {
+	void *ny = prne_redup_str(*dst, src);
+	if (ny == NULL) {
+		perror("prne_redup_str()");
+		abort();
 	}
-
-	ctx->path = prne_rebuild_str(ctx->path, sb, ctx->path_list.size * 2);
-	assert(ctx->path != NULL);
+	*dst = (char*)ny;
 }
 
-static void yaml_parse_push_path (
-	parse_context_t *ctx,
-	const yaml_char_t *name)
+bool yaml_doc_end_cb (void *ctx, const yaml_event_t *event) {
+	// Accept the first doc only.
+	return false;
+}
+
+static bool yaml_scalar_cb (
+	void *ctx,
+	const char *val,
+	const prne_yaml_path_t *path_obj)
 {
-	char *tag;
-	prne_llist_entry_t *ent;
+	const char *err_msg = NULL;
+	char *path = NULL;
+	bool ret = true;
 
-	tag = prne_dup_str((const char*)name);
-	ent = prne_llist_append(&ctx->path_list, (prne_llist_element_t)tag);
-	assert(tag != NULL && ent != NULL);
-}
+	path = prne_yaml_path_tostr(path_obj, ".", true, NULL);
+	prne_assert(path != NULL);
 
-static void yaml_parse_pop_path (parse_context_t *ctx) {
-	if (ctx->path_list.size == 0) {
-		return;
+	if (strstr(path, ".hostinfod") != path) {
+		ret = false;
+		fprintf(stderr, "%s: invalid root\n", path);
+		goto END;
 	}
-	prne_free((void*)ctx->path_list.tail->element);
-	prne_llist_erase(&ctx->path_list, ctx->path_list.tail);
-}
 
-static void yaml_parse_dup_str (char **str, const yaml_char_t *val) {
-	prne_free(*str);
-	*str = prne_dup_str((const char*)val);
-	assert(*str != NULL);
-}
-
-static bool yaml_parse_handle_node (
-	parse_context_t *ctx,
-	const yaml_char_t *val)
-{
-	if (strcmp(ctx->path, "/hostinfod/db/host") == 0) {
-		yaml_parse_dup_str(&prog_conf.db.host, val);
+	if (strcmp(path, ".hostinfod.db.host") == 0) {
+		dup_assign_str(&prog_conf.db.host, val);
 	}
-	else if (strcmp(ctx->path, "/hostinfod/db/port") == 0) {
+	else if (strcmp(path, ".hostinfod.db.port") == 0) {
 		int tmp;
 
-		ctx->err =
-			sscanf((const char*)val, "%d", &tmp) != 1 ||
-			!(0 < tmp && tmp <= 65535);
-		if (!ctx->err) {
+		ret =
+			sscanf((const char*)val, "%d", &tmp) == 1 &&
+			(0 < tmp && tmp <= 65535);
+		if (ret) {
 			prog_conf.db.port = (uint16_t)tmp;
 		}
+		else {
+			errno = EINVAL;
+			err_msg = ".hostinfod.db.port";
+		}
 	}
-	else if (strcmp(ctx->path, "/hostinfod/db/user") == 0) {
-		yaml_parse_dup_str(&prog_conf.db.user, val);
+	else if (strcmp(path, ".hostinfod.db.user") == 0) {
+		dup_assign_str(&prog_conf.db.user, val);
 	}
-	else if (strcmp(ctx->path, "/hostinfod/db/pw") == 0) {
-		yaml_parse_dup_str(&prog_conf.db.pw, val);
+	else if (strcmp(path, ".hostinfod.db.pw") == 0) {
+		dup_assign_str(&prog_conf.db.pw, val);
 	}
-	else if (strcmp(ctx->path, "/hostinfod/db/db") == 0) {
-		yaml_parse_dup_str(&prog_conf.db.db, val);
+	else if (strcmp(path, ".hostinfod.db.db") == 0) {
+		dup_assign_str(&prog_conf.db.db, val);
 	}
-	else if (strcmp(ctx->path, "/hostinfod/db/table_prefix") == 0) {
-		yaml_parse_dup_str(&prog_conf.db.tbl_pfx, val);
+	else if (strcmp(path, ".hostinfod.db.table_prefix") == 0) {
+		dup_assign_str(&prog_conf.db.tbl_pfx, val);
 	}
-	else if (strcmp(ctx->path, "/hostinfod/ssl/ca") == 0) {
-		yaml_parse_dup_str(&prog_conf.ssl.path_ca, val);
+	else if (strcmp(path, ".hostinfod.ssl.ca") == 0) {
+		dup_assign_str(&prog_conf.ssl.path_ca, val);
 	}
-	else if (strcmp(ctx->path, "/hostinfod/ssl/crt") == 0) {
-		yaml_parse_dup_str(&prog_conf.ssl.path_crt, val);
+	else if (strcmp(path, ".hostinfod.ssl.crt") == 0) {
+		dup_assign_str(&prog_conf.ssl.path_crt, val);
 	}
-	else if (strcmp(ctx->path, "/hostinfod/ssl/key") == 0) {
-		yaml_parse_dup_str(&prog_conf.ssl.path_key, val);
+	else if (strcmp(path, ".hostinfod.ssl.key") == 0) {
+		dup_assign_str(&prog_conf.ssl.path_key, val);
 	}
-	else if (strcmp(ctx->path, "/hostinfod/ssl/key_pw") == 0) {
-		yaml_parse_dup_str(&prog_conf.ssl.key_pw, val);
+	else if (strcmp(path, ".hostinfod.ssl.key_pw") == 0) {
+		dup_assign_str(&prog_conf.ssl.key_pw, val);
 	}
-	else if (strcmp(ctx->path, "/hostinfod/ssl/dh") == 0) {
-		yaml_parse_dup_str(&prog_conf.ssl.path_dh, val);
+	else if (strcmp(path, ".hostinfod.ssl.dh") == 0) {
+		dup_assign_str(&prog_conf.ssl.path_dh, val);
 	}
-	else if (strcmp(ctx->path, "/hostinfod/max_conn") == 0) {
-		ctx->err = sscanf((const char*)val, "%zu", &prog_conf.max_conn) != 1;
+	else if (strcmp(path, ".hostinfod.max_conn") == 0) {
+		ret = sscanf(val, "%zu", &prog_conf.max_conn) == 1;
+		err_msg = ".hostinfod.max_conn";
 	}
-	else if (strcmp(ctx->path, "/hostinfod/db_q_size") == 0) {
-		ctx->err = sscanf((const char*)val, "%zu", &prog_conf.db_q_size) != 1;
+	else if (strcmp(path, ".hostinfod.db_q_size") == 0) {
+		ret = sscanf(val, "%zu", &prog_conf.db_q_size) == 1;
+		err_msg = ".hostinfod.db_q_size";
 	}
-	else if (strcmp(ctx->path, "/hostinfod/report_int") == 0) {
+	else if (strcmp(path, ".hostinfod.report_int") == 0) {
 		unsigned long tmp;
 
-		ctx->err = sscanf((const char*)val, "%lu", &tmp) != 1;
-		if (!ctx->err) {
+		ret = sscanf(val, "%lu", &tmp) == 1;
+		err_msg = ".hostinfod.report_int";
+		if (ret) {
 			prog_conf.report_int = prne_ms_timespec(tmp);
 		}
 	}
-	else if (strcmp(ctx->path, "/hostinfod/sck_op_timeout") == 0) {
+	else if (strcmp(path, ".hostinfod.sck_op_timeout") == 0) {
 		unsigned long tmp;
 
-		ctx->err = sscanf((const char*)val, "%lu", &tmp) != 1;
-		if (!ctx->err) {
+		ret = sscanf(val, "%lu", &tmp) == 1;
+		err_msg = ".hostinfod.sck_op_timeout";
+		if (ret) {
 			prog_conf.sck_op_timeout = prne_ms_timespec(tmp);
 		}
 	}
-	else if (strcmp(ctx->path, "/hostinfod/nb_thread") == 0) {
-		ctx->err = sscanf((const char*)val, "%u", &prog_conf.nb_thread) != 1;
+	else if (strcmp(path, ".hostinfod.nb_thread") == 0) {
+		ret = sscanf(val, "%u", &prog_conf.nb_thread) == 1;
+		err_msg = ".hostinfod.nb_thread";
 	}
-	else if (strcmp(ctx->path, "/hostinfod/backlog") == 0) {
-		ctx->err = sscanf((const char*)val, "%u", &prog_conf.backlog) != 1;
+	else if (strcmp(path, ".hostinfod.backlog") == 0) {
+		ret = sscanf(val, "%u", &prog_conf.backlog) == 1;
+		err_msg = ".hostinfod.backlog";
 	}
-	else if (strcmp(ctx->path, "/hostinfod/listen_port") == 0) {
-		ctx->err = sscanf(
-			(const char*)val,
-			"%"SCNu16,
-			&prog_conf.listen_port) != 1;
+	else if (strcmp(path, ".hostinfod.listen_port") == 0) {
+		ret = sscanf(val, "%"SCNu16, &prog_conf.listen_port) == 1;
+		err_msg = ".hostinfod.listen_port";
 	}
-	else if (strcmp(ctx->path, "/hostinfod/verbose") == 0) {
-		ctx->err = sscanf((const char*)val, "%d", &prog_conf.verbose) != 1;
-	}
-
-	return true;
-}
-
-static void yaml_parse_handle_doc (
-	parse_context_t *ctx,
-	const yaml_event_t *event)
-{
-	switch (event->type) {
-	case YAML_SEQUENCE_START_EVENT:
-		ctx->state = PS_SEQ_START;
-		break;
-	case YAML_MAPPING_START_EVENT:
-		ctx->state = PS_MAPPING_START;
-		break;
-	case YAML_SCALAR_EVENT:
-		switch (ctx->state) {
-		case PS_SEQ_START:
-			yaml_parse_push_path(ctx, event->data.scalar.value);
-			ctx->state = PS_SEQ;
-			break;
-		case PS_MAPPING_START:
-			yaml_parse_push_path(ctx, event->data.scalar.value);
-			ctx->state = PS_MAPPING_VAL;
-			break;
-		case PS_SEQ:
-			break;
-		case PS_MAPPING_VAL:
-			yaml_parse_build_path(ctx);
-			yaml_parse_handle_node(ctx, event->data.scalar.value);
-			yaml_parse_pop_path(ctx);
-			ctx->state = PS_MAPPING_START;
-			break;
-		}
-		break;
-	case YAML_SEQUENCE_END_EVENT:
-	case YAML_MAPPING_END_EVENT:
-		yaml_parse_pop_path(ctx);
-		ctx->state = PS_MAPPING_START;
-		break;
-	case YAML_DOCUMENT_END_EVENT:
-		ctx->state = PS_STREAM;
-		break;
-	default: abort();
-	}
-}
-
-static bool yaml_parse_func (
-	parse_context_t *ctx,
-	const yaml_event_t *event)
-{
-	switch (ctx->state) {
-	case PS_INIT:
-		assert(event->type == YAML_STREAM_START_EVENT);
-		ctx->state = PS_STREAM;
-		break;
-	case PS_STREAM:
-		if (event->type == YAML_STREAM_END_EVENT) {
-			return false;
-		}
-		ctx->state = PS_DOC;
-		assert(event->type == YAML_DOCUMENT_START_EVENT);
-		break;
-	default:
-		yaml_parse_handle_doc(ctx, event);
+	else if (strcmp(path, ".hostinfod.verbose") == 0) {
+		ret = sscanf(val, "%d", &prog_conf.verbose) == 1;
+		err_msg = ".hostinfod.verbose";
 	}
 
-	return true;
+END:
+	if (!ret) {
+		*((bool*)ctx) = true;
+		prne_assert(err_msg != NULL);
+		perror(err_msg);
+	}
+	prne_free(path);
+
+	return ret;
 }
 
 static bool load_conf (FILE *file) {
 	yaml_parser_t parser;
-	yaml_event_t event;
-	parse_context_t p_ctx;
-	bool p_ret;
+	prne_yaml_ctx_t p_ctx;
+	prne_yaml_parse_opt_t p_opt;
+	prne_yaml_parse_ret_t p_ret;
+	bool err = false;
+	bool ret = false;
 
-	prne_memzero(&p_ctx, sizeof(parse_context_t));
-	prne_init_llist(&p_ctx.path_list);
+	prne_yaml_init_ctx(&p_ctx);
+	prne_yaml_init_parse_opt(&p_opt);
+
+	p_opt.uctx = &err;
+	p_opt.cb.doc_end = yaml_doc_end_cb;
+	p_opt.cb.scalar = yaml_scalar_cb;
 
 	if (yaml_parser_initialize(&parser) == 0) {
-		fprintf(
-			stderr,
-			"*** YAML error: %s\n",
-			parser.problem);
+		fprintf(stderr, "*** YAML error: %s\n", parser.problem);
 		abort();
 	}
 
 	yaml_parser_set_input_file(&parser, file);
-	do {
-		if (yaml_parser_parse(&parser, &event) == 0) {
+	p_ret = prne_yaml_do_parse(&parser, &p_ctx, &p_opt);
+	switch (p_ret) {
+	case PRNE_YAML_PR_CBHALT:
+		if (err) {
 			fprintf(
 				stderr,
-				"*** YAML parse error %zu:%zu: %s\n",
-				parser.problem_mark.line,
-				parser.problem_mark.column,
-				parser.problem);
-			p_ctx.err = true;
-			break;
-		}
-		p_ret = yaml_parse_func(&p_ctx, &event);
-		if (p_ctx.err) {
-			fprintf(
-				stderr,
-				"*** Config error %zu:%zu: invalid value\n",
+				"*** Config error at %zu:%zu\n",
 				parser.mark.line,
 				parser.mark.column);
 			break;
 		}
-		yaml_event_delete(&event);
-	} while (p_ret);
+		else {
+			// Halted at end of document. Fall through
+		}
+		/* fall-through */
+	case PRNE_YAML_PR_END:
+		ret = true;
+		break;
+	case PRNE_YAML_PR_ERRNO:
+		perror("prne_yaml_do_parse()");
+		break;
+	case PRNE_YAML_PR_APIERR:
+		fprintf(
+			stderr,
+			"*** YAML parse error %zu:%zu: %s\n",
+			parser.problem_mark.line,
+			parser.problem_mark.column,
+			parser.problem);
+		break;
+	default:
+		fprintf(
+			stderr,
+			"prne_yaml_do_parse(): %s\n",
+			prne_yaml_pr_tostr(p_ret));
+	}
 
 	yaml_parser_delete(&parser);
-	for (prne_llist_entry_t *e = p_ctx.path_list.head; e != NULL; e = e->next) {
-		prne_free((void*)e->element);
-	}
-	prne_free_llist(&p_ctx.path_list);
-	prne_free(p_ctx.path);
+	prne_yaml_free_ctx(&p_ctx);
+	prne_yaml_free_parse_opt(&p_opt);
 
-	return !p_ctx.err;
+	return ret;
 }
 
 static int setup_conf (const char *conf_path) {

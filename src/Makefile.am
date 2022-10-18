@@ -6,6 +6,7 @@ AM_CFLAGS =\
 	-Wno-switch\
 	-D_POSIX_C_SOURCE=200112L\
 	-Wno-unused-parameter\
+	-Werror=implicit-function-declaration\
 	-fdata-sections\
 	-ffunction-sections\
 	-Wl,--gc-sections
@@ -42,7 +43,10 @@ bin_PROGRAMS =\
 	proone-mkcdict\
 	proone-bne
 if BUILD_MTTOOLS
-bin_PROGRAMS += proone-hostinfod proone-htbtclient
+bin_PROGRAMS +=\
+	proone-htbtclient\
+	proone-hostinfod\
+	proone-yamlls
 endif
 
 proone_tests =\
@@ -74,6 +78,9 @@ libproone_a_SOURCES =\
 	cred_dict.c\
 	bne.c\
 	bitfield.c
+if BUILD_MTTOOLS
+libproone_a_SOURCES += yaml.c
+endif
 
 proone: proone.bin dvault.bin
 	cp -fa proone.bin proone
@@ -130,6 +137,8 @@ proone_hostinfod_LDADD = libproone.a
 proone_hostinfod_SOURCES = proone-hostinfod.c
 proone_htbtclient_LDADD = libproone.a
 proone_htbtclient_SOURCES = proone-htbtclient.c
+proone_yamlls_LDADD = libproone.a
+proone_yamlls_SOURCES = proone-yamlls.c
 endif
 
 proone_test_proto_LDADD = libproone.a

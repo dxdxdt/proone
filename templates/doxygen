@@ -21,9 +21,15 @@
 
 
 /**
- * \brief The equality operator of the
+ * \brief The equality operator
  * \retval true if the contents of both \p a and \p b are identical
  * \retval false otherwise
+ */
+/**
+ * \brief The comparison operator
+ * \returns negative value if \p a is less than \p b
+ * \returns positive value if \p a is greater than \p b
+ * \retval 0 if \p a and \p b are identical
  */
 /**
  * \brief The deep copy operator of the
@@ -39,6 +45,22 @@
  * \return false on failure and \c errno set to \c ENOMEM
  * \see [/doc/impl.md#Resource Allocation](/doc/impl.md#resource_allocation)
  */
+/**
+ * \brief Deep copy operator
+ *
+ * \param src The source object
+ * \param dst The destination object. The original contents are be freed
+ * \return true on successful operation
+ * \return false on failure and \c errno set to \c ENOMEM
+ */
+/**
+ * \brief Swap operator
+ */
+/**
+ * \brief Move opeator. Moves the contents of \p a into \p b The original
+ * contents of \p b are freed
+ */
+
 
 /**
  * \brief The serialisation function for the

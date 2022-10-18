@@ -1,0 +1,52 @@
+---
+-
+  -
+    - a
+    - b
+  -
+    - 1
+    - 2
+  - "b"
+---
+main-doc:
+  mapping-0:
+    apple: fruit
+    cabbage: veg
+    orange: fruit
+    lettuce: veg
+  mapping-1:
+    persons: &the_alias
+      - name: John Doe
+        email: john.d@example.com
+        extra-data:
+          address: |
+            137 Example St
+            Example City EX 0000
+            Example Country
+          vehicles:
+            - ABC123
+            - EXAMPLE
+      - name: Jane Doe
+        email: jane.d@example.com
+    members: *the_alias
+---
+override_dot:
+  a.b: 1
+  a:
+    b: 2
+---
+override_slash:
+  a/b: 1
+  a:
+    b: 2
+---
+lone_text_scalar
+---
+123
+---
+- "root"
+- "text"
+- "array"
+- 3.14
+---
+last-doc: hello

@@ -25,5 +25,30 @@
 	"doxdocgen.generic.commandSuggestionAddPrefix": true,
 	"doxdocgen.generic.dateTemplate": "\\date {date}",
 	"doxdocgen.generic.paramTemplate": "\\param {param} ",
-	"doxdocgen.generic.returnTemplate": "\\return {type} "
+	"doxdocgen.generic.returnTemplate": "\\return {type} ",
+	"cSpell.words": [
+		"ALPN",
+		"bitfield",
+		"Buildroot",
+		"cmdline",
+		"DTLS",
+		"dvault",
+		"errno",
+		"Heartbeart",
+		"Hostinfo",
+		"hostinfod",
+		"htbt",
+		"MALLOC",
+		"Mbed",
+		"NYBIN",
+		"POSIX",
+		"Proone",
+		"resolv",
+		"struct"
+	],
+	"cSpell.language": "en,en-GB",
+	"cSpell.enableFiletypes": [
+		"md",
+		"puml"
+	]
 }

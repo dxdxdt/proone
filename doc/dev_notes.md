@@ -34,7 +34,7 @@ limited because in the worst case(or best?) scenario, the instance can spawn
 a large number of bne workers. Although there's no doubt that a regular PC is
 capable of running 100 or more bne workers.
 
-The original idea was to implement both cooperative and preemtive threading
+The original idea was to implement both cooperative and preemptive threading
 using C macros. You'll find some condition variables and locks for this purpose
 in the resolv implementation. This idea was abandoned. Should you have to switch
 to real threads, expect some race condition related bugs.
@@ -42,7 +42,7 @@ to real threads, expect some race condition related bugs.
 ### Put Mbed TLS on Diet
 The build is not light because the Mbed TLS library is extensive. Proone is
 tested using default Mbed TLS config included in Buildroot, but size reduction
-may be achieved by disabling unnessary features.
+may be achieved by disabling unnecessary features.
 
 * Threading
 * DTLS
@@ -55,12 +55,12 @@ code size. Proone does not expect user's intervention. Proone is programmed to
 exit when SIGINT is received for debugging purposes only. You can also see some
 code size reduction from removing the handling of the signal as well.
 
-### Using SSH Subchannel for Transfering Binary Data
+### Using SSH Subchannel for Transferring Binary Data
 Data transfer over a SSH session can be optimised by using a separate SSH
 channel for data transfer. The current implementation uses the data transfer
 method using commands available on the host such as echo and base64. This method
 is slow and expensive, even for regular PCs, but it's the only feasible method
-of transfering binary data over telnet connections.
+of transferring binary data over telnet connections.
 
 On a SSH connection, however, multiple channels can be created. Once the
 availability of the commands are checked, a separate channel can be opened for
@@ -75,8 +75,8 @@ gzip -c file | ssh user@host "gzip -cd > file"
 ## Ideas
 ### "Organic" Cred Dict
 Rather than relying on the cred dict, program instances to try a few randomly
-generated comboes before trying cred dict. If the instance gets a working random
-combo, save it on memory. During the htbt m2m, exchange the saved random comboes
+generated combos before trying cred dict. If the instance gets a working random
+combo, save it on memory. During the htbt m2m, exchange the saved random combos
 to see if there's any common combo found by both parties. If there is, add that
 combo to the cred dict with the lowest weight value. If the combo already exists
 in the cred dict, increment the weight value.
@@ -128,7 +128,7 @@ negative fd values are transparently filtered out before passed to `pth_poll()`.
 ## Problems
 ### Evading Packet Sniffing
 Lawful interception is conducted in most countries. Law enforcements often use
-the characteristics exhibited by malwares to prevent the spread by filtering
+the characteristics exhibited by malware to prevent the spread by filtering
 traffic. These are the "characteristics" of Proone.
 
 * SYN packets to remote port 64420[^2]
@@ -158,13 +158,13 @@ torn down, but the new image could not be completely built.  In such cases, the
 kernel kills the process with a SIGSEGV (SIGKILL until Linux 3.17) signal.
 
 This means that binary upgrade can result in the loss of the control over hosts.
-But doing exec() from the main process seemed as an acceptable risk becuase the
+But doing exec() from the main process seemed as an acceptable risk because the
 host doesn't have to maintain both old and new images this way. Memory is a
 scarce commodity on embedded devices!
 
 ## Notes on Arch
 For ARM, the codes are assigned for arches with major changes as per the
-"industry standard". ARMV4T is the first and oldest Linux suppports. The thumb
+"industry standard". ARMV4T is the first and oldest Linux supports. The thumb
 variant has been chosen because almost all ARM CPUs run Linux kernel with Thumb
 enabled. Major improvements and features were introduced with ARMV7(hfp) and
 AARCH64(more hfp registers and 64bit address space). Note that in order for a

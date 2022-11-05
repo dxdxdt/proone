@@ -27,7 +27,7 @@ The subsystem is documented separately in [htbt.md](htbt.md).
 ### Recon
 The role of the Recon(RCN) worker is to discover nodes both on the internet and
 the link-local network. The worker instance takes a target network list and a
-blacklist network list as parametres. */src/data/recon.samepl.conf* is the
+blacklist network list as parameters. */src/data/recon.sample.conf* is the
 sample lists for **proone-recon**, and `PRNE_RCN_T_IPV4`, `PRNE_RCN_BL_IPV4`,
 `PRNE_RCN_T_IPV6` and `PRNE_RCN_BL_IPV6` macro defines are for hardcoded values
 in Proone. The `PRNE_RCN_PORTS` macro defines the target remote remote TCP ports
@@ -38,7 +38,7 @@ At least one target network for each version of IP must be specified. You may
 choose to target all networks by specifying 0.0.0.0/0 and ::/0 respectively. For
 efficiency, you may specify the networks for special uses such as 127.0.0.0/8,
 224.0.0.0/4, ::/128, ::1/128, 1::/64 and so on. You may or may not want to
-blacklist private network addresses as devices sitting befine NATed networks.
+blacklist private network addresses as devices sitting behind NATed networks.
 Note that the NATed devices still can be controlled by TXT REC CNC. However,
 NAT routers are usually low to mid-range devices so infecting too many devices
 on the private network can put strain on the NAT router.
@@ -119,8 +119,8 @@ magic number 128(`PROONE_BNE_MAX_CNT`). The chance of an instance reaching this
 limit is rare. On most embedded devices, the process will run out of memory long
 before reaching this limit. After a certain point, further attempts to spawn a
 worker will fail with ENOMEM. Or it is possible that the BNE threads will start
-suffering from starvation. For this reasion, the BNE workers have lowest
-priority to minimise the starvation of other vital workers.
+suffering from starvation. For this reason, the BNE workers have lowest priority
+to minimise the starvation of other vital workers.
 
 ### Resolv
 The Resolv worker is a DNS resolver specifically designed for Proone. It is
@@ -141,7 +141,7 @@ worker will circle through the name servers until the query times out. A short
 connection timeout value is used to achieve this.
 
 The Resolv worker supports basics only. It is capable of resolving TXT, A and
-AAAA records. It does not depend on any system configuration. Only the harcoded
+AAAA records. It does not depend on any system configuration. Only the hardcoded
 DoT public name servers are used and only the hardcoded TLS certificate and
 private key are used to make it difficult to analyze packets exchanged between
 the name servers and the process.
@@ -160,7 +160,7 @@ sensitive data necessary for operation of Proone. DVault is a kempt version of
 the data table of Mirai. DVault also helps reduce the size of Proone. Each
 executable contains the *.data* section. If there's a long string in the
 program, the value of the string will end up in each *.data* section of the
-executables. Compression leviates this issue but there's a limit because the
+executables. Compression alleviate this issue but there's a limit because the
 size of data dictionary blocks can only get big. Having a custom *.data* section
 for large data solves this issue at the cost of the size of code for fetching
 and unmasking values from DVault. This implies that, in some cases, storing
@@ -197,7 +197,7 @@ host.
  ├──────────────┤                         │   │                ├──────────────┤
  │    DVault    │ ───────────────────────────╴│╶───── copy ──> │    DVault    │
  ├──────────────┤                         │   │                ├──────────────┤
- │   BA index   │ ───────────────────────────╴│╶─── udpate ──> │   BA index   │
+ │   BA index   │ ───────────────────────────╴│╶─── update ──> │   BA index   │
  ├--------------┤                         │   │                ├--------------┤
  │ linux sh4    │ ────────────────────────┘   └── compress ──> │ linux armv4t │
  │ linux i686   │ ───────────────────────────── recompress ──> │ linux i686   │
@@ -242,7 +242,7 @@ servers. The Recon worker supports discovery of IPv6 hosts on the network and
 IPv6 network targets.
 
 Proone always favours IPv6 connectivity. Whenever the instance connects to the
-public DNS over TLS servers or an authoritive heartbeat host, it attempts to
+public DNS over TLS servers or an authoritative heartbeat host, it attempts to
 establish both IPv4 and IPv6 connection. If both connections are established,
 the instance drops the IPv4 connection and uses IPv6 connection. The minor issue
 with this approach is when the IPv6 handshake process takes a little longer than
@@ -271,7 +271,7 @@ host does not support, the syscall will fail with `ENOSYS`. If the feature
 requiring the new API can be silently switched off at runtime, removal of the
 macro is recommended.
 
-The Linux kernel is highly configurable. Pesudo file systems and the device file
+The Linux kernel is highly configurable. Pseudo file systems and the device file
 system may not be present on a Linux host since they can be disabled. Disabling
 any of these file systems is unusual for PCs but practical on embedded devices.
 Proone do not assume that these file systems are available on the host and try
@@ -292,7 +292,7 @@ and serve the local backdoor connections while unable to infecting the other
 devices on the network. Proone does not reattempt to start the workers it failed
 to run on start. The assumption is that the system is already running with its
 memory full to the brim and it's futile to wait for resource it failed to claim
-as it's likley that the other services on the system will claim the reource at
+as it's likely that the other services on the system will claim the resource at
 some point.
 
 Proone does cooperative multitasking by using **Pthsem** library. This is one
@@ -300,7 +300,7 @@ of many efforts to "run lean" whereby restricting CPU usage to one logical
 thread. This may seem as a huge missed opportunity if Proone scores infecting
 itself onto a beefy multi-core system. Keep in mind that Proone is designed to
 run on resource-scarce embedded devices. Most poorly-designed vulnerable devices
-will be single core, anways. The strategy is getting the most small-powered
+will be single core, anyway. The strategy is getting the most small-powered
 devices infected rather than having a few infected high-performance systems.
 
 ### Ephemeral Presence
@@ -323,7 +323,7 @@ memory-backed file systems, Proone eliminates the change of traces of the
 executable being left on non-volatile storage devices. The executable size of
 Proone is quite big since it carries executable for other platforms. On most
 embedded devices, the size of SPI flash memory is small while the RAM is
-reletively spacious. So it would be unwise to use just any mount point.
+relatively spacious. So it would be unwise to use just any mount point.
 
 ## Dependencies
 The dependencies for Proone have been kept to absolute necessities. libssh2 is
@@ -362,7 +362,7 @@ proone-htbtclient. MariaDB for DB backend.
 * /src/proone.bin: Proone instance executable ELF part only (not runnable)
 * /src/proone-bne: standalone bne tool for testing and deployment of an index
   case(P0)
-* /src/proone-hostinfod: hostinfo daemon, an example of authoritive heartbeat
+* /src/proone-hostinfod: hostinfo daemon, an example of authoritative heartbeat
   implementation
 * /src/proone-htbtclient: heartbeat client, Proone instance maintenance tool
 * /src/proone-htbthost: standalone heartbeat worker for testing
@@ -422,7 +422,7 @@ proone-htbtclient. MariaDB for DB backend.
 * /src/pack.h: packaging facilities for binary archive and nybin
 * /src/proone-bne.c: standalone bne
 * /src/proone.c: Proone instance
-* /src/proone.h: Proone instnace
+* /src/proone.h: Proone instance
 * /src/proone_conf.skel/config.h: domain-specific configuration
 * /src/proone_conf.skel/x509.h: domain-specific PKI data
 * /src/proone-hostinfod.c: hostinfo daemon

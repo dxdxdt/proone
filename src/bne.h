@@ -93,7 +93,7 @@ typedef enum prne_bne_vector prne_bne_vector_t;
 struct prne_bne_param {
 	// The cred dict to use for brute force login (optional)
 	const prne_cred_dict_t *cred_dict;
-	// The SSL config object for authoritive heartbeat client connections
+	// The SSL config object for authoritative heartbeat client connections
 	// (optional)
 	mbedtls_ssl_config *htbt_ssl_conf;
 	/**

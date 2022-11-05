@@ -88,7 +88,7 @@ to determine the length of the data. Once the length of the data is unmasked,
 the data part of the masked entry data can be unmasked using the same algorithm.
 When the unmasked data entry is referenced and no longer needed, the entirety of
 the data must be masked back to the original form so that the data entries are
-kept obsecure in memory. This should be done immediately by calling
+kept obscure in memory. This should be done immediately by calling
 `prne_dvault_reset()`.
 
 Note that the total length of entries can be up to **around** 65,535 octets

@@ -988,7 +988,7 @@ static bool htbt_relay_child_evflush (
 			*/
 			errno = EPIPE;
 		}
-		// It's up to authoritive end to decide if they should raise SIGPIPE
+		// It's up to authoritative end to decide if they should raise SIGPIPE
 		prne_pth_reset_timer(ev, &HTBT_SLV_SCK_OP_TIMEOUT);
 		htbt_slv_send_status(
 			ctx,

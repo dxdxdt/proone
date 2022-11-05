@@ -32,7 +32,7 @@ memory allocation failure from the parameter and the return value.
   if (n > 0 && ret == NULL) {
 ```
 
-All the memory allocated using the framework allocaiton functions(`prne_*()`)
+All the memory allocated using the framework allocation functions(`prne_*()`)
 must be freed with `prne_free()`.
 
 ## Resource Allocation Hook

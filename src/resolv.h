@@ -218,7 +218,7 @@ extern const prne_resolv_ns_pool_t PRNE_RESOLV_DEF_IPV6_POOL;
 
 // The DNS record types as per RFC 1035 3.2.2 and RFC 3596
 #define PRNE_RESOLV_RTYPE_A				1	// A host address
-#define PRNE_RESOLV_RTYPE_NS			2	// An authoritive name server
+#define PRNE_RESOLV_RTYPE_NS			2	// An authoritative name server
 #define PRNE_RESOLV_RTYPE_CNAME			5	// The canonical name for an alias
 // Marks the start of a zone of authority
 #define PRNE_RESOLV_RTYPE_SOA			6

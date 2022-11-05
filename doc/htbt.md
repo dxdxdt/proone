@@ -1,14 +1,14 @@
 # Heartbeart Protocol Spec
 The subsystem can work with DNS TXT records or over a TCP/IP connection. A
-complete heartbeat connection consists of an **authoritive host** and a
-**submissive host**. The authoritive host and the submissive host can be either
-end of the TCP/IP connection.
+complete heartbeat connection consists of an **authoritative host** and a
+**submissive host**. The authoritative host and the submissive host can be
+either end of the TCP/IP connection.
 
 Copyright (c) 2019-2022 David Timber &lt;dxdt@dev.snart.me&gt;
 
 **A session** is a series of messages identified by a single message id. A
 message is a combination of one or more frames. All messages begin with the
-message header frame. The frame that should appear next depdens on the OP code
+message header frame. The frame that should appear next depends on the OP code
 of the message header frame. A session is usually terminated by a message that
 indicates the end of the session.
 
@@ -27,8 +27,8 @@ indicates the end of the session.
 * All message headers in a session share the same msg id
 * The OP code of a message header dictates the format of the following frame
 
-The framinig protocol is designed so that multiple sessions can be pipelined
-into a single TCP/IP connection or a DNS TXT record stream.
+The framing protocol is designed so that multiple sessions can be pipelined into
+a single TCP/IP connection or a DNS TXT record stream.
 
 ## Other Characteristics
 * Heartbeat Protocol is a big-endian protocol
@@ -49,12 +49,12 @@ into a single TCP/IP connection or a DNS TXT record stream.
 ## TXT REC CNC
 Unlike conventional botnets, Proone instances(our jargon for "bots") are
 controlled by TXT DNS records containing one or more request sessions of an
-authoritive host. In this scheme, Proone instances periodicallty query the
+authoritative host. In this scheme, Proone instances periodically query the
 contents of the TXT records to parse and serve request messages as if they were
-from a "real" authoritive host on the TLS connection. Any response data resulted
-in the process is discarded. The serialised frames in the records are encoded in
-base64 because most DNS management software do not accept binary data for the
-value of TXT records. The
+from a "real" authoritative host on the TLS connection. Any response data
+resulted in the process is discarded. The serialised frames in the records are
+encoded in base64 because most DNS management software do not accept binary data
+for the value of TXT records. The
 spec([rfc1035](https://datatracker.ietf.org/doc/html/rfc1035#section-3.3) does
 not impose such restriction.
 
@@ -102,7 +102,7 @@ regard it as a protocol error.
 
 Only public DNS servers which support DNS over TLS are used to counter lawful
 interception. The rationale behind this is that the DNS protocol is not
-encrypted and ISPs or law enforcfements can easily filter out TXT REC CNC
+encrypted and ISPs or law enforcements can easily filter out TXT REC CNC
 traffic simply by doing plain-text string search. Proone queries public DNS
 servers directly rather than using system functions. This eliminates the chance
 of ISP DNS servers giving false results. Using public DNS servers is also
@@ -113,14 +113,15 @@ run CNC implementations for simple tasks like running shell scripts.
 
 There are 2 recommended applications. One typical application is having a
 `PRNE_HTBT_OP_HOVER`(Hand-over Command) request frame in TXT records to instruct
-the instances to connect to servers running authoritive htbt implementations for
-furthur instructions. The second application is having a
+the instances to connect to servers running authoritative htbt implementations
+for further instructions. The second application is having a
 `PRNE_HTBT_OP_RUN_CMD`(Execute) frame or a
 `PRNE_HTBT_OP_RUN_BIN`(Execute Binary Command) containing a simple minified
 shell script to be run on the hosts.
 
 Using CNC TXT records to transfer a large amount of data is possible but not
-recommended. For Proone instances, quering TXT records, decoding base64 data and
+recommended. For Proone instances, querying TXT records, decoding base64 data
+and
 running a slave heartbeat context is a costly operation.
 
 ## M2M
@@ -143,17 +144,17 @@ negotiation) string "prne-htbt" is also used to further ensure that the remote
 endpoint the implementation connects to is served by a Proone implementation
 serving heartbeat connections.
 
-The Proone executables carry files necessray to set up TLS connections hardcoded
+The Proone executables carry files necessary to set up TLS connections hardcoded
 in their binary. These files include the CA cert, a DH param, a cert and a
 private key for client connections and a cert and private key for server
 connections.
 
-## Custom Authoritive Server Implementations
+## Custom Authoritative Server Implementations
 In order to do things of complexity, it's recommended to implement an
-authoritive server implementation and command Proone instances to take orders
+authoritative server implementation and command Proone instances to take orders
 from the servers running the implementation. Load balancing can be done at the
 DNS level using techniques like round-robin DNS or GeoDNS. Once a Proone
-instance connects to an authoritive server, the server can fully utilise the
+instance connects to an authoritative server, the server can fully utilise the
 heartbeat protocol. To make an example, **proone-hostinfod** is implemented.
 
 ## Possible Use Cases
@@ -170,7 +171,7 @@ systems(historically).
   the device resets it
 
 To make hosts run an arbitrary binary executable, `PRNE_HTBT_OP_HOST_INFO`(Host
-Info Request) can be used to query the archeticture type of the host to select
+Info Request) can be used to query the architecture type of the host to select
 a suitable binary for upload. This is what `proone-htbtclient upbin` command
 does to prepare the binary for the instance.
 
@@ -236,7 +237,7 @@ that the NOOP messages always appear as `80 00 00` and `00 00 00` in binary.
 The special id value 0x7FFF is used to indicate a "notification session" in
 which the recipient host is not expected to produce any response messages for
 that session. For example, a Status message can be sent with the id 0x7FFF by
-either host to report a protorol error.
+either host to report a protocol error.
 
 #### OP Codes
 | Enum      | Value | Name                 | Next Frame           |
@@ -286,7 +287,7 @@ either host to report a protorol error.
 | MaxLen    | -                                                                |
 
 The status frame is used to describe the result of a request or an error
-occurred. *err* is used to convey `errno` or a return value from the underlaying
+occurred. *err* is used to convey `errno` or a return value from the underlying
 library.
 
 Note that the host CPU architecture may be using [unusual signed integer
@@ -417,7 +418,7 @@ for the first time. The uuid is preserved across `exec()`(e.g. binary upgrade).
 zeroed-out uuid indicates that the *org_id* is not specified.
 
 **parent_uptime** is the number of seconds elapsed since the parent process has
-started. **child_uptime** is the numer of seconds elapsed since the child
+started. **child_uptime** is the number of seconds elapsed since the child
 process has been spawned by the parent process. The value 0xFFFFFFFF is used to
 indicate errors like integer overflow or unset value.
 
@@ -447,7 +448,7 @@ The credential data can be used after being validated by searching for two
 zeroes, the last of which is at the end of the data, to prevent buffer overflow.
 This data is non-existent(*hc_len* is zero and there's no *hc* after the
 fixed-length part of the frame) if the host has been breached by means other
-than brute foce login attacks.
+than brute force login attacks.
 
 
 **bf** contains the flag bits to describe the attributes of the instance. The
@@ -474,7 +475,7 @@ that follows after the host credential data.
 These flags are diagnostic flags. They are designed to examine the health of
 instances. For example, a bug in the BNE worker may cause a malformed executable
 on the target host, rendering the binary archive appended to the executable
-useless. `WKR_*` flags are used to determine if the host is runnning low on
+useless. `WKR_*` flags are used to determine if the host is running low on
 memory. Other examples are ...
 
 * Without the Recon worker(WKR_RCN unset), the instance cannot infect other
@@ -513,10 +514,10 @@ for facilitating the use of bitfields.
 
 | Field  | Description                                                         |
 | ------ | ------------------------------------------------------------------- |
-| addr_4 | 32-bit IPv4 address of the authoritive host                         |
-| port_4 | 16-bit unsigned integer IPv4 port of the authoritive host           |
-| addr_6 | 128-bit IPv6 address of the authoritive host                        |
-| port_6 | 16-bit unsigned integer IPv6 port of the authoritive host           |
+| addr_4 | 32-bit IPv4 address of the authoritative host                       |
+| port_4 | 16-bit unsigned integer IPv4 port of the authoritative host         |
+| addr_6 | 128-bit IPv6 address of the authoritative host                      |
+| port_6 | 16-bit unsigned integer IPv6 port of the authoritative host         |
 
 | Attribute | Value                                                            |
 | --------- | ---------------------------------------------------------------- |
@@ -532,7 +533,7 @@ for facilitating the use of bitfields.
 | MaxLen    | -                                                                |
 
 The hand-over frame is used to represent the socket addresses of another
-authoritive host. Zeroed-out addresses(0.0.0.0 and ::) are used to represent
+authoritative host. Zeroed-out addresses(0.0.0.0 and ::) are used to represent
 that the address is unspecified. If both IPv4 and IPv6 addresses are specified,
 the IPv6 address takes the precedence. This means that the use of IPv6 is
 favoured whenever IPv6 connectivity is available.
@@ -626,7 +627,7 @@ with zero is illegal. Empty strings are permitted.
 
 | Field     | Description                                                      |
 | --------- | ---------------------------------------------------------------- |
-| alloc_len | 24-bit unsigned integer advisory preallocation length in octests |
+| alloc_len | 24-bit unsigned integer advisory preallocation length in octets  |
 | rsv       | Not used                                                         |
 | D         | Detach flag. 1 if the process has to be "detached". 0 Otherwise  |
 | args_len  | 10-bit unsigned integer length of args, in octets                |
@@ -647,17 +648,17 @@ with zero is illegal. Empty strings are permitted.
 
 The bin meta frame is an extension of the Command frames.
 
-**alloc_len** is the length in octets advised by the authoritive implementation
-for preallocation. The submissive implementation may choose to honor the field
-to preallocate space on the file system using syscalls like `fallocate()`. The
-implementations may choose to ignore the field. If the desired length cannot be
-represented using the 24-bit field, the implementations may use the value
-0xFFFFFF to indicate that the desired length is larger than 0xFFFFFF. Note that
-the field does not represent the actual size of the executable. Therefore the
-implementation must "dock" the file to the size of the actual data received if
-it turns out to be shorter than *alloc_len*.
+**alloc_len** is the length in octets advised by the authoritative
+implementation for preallocation. The submissive implementation may choose to
+honor the field to preallocate space on the file system using syscalls like
+`fallocate()`. The implementations may choose to ignore the field. If the
+desired length cannot be represented using the 24-bit field, the implementations
+may use the value 0xFFFFFF to indicate that the desired length is larger than
+0xFFFFFF. Note that the field does not represent the actual size of the
+executable. Therefore the implementation must "dock" the file to the size of the
+actual data received if it turns out to be shorter than *alloc_len*.
 
-Refer to ###Command Frame section for furthur info.
+Refer to ###Command Frame section for further info.
 
 ### STDIO Frame
 ```
@@ -697,7 +698,7 @@ data.
 **E**("err") is a flag used to indicate whether the frame holds the output of
 the standard error. This flag is only used by the submissive host in Execute and
 Execute Binary sessions. The frame with the flag set is illegal if sent by the
-authoritive host. The flag is ignored when used in Binary Upgrade and Binary
+authoritative host. The flag is ignored when used in Binary Upgrade and Binary
 Recombination sessions.
 
 **F**("fin") is a flag used to mark the final transmission of the channel. When
@@ -793,9 +794,9 @@ type of the next frame. Some op codes define no next header nor following
 messages. In this case the initial message header is the only frame that appears
 in the session.
 
-A new session is initiated when the authoritive host sends a message with a new
-message id(randomly generated) and the I flag set. The hosts exchange messages
-until the session is concluded.
+A new session is initiated when the authoritative host sends a message with a
+new message id(randomly generated) and the I flag set. The hosts exchange
+messages until the session is concluded.
 
 ### No Operation
 ```
@@ -835,7 +836,7 @@ sessions like Execute/Execute Binary sessions.
      └─┘             └─┘
 ```
 
-The Host Info session is initiated by the authoritive host to query the
+The Host Info session is initiated by the authoritative host to query the
 information of the submissive end(the instance). The possible response from the
 submissive end can be following.
 
@@ -871,8 +872,8 @@ submissive end can be following.
      └─┘             └─┘
 ```
 
-The Hand-over session is initiated by the authoritive host when furthur the
-subsmissive host should request further instructions from another authroitive
+The Hand-over session is initiated by the authoritative host when further the
+submissive host should request further instructions from another authoritative
 host. The request is served in the background and the connection continues. The
 possible status response:
 
@@ -883,13 +884,13 @@ possible status response:
   * EAGAIN if the request queue reached the maximum size
 
 If the thread processing the request receives another Hand-over session sent by
-another authoritive host, the thread increments the internal counter to enforce
-the "redirection limit".
+another authoritative host, the thread increments the internal counter to
+enforce the "redirection limit".
 
-When the submissive host establishes a TLS connection to another authoritive
+When the submissive host establishes a TLS connection to another authoritative
 host, the submissive host is required to initiate a Solicit session to request
-furthur instructions. Note that this is where the hosts switch places in the TLS
-connection - the authoritive host becomes the server and the submissive host
+further instructions. Note that this is where the hosts switch places in the TLS
+connection - the authoritative host becomes the server and the submissive host
 client.
 
 ### Solicit Session
@@ -904,12 +905,12 @@ client.
      └─┘          └─┘
 ```
 
-The Solicit session is initiated by the subissive host after establishing a TLS
-connection to another authoritive to carry out the Hand-over request. There is
+The Solicit session is initiated by the submissive host after establishing a TLS
+connection to another authoritative to carry out the Hand-over request. There is
 no next frame that follows the message.
 
-The authoritive host may choose to reuse the message id used for the request to
-initiate request to the submissive host. This is not a requirement and
+The authoritative host may choose to reuse the message id used for the request
+to initiate request to the submissive host. This is not a requirement and
 disregarding the message id in the Solicit message is not illegal.
 
 ### Execute Session
@@ -1006,17 +1007,18 @@ function. The first string in the *args* field must be the absolute path to an
 executable on the host as per the usage of exec().
 
 STDIO messages are used to transfer standard input and output data from and to
-the child process. The authoritive host should send a STDIO frame with fin flag
-so that `read()` on the standard input returns EOF in the child process. The
-submissive host must notify the authoritive host with STDIO frames with fin flag
-when the child process closes its standard output and standard error. Once both
-outputs reached EOF, the submissive host reaps the child process to retrieve the
-exit code, which is then sent over a Status frame to the authoritive host.
+the child process. The authoritative host should send a STDIO frame with fin
+flag so that `read()` on the standard input returns EOF in the child process.
+The submissive host must notify the authoritative host with STDIO frames with
+fin flag when the child process closes its standard output and standard error.
+Once both outputs reached EOF, the submissive host reaps the child process to
+retrieve the exit code, which is then sent over a Status frame to the
+authoritative host.
 
 If an error occurs during the process, the submissive host will skip to sending
-a status frame with errno. The authoritive host shouldn't expect and send
-furthur STDIO messages. The submissive host may skip to sending a Status frame
-with UNIMPL if it does not implement Execute sessions.
+a status frame with errno. The authoritative host shouldn't expect and send
+subsequent STDIO messages. The submissive host may skip to sending a Status
+frame with UNIMPL if it does not implement Execute sessions.
 
 ### Binary Upgrade Session
 ```
@@ -1095,10 +1097,10 @@ executable using `exec()`. The Binary Meta frame contains the arguments to the
 `exec()` syscall which are honoured by the submissive host. STDIO frames are
 used for data transfer. The format of the new executable can be any format
 recognised by the host kernel(ELF or #! if the kernel supports it). The
-authoritive host is responsible for providing the suitable executable for the
+authoritative host is responsible for providing the suitable executable for the
 submissive host. Usually, the Host Info is queried to prepare the right
 executable for the host. The Status frame is used to deliver the result of the
-data tranfer. In the event of an error, the submissive host does not wait for
+data transfer. In the event of an error, the submissive host does not wait for
 the data transfer to finish before sending the Status frame.
 
 Upon successful upload, the Proone instance will attempt to `exec()` to the
@@ -1294,7 +1296,7 @@ session.
 ## Protocol Error
 The protocol error is reported using a Status message. The status code PROTO_ERR
 is used. If the error is encountered in mid-session, the message id for the
-session is used for the Status mesage. Otherwise, the special message id 0x7FFF
+session is used for the Status message. Otherwise, the special message id 0x7FFF
 is used.
 
 A protocol error is raised when

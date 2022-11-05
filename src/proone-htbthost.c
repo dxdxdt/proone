@@ -203,9 +203,11 @@ static void load_ssl_conf (
 			MBEDTLS_SSL_PRESET_DEFAULT) == 0 &&
 		mbedtls_x509_crt_parse(s_crt, S_CRT, sizeof(S_CRT)) == 0 &&
 		mbedtls_pk_parse_key(s_key, S_KEY, sizeof(S_KEY), NULL, 0) == 0 &&
-		mbedtls_dhm_parse_dhm(dhm, DH, sizeof(DH)) == 0 &&
+		(sizeof(DH) > 0 ?
+			mbedtls_dhm_parse_dhm(dhm, DH, sizeof(DH)) : 0) == 0 &&
 		mbedtls_ssl_conf_own_cert(s_conf, s_crt, s_key) == 0 &&
-		mbedtls_ssl_conf_dh_param_ctx(s_conf, dhm) == 0);
+		(sizeof(DH) > 0 ?
+			mbedtls_ssl_conf_dh_param_ctx(s_conf, dhm) : 0) == 0);
 	mbedtls_ssl_conf_ca_chain(s_conf, ca, NULL);
 	mbedtls_ssl_conf_verify(s_conf, prne_mbedtls_x509_crt_verify_cb, NULL);
 	mbedtls_ssl_conf_rng(s_conf, mbedtls_ctr_drbg_random, rnd);

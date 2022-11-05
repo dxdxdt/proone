@@ -876,17 +876,19 @@ static void load_ssl_conf (void) {
 				0);
 			BREAKIF_ERR("mbedtls_pk_parse_key");
 			data = prne_dvault_get_bin(PRNE_DATA_KEY_X509_DH, &dvlen);
-			mret = mbedtls_dhm_parse_dhm(&prne_g.s_ssl.dhm, data, dvlen);
-			BREAKIF_ERR("mbedtls_dhm_parse_dhm");
+			if (dvlen > 0) {
+				mret = mbedtls_dhm_parse_dhm(&prne_g.s_ssl.dhm, data, dvlen);
+				BREAKIF_ERR("mbedtls_dhm_parse_dhm");
+				mret = mbedtls_ssl_conf_dh_param_ctx(
+					&prne_g.s_ssl.conf,
+					&prne_g.s_ssl.dhm);
+				BREAKIF_ERR("mbedtls_ssl_conf_dh_param_ctx");
+			}
 			mret = mbedtls_ssl_conf_own_cert(
 				&prne_g.s_ssl.conf,
 				&prne_g.s_ssl.crt,
 				&prne_g.s_ssl.pk);
 			BREAKIF_ERR("mbedtls_ssl_conf_own_cert");
-			mret = mbedtls_ssl_conf_dh_param_ctx(
-				&prne_g.s_ssl.conf,
-				&prne_g.s_ssl.dhm);
-			BREAKIF_ERR("mbedtls_ssl_conf_dh_param_ctx");
 			mret = mbedtls_ssl_conf_alpn_protocols(
 				&prne_g.s_ssl.conf,
 				ALP_LIST);

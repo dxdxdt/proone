@@ -20,6 +20,8 @@
 import sys
 from typing import Iterable
 
+VERSION = "0.0.0"
+
 # AWS hook - The max number of objects in a request
 AWS_MAX_ITEMS = 1000
 

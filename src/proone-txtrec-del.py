@@ -25,6 +25,7 @@
 import sys
 import re
 import prne_txtrec
+import getopt
 
 # regex for seperating the number of data RRs and the suffix from the head TXT
 HEAD_TXT_RE = re.compile('"([0-9]{8})(.*)"')
@@ -59,8 +60,18 @@ HOOK_ERRORS = {
 	},
 }
 
-def main_aws (zone_id: str, head_rec: str):
+def main_aws (param: dict):
 	"""AWS hook main function"""
+	zone_id = param["zone_id"]
+	head_rec = param["head_rec"]
+
+	if zone_id is None:
+		sys.stderr.writelines([
+			"--zone-id required.\n",
+			"Run '{0} --help' for help.\n".format(sys.argv[0])
+		])
+		exit(2)
+
 	try:
 		import boto3
 	except ModuleNotFoundError as e:
@@ -150,30 +161,59 @@ def main_aws (zone_id: str, head_rec: str):
 HOOKS = {
 	"aws": main_aws
 }
-USAGE_LINES = [
-	"Usage: " + sys.argv[0] + " <head rec> <hook> <zone id>\n",
-	"Hooks:\n"
-]
-for h in HOOKS:
-	USAGE_LINES.append("  " + h + "\n")
+USAGE_STR = '''Delete Proone CNC TXT DNS records
+Usage: {arg0} <options>
+Options:
+  -h, --help       print this message and exit normally
+  -V, --version    print version info and exit normally
+  --hook=<str>     (required) use the hook. See below for available hooks
+  --head=<str>     (required) set the name of the header CNC TXT record
+  --zond-id=<str>  set the zone id. Required for AWS hook
+Hooks:
+  {hooks}
+'''.format(
+	arg0 = sys.argv[0],
+	hooks = "  ".join(k + "\n" for k in HOOKS.keys())
+)
 
 def print_usage (out):
-	out.writelines(USAGE_LINES)
+	out.write(USAGE_STR)
 
-# proecss argv
+opts, args = getopt.getopt(
+	sys.argv[1:],
+	"hV",
+	[
+		"help",
+		"version",
+		"hook=",
+		"head=",
+		"zone-id="
+	])
+opts = dict(opts)
+
+if set(opts.keys()).intersection(set([ "--help", "-h", "--version", "-V" ])):
+	if "--version" in opts or "-V" in opts:
+		print("prne-txtrec version: " + prne_txtrec.VERSION)
+	if "--help" in opts or "-h" in opts:
+		print_usage(sys.stdout)
+	exit(0)
+
+# process argv
 try:
-	ARGV_DICT = {
-		"head_rec": prne_txtrec.termdot(sys.argv[1].lower()),
-		"hook": sys.argv[2].lower(),
-		"zone_id": sys.argv[3]
-	}
-except IndexError:
-	print_usage(sys.stderr)
+	ARGV_DICT = {}
+	ARGV_DICT["hook"] = opts["--hook"]
+	ARGV_DICT["head_rec"] = opts["--head"]
+	ARGV_DICT["zone_id"] = opts.get("--zone-id")
+except KeyError as e:
+	sys.stderr.writelines([
+		e.args[0] + " option required.\n",
+		"Run '{0} --help' for help.\n".format(sys.argv[0])
+	])
 	exit(1)
 
 # call the function
 try:
-	HOOKS[ARGV_DICT["hook"]](ARGV_DICT["zone_id"], ARGV_DICT["head_rec"])
+	HOOKS[ARGV_DICT["hook"]](ARGV_DICT)
 except KeyError:
 	prne_txtrec.handle_err(HOOK_ERRORS["NOT_IMPL"], None, ARGV_DICT["hook"])
 

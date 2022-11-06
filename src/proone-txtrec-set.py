@@ -25,6 +25,7 @@
 import sys
 import base64
 import prne_txtrec
+import getopt
 
 # Error definitions
 HOOK_ERRORS = {
@@ -42,10 +43,25 @@ HOOK_ERRORS = {
 	}
 }
 
-def main_aws (zone_id: str, head_rec: str, suffix: str, ttl: int):
+BYTES_PER_RR = 189
+
+def mktxtrr (cnt: int, suffix: str):
+	return "%08u" % (cnt) + suffix
+
+def main_aws (param: dict):
 	"""AWS hook main function"""
-	if ttl is None:
-		ttl = 3600
+
+	zone_id = param["zone_id"];
+	if zone_id is None:
+		sys.stderr.writelines([
+			"--zone-id required.\n",
+			"Run '{0} --help' for help.\n".format(sys.argv[0])
+		])
+		exit(2)
+	head_rec = param["head_rec"]
+	suffix = param["suffix"]
+	ttl = param["ttl"]
+	if ttl is None: ttl = 3600
 
 	try:
 		import boto3
@@ -62,24 +78,24 @@ def main_aws (zone_id: str, head_rec: str, suffix: str, ttl: int):
 		ins_q.clear()
 
 	while True:
-		b = sys.stdin.buffer.read(189)
+		b = sys.stdin.buffer.read(BYTES_PER_RR)
 		if not b: # Assume that EOF is reached
 			break
 
 		ins_q.append({
-			'Name': "%08u" % (cnt) + suffix,
+			'Name': mktxtrr(cnt, suffix),
 			'Type': 'TXT',
 			'TTL': ttl,
 			'ResourceRecords': [
 				{ 'Value': '"' + base64.b64encode(b).decode('ascii') + '"' }
 			]
 		})
-		cnt = cnt + 1
+		cnt += 1
 		if len(ins_q) >= prne_txtrec.AWS_MAX_ITEMS:
 			flush_q()
 
 	flush_q()
-	head_rr = "%08u" % (cnt) + suffix
+	head_rr = mktxtrr(cnt, suffix)
 	# insert the head rec
 	prne_txtrec.change_all(
 		client,
@@ -94,47 +110,111 @@ def main_aws (zone_id: str, head_rec: str, suffix: str, ttl: int):
 			]
 		}])
 
+def main_dnsmasq (param: dict):
+	head_rec = param["head_rec"]
+	suffix = param["suffix"]
+	ttl = param["ttl"]
+
+	if ttl is None: ttl_str = ""
+	else: ttl_str = ",%us" % ttl
+
+	cnt = 0
+	while True:
+		b = sys.stdin.buffer.read(BYTES_PER_RR)
+		if not b: # EOF
+			break
+
+		name = mktxtrr(cnt, suffix)
+		l = '''txt-record={name},"{val}"{ttl}'''.format(
+			name = name,
+			val = base64.b64encode(b).decode('ascii'),
+			ttl = ttl_str
+		)
+		cnt += 1
+
+		print(l)
+
+	head_rr = mktxtrr(cnt, suffix)
+	l = '''txt-record={name},"{val}"{ttl}'''.format(
+		name = head_rec,
+		val = head_rr,
+		ttl = ttl_str
+	)
+	print(l)
+
+
 HOOKS = {
-	"aws": main_aws
+	"aws": main_aws,
+	"dnsmasq": main_dnsmasq
 }
-USAGE_LINES = [
-	"Usage: " + sys.argv[0] + " <head rec> <suffix> <hook> <zone id> [TTL]\n",
-	"Hooks:\n"
-]
-for h in HOOKS:
-	USAGE_LINES.append("  " + h + "\n")
+USAGE_STR = '''Upload or output Proone CNC TXT DNS records
+Usage: {arg0} <options>
+Options:
+  -h, --help       print this message and exit normally
+  -V, --version    print version info and exit normally
+  --hook=<str>     (required) use the hook. See below for available hooks
+  --head=<str>     (required) set the name of the header CNC TXT record
+  --suffix=<str>   (required) set the suffix of the data CNC TXT record(s)
+  --zond-id=<str>  set the zone id. Required for AWS hook
+  --ttl=<uint>     specify TTL of the records
+Hooks:
+  {hooks}
+'''.format(
+	arg0 = sys.argv[0],
+	hooks = "  ".join(k + "\n" for k in HOOKS.keys())
+)
 
 def print_usage (out):
-	out.writelines(USAGE_LINES)
+	out.write(USAGE_STR)
 
-# proecss argv
+
+opts, args = getopt.getopt(
+	sys.argv[1:],
+	"hV",
+	[
+		"help",
+		"version",
+		"hook=",
+		"head=",
+		"suffix=",
+		"zone-id=",
+		"ttl="
+	])
+opts = dict(opts)
+
+if set(opts.keys()).intersection(set([ "--help", "-h", "--version", "-V" ])):
+	if "--version" in opts or "-V" in opts:
+		print("prne-txtrec version: " + prne_txtrec.VERSION)
+	if "--help" in opts or "-h" in opts:
+		print_usage(sys.stdout)
+	exit(0)
+
+
+# process argv
 try:
-	ARGV_DICT = {
-		"head_rec": prne_txtrec.termdot(sys.argv[1].lower()),
-		"suffix": prne_txtrec.termdot(sys.argv[2].lower()),
-		"hook": sys.argv[3].lower(),
-		"zone_id": sys.argv[4]
-	}
-	if len(sys.argv) >= 6:
-		try:
-			ARGV_DICT["ttl"] = int(sys.argv[5])
-			if not (ARGV_DICT["ttl"] in range(0, 2147483648)):
-				raise ValueError()
-		except ValueError:
-			prne_txtrec.handle_err(HOOK_ERRORS["INV_ARG"], None, sys.argv[5])
-	else:
-		ARGV_DICT["ttl"] = None
-except IndexError:
-	print_usage(sys.stderr)
-	exit(1)
+	ARGV_DICT = {}
+	ARGV_DICT["hook"] = opts["--hook"]
+	ARGV_DICT["head_rec"] = opts["--head"]
+	ARGV_DICT["suffix"] = opts["--suffix"]
+	ARGV_DICT["zone_id"] = opts.get("--zone-id")
+	ARGV_DICT["ttl"] = opts.get("--ttl")
+	if ARGV_DICT["ttl"]:
+		ARGV_DICT["ttl"] = int(ARGV_DICT["ttl"])
+		if ARGV_DICT["ttl"] not in range(0, 2147483648):
+			prne_txtrec.handle_err(
+				HOOK_ERRORS["INV_ARG"],
+				None,
+				ARGV_DICT["ttl"])
+except KeyError as e:
+	sys.stderr.writelines([
+		e.args[0] + " option required.\n",
+		"Run '{0} --help' for help.\n".format(sys.argv[0])
+	])
+	exit(2)
 
 # call the function
 try:
-	HOOKS[ARGV_DICT["hook"]](
-		ARGV_DICT["zone_id"],
-		ARGV_DICT["head_rec"],
-		ARGV_DICT["suffix"],
-		ARGV_DICT["ttl"])
+	HOOKS[ARGV_DICT["hook"]](ARGV_DICT)
 except KeyError:
 	prne_txtrec.handle_err(HOOK_ERRORS["NOT_IMPL"], None, ARGV_DICT["hook"])
 
